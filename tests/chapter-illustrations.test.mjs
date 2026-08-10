@@ -10,6 +10,9 @@ test("curated chapter illustrations are packaged and assigned", async () => {
     "concept-indian-aesthetics.webp",
     "origin-and-concept.webp",
     "structure-and-design.webp",
+    "rasa-bhava.png",
+    "dhvani-poetics.png",
+    "natya-performance.png",
   ];
   for (const image of images) {
     await access(new URL(`../public/illustrations/${image}`, import.meta.url));
@@ -28,6 +31,7 @@ test("illustrations are assigned after chapter hierarchy repair", () => {
   const assignmentPosition = page.indexOf("const illustratedChapters = hierarchy.chapters.map");
   assert.ok(repairPosition >= 0, "chapter hierarchy repair is present");
   assert.ok(assignmentPosition > repairPosition, "all final chapters receive art after their titles are repaired");
-  assert.match(page, /curatedIllustration\(chapter\.title\)/);
+  assert.match(page, /curatedIllustration\(chapter\.title, chapter\.body, chapter\.id\)/);
+  assert.match(page, /return fallback\[Math\.abs\(id - 1\) % fallback\.length\]/);
   assert.match(page, /chapters: illustratedChapters/);
 });
