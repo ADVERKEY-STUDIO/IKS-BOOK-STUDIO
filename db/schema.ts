@@ -19,3 +19,9 @@ export const projectVersions = sqliteTable("book_project_versions", {
   snapshotJson: text("snapshot_json").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("book_versions_project_created_idx").on(table.projectId, table.createdAt)]);
+
+export const designerPreferences = sqliteTable("designer_preferences", {
+  ownerKey: text("owner_key").primaryKey(),
+  preferencesJson: text("preferences_json").notNull(),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
