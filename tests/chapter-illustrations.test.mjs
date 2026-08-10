@@ -22,3 +22,12 @@ test("finished illustrations replace direction placeholders and remain print-saf
   assert.match(css, /\.has-chapter-image \.illustration\{display:none\}/);
   assert.match(css, /\.chapter-image img\{max-height:92mm;object-fit:contain\}/);
 });
+
+test("illustrations are assigned after chapter hierarchy repair", () => {
+  const repairPosition = page.indexOf("const hierarchy = repairChapterHierarchy(normalizedChapters)");
+  const assignmentPosition = page.indexOf("const illustratedChapters = hierarchy.chapters.map");
+  assert.ok(repairPosition >= 0, "chapter hierarchy repair is present");
+  assert.ok(assignmentPosition > repairPosition, "all final chapters receive art after their titles are repaired");
+  assert.match(page, /curatedIllustration\(chapter\.title\)/);
+  assert.match(page, /chapters: illustratedChapters/);
+});

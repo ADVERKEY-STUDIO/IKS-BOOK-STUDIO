@@ -228,7 +228,6 @@ function repairChapterHierarchy(chapters: Chapter[]) {
 function normalizeProject(saved: Project): Project {
   const normalizedChapters = (saved.chapters ?? []).map((chapter, index) => {
     const title = chapter.title || `Chapter ${index + 1}`;
-    const illustration = curatedIllustration(title);
     return {
       id: chapter.id ?? index + 1,
       title,
@@ -238,12 +237,23 @@ function normalizeProject(saved: Project): Project {
       sourceRefs: chapter.sourceRefs ?? [],
       body: chapter.body || `<p class="chapter-kicker">CHAPTER ${index + 1}</p><h1>${title}</h1>`,
       imageKey: chapter.imageKey,
-      imageUrl: chapter.imageUrl || illustration?.url,
-      imageCaption: chapter.imageCaption || illustration?.caption,
+      imageUrl: chapter.imageUrl,
+      imageCaption: chapter.imageCaption,
       wordCount: chapter.wordCount,
     };
   });
   const hierarchy = repairChapterHierarchy(normalizedChapters);
+  // Chapter labels and their following titles are merged above. Attach curated
+  // art only after that repair so every final chapter title receives its own
+  // matching illustration, including already-saved projects.
+  const illustratedChapters = hierarchy.chapters.map((chapter) => {
+    const illustration = curatedIllustration(chapter.title);
+    return {
+      ...chapter,
+      imageUrl: chapter.imageUrl || illustration?.url,
+      imageCaption: chapter.imageCaption || illustration?.caption,
+    };
+  });
   return {
     ...emptyProject,
     ...saved,
@@ -254,8 +264,8 @@ function normalizeProject(saved: Project): Project {
     citationStyle: saved.citationStyle ?? "Source page notes",
     learningFeatures: saved.learningFeatures ?? ["Key takeaways"],
     briefApproved: saved.briefApproved ?? false,
-    sourceHeadings: hierarchy.repaired ? hierarchy.chapters.map((chapter) => chapter.title) : (saved.sourceHeadings ?? []),
-    chapters: hierarchy.chapters,
+    sourceHeadings: hierarchy.repaired ? illustratedChapters.map((chapter) => chapter.title) : (saved.sourceHeadings ?? []),
+    chapters: illustratedChapters,
   };
 }
 

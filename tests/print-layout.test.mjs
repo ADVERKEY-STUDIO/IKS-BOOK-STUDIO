@@ -24,5 +24,5 @@ test("chapter labels are paired with their following source titles", async () =>
   assert.match(worker, /const labelledChapterTitles = chapterTitlesFromLabels\(lines\)/);
   assert.match(worker, /labelledChapterTitles\.length \? labelledChapterTitles/);
   assert.match(page, /repairChapterHierarchy\(normalizedChapters\)/);
-  assert.match(page, /sourceHeadings: hierarchy\.repaired \? hierarchy\.chapters\.map/);
+  assert.match(page, /sourceHeadings: hierarchy\.repaired \? illustratedChapters\.map/);
 });
