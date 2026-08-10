@@ -17,3 +17,12 @@ test("chapter drafting tracks evidence across the complete book", async () => {
   assert.match(worker, /if \(usedEvidence\.has\(signature\)\) continue/);
   assert.match(worker, /usedEvidence\.add\(evidenceSignature\(item\.sentence\)\)/);
 });
+
+test("chapter labels are paired with their following source titles", async () => {
+  const worker = await readFile(new URL("../worker/index.ts", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(worker, /const labelledChapterTitles = chapterTitlesFromLabels\(lines\)/);
+  assert.match(worker, /labelledChapterTitles\.length \? labelledChapterTitles/);
+  assert.match(page, /repairChapterHierarchy\(normalizedChapters\)/);
+  assert.match(page, /sourceHeadings: hierarchy\.repaired \? hierarchy\.chapters\.map/);
+});

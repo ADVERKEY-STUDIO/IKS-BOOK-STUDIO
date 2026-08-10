@@ -162,7 +162,62 @@ const emptyProject: Project = {
 
 const wizardSteps = ["Source", "Reader", "Writing", "Design", "Review"];
 
+function isChapterLabel(value: string) {
+  return /^chapter\s+(?:\d{1,3}|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*[:.\-–—]?$/i.test(value.trim());
+}
+
+function retitleChapterBody(body: string, title: string, chapterNumber: number) {
+  const safeTitle = escapeHtml(title);
+  let next = body || "";
+  if (/<p\b[^>]*class=["'][^"']*chapter-kicker[^"']*["'][^>]*>[\s\S]*?<\/p>/i.test(next)) {
+    next = next.replace(/<p\b([^>]*class=["'][^"']*chapter-kicker[^"']*["'][^>]*)>[\s\S]*?<\/p>/i, `<p$1>CHAPTER ${String(chapterNumber).padStart(2, "0")}</p>`);
+  } else {
+    next = `<p class="chapter-kicker">CHAPTER ${String(chapterNumber).padStart(2, "0")}</p>${next}`;
+  }
+  if (/<h1\b[^>]*>[\s\S]*?<\/h1>/i.test(next)) return next.replace(/<h1\b[^>]*>[\s\S]*?<\/h1>/i, `<h1>${safeTitle}</h1>`);
+  return `${next}<h1>${safeTitle}</h1>`;
+}
+
+function repairChapterHierarchy(chapters: Chapter[]) {
+  const chapterLabels = chapters
+    .map((chapter, index) => ({ chapter, index }))
+    .filter(({ chapter }) => isChapterLabel(chapter.title));
+  if (!chapterLabels.length) return { chapters, repaired: false };
+
+  const repaired = chapterLabels.flatMap(({ chapter: labelChapter, index }, repairedIndex) => {
+    const titleChapter = chapters[index + 1];
+    if (!titleChapter || isChapterLabel(titleChapter.title) || /^(contents|preface|foreword|introduction|references|bibliography|index)$/i.test(titleChapter.title.trim())) return [];
+    const title = titleChapter.title.trim();
+    const preferredBody = chapterWordCount(titleChapter) >= 40 ? titleChapter.body : labelChapter.body;
+    return [{
+      ...titleChapter,
+      id: repairedIndex + 1,
+      title,
+      pages: Math.max(labelChapter.pages || 0, titleChapter.pages || 0, 2),
+      locked: Boolean(labelChapter.locked || titleChapter.locked),
+      status: labelChapter.status === "approved" || titleChapter.status === "approved" ? "approved" as const : titleChapter.status,
+      sourceRefs: [...labelChapter.sourceRefs, ...titleChapter.sourceRefs].filter((ref, refIndex, refs) => refs.findIndex((item) => item.page === ref.page && item.title === ref.title) === refIndex),
+      body: retitleChapterBody(preferredBody, title, repairedIndex + 1),
+    }];
+  });
+  return repaired.length ? { chapters: repaired, repaired: true } : { chapters, repaired: false };
+}
+
 function normalizeProject(saved: Project): Project {
+  const normalizedChapters = (saved.chapters ?? []).map((chapter, index) => ({
+    id: chapter.id ?? index + 1,
+    title: chapter.title || `Chapter ${index + 1}`,
+    pages: chapter.pages || 6,
+    status: chapter.status || "planned",
+    locked: Boolean(chapter.locked),
+    sourceRefs: chapter.sourceRefs ?? [],
+    body: chapter.body || `<p class="chapter-kicker">CHAPTER ${index + 1}</p><h1>${chapter.title || `Chapter ${index + 1}`}</h1>`,
+    imageKey: chapter.imageKey,
+    imageUrl: chapter.imageUrl,
+    imageCaption: chapter.imageCaption,
+    wordCount: chapter.wordCount,
+  }));
+  const hierarchy = repairChapterHierarchy(normalizedChapters);
   return {
     ...emptyProject,
     ...saved,
@@ -173,15 +228,8 @@ function normalizeProject(saved: Project): Project {
     citationStyle: saved.citationStyle ?? "Source page notes",
     learningFeatures: saved.learningFeatures ?? ["Key takeaways"],
     briefApproved: saved.briefApproved ?? false,
-    chapters: (saved.chapters ?? []).map((chapter, index) => ({
-      id: chapter.id ?? index + 1,
-      title: chapter.title || `Chapter ${index + 1}`,
-      pages: chapter.pages || 6,
-      status: chapter.status || "planned",
-      locked: Boolean(chapter.locked),
-      sourceRefs: chapter.sourceRefs ?? [],
-      body: chapter.body || `<p class="chapter-kicker">CHAPTER ${index + 1}</p><h1>${chapter.title || `Chapter ${index + 1}`}</h1>`,
-    })),
+    sourceHeadings: hierarchy.repaired ? hierarchy.chapters.map((chapter) => chapter.title) : (saved.sourceHeadings ?? []),
+    chapters: hierarchy.chapters,
   };
 }
 
@@ -283,6 +331,16 @@ export default function Home() {
         const restored = bookData.projects.map(normalizeProject);
         setProjects(restored);
         setProject(restored[0]);
+        const repaired = restored.filter((item, index) => {
+          const original = bookData.projects[index];
+          return item.chapters.length !== original.chapters.length
+            || item.chapters.some((chapter, chapterIndex) => chapter.title !== original.chapters[chapterIndex]?.title);
+        });
+        void Promise.all(repaired.map((item) => fetch("/api/projects", {
+          method: "POST",
+          headers: { "content-type": "application/json", ...headers },
+          body: JSON.stringify(item),
+        }))).catch(() => undefined);
       }
       if (preferenceData?.preferences) setDesignerPreferences(preferenceData.preferences);
     }).catch(() => undefined);

@@ -126,6 +126,36 @@ function contentWords(value: string) {
   return value.toLowerCase().match(/[\p{L}\p{N}’'-]+/gu) ?? [];
 }
 
+function isChapterLabel(value: string) {
+  return /^chapter\s+(?:\d{1,3}|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*[:.\-–—]?$/i.test(value.trim());
+}
+
+function chapterTitlesFromLabels(lines: string[]) {
+  const titles: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!isChapterLabel(lines[index])) continue;
+    for (let cursor = index + 1; cursor < Math.min(lines.length, index + 7); cursor += 1) {
+      const candidate = lines[cursor]
+        .replace(/^\s*\d{1,3}\s*[.·-]?\s*/, "")
+        .replace(/\s+\d+\s*$/, "")
+        .trim();
+      if (!candidate) continue;
+      if (isChapterLabel(candidate)) break;
+      if (/^(contents|preface|foreword|references|bibliography|index)$/i.test(candidate)) continue;
+      const words = candidate.split(/\s+/);
+      const looksLikeTitle = candidate.length >= 4
+        && candidate.length <= 120
+        && words.length <= 16
+        && !/[.!?]$/.test(candidate)
+        && (candidate === candidate.toUpperCase() || /^[A-Z][\p{L}\p{N} &'’,:()\-–—]+$/u.test(candidate));
+      if (!looksLikeTitle) continue;
+      titles.push(candidate.replace(/\s+/g, " "));
+      break;
+    }
+  }
+  return titles.filter((title, index, all) => all.findIndex((item) => item.toLowerCase() === title.toLowerCase()) === index);
+}
+
 function evidenceSignature(value: string) {
   return contentWords(value).slice(0, 42).join(" ");
 }
@@ -236,6 +266,7 @@ function analyseText(text: string) {
   const words = compact.match(/[\p{L}\p{N}’'-]+/gu) ?? [];
   const lines = compact.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const contentsIndex = lines.findIndex((line) => /^contents$/i.test(line));
+  const labelledChapterTitles = chapterTitlesFromLabels(lines);
   const contentsHeadings = contentsIndex < 0 ? [] : lines.slice(contentsIndex + 1, contentsIndex + 180)
     .map((line) => line.match(/^(\d{1,2})\.\s+(?!\d)(.+?)(?:\s+\d+\s*[-–]\s*\d+)?$/))
     .filter((match): match is RegExpMatchArray => Boolean(match))
@@ -245,7 +276,7 @@ function analyseText(text: string) {
     /^(chapter|unit|part|section|book)\s+[\divxlc]+\b/i.test(line)
     || (/^[A-Z\d][A-Z\d :,'’&-]+$/.test(line) && line.split(/\s+/).length <= 10)
   )).filter((line, index, array) => array.findIndex((item) => item.toLowerCase() === line.toLowerCase()) === index).slice(0, 18);
-  const headings = (contentsHeadings.length >= 2 ? contentsHeadings : structuralHeadings)
+  const headings = (labelledChapterTitles.length ? labelledChapterTitles : contentsHeadings.length >= 2 ? contentsHeadings : structuralHeadings)
     .filter((line, index, array) => array.findIndex((item) => item.toLowerCase() === line.toLowerCase()) === index)
     .slice(0, 18);
   const frequency = new Map<string, number>();
