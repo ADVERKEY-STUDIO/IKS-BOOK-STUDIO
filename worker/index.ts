@@ -18,6 +18,27 @@ interface Env {
   };
 }
 
+type DraftChapterInput = {
+  id: number;
+  title: string;
+  pages: number;
+  locked?: boolean;
+};
+
+type DraftProjectInput = {
+  source: string;
+  sourceObjectKey: string;
+  audience?: string;
+  readingLevel?: string;
+  tone?: string;
+  aesthetic?: string;
+  illustrationStyle?: string;
+  imageFrequency?: string;
+  sourceTerms?: string[];
+  chapters: DraftChapterInput[];
+  chapterIds: number[];
+};
+
 interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
   passThroughOnException(): void;
@@ -52,6 +73,145 @@ function ownerKey(request: Request) {
 
 function json(data: unknown, status = 200) {
   return Response.json(data, { status, headers: { "cache-control": "no-store" } });
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#039;");
+}
+
+function sourceExtension(name: string) {
+  return name.split(".").pop()?.toLowerCase() ?? "";
+}
+
+async function extractSourcePages(bytes: ArrayBuffer, extension: string) {
+  if (extension === "pdf") {
+    const pdf = await getDocumentProxy(new Uint8Array(bytes));
+    const extracted = await extractText(pdf, { mergePages: false });
+    const pageTexts = typeof extracted.text === "string" ? [extracted.text] : extracted.text;
+    return { text: pageTexts.join("\n\n"), pageTexts, pages: extracted.totalPages };
+  }
+  if (extension === "docx") {
+    const text = (await mammoth.extractRawText({ arrayBuffer: bytes })).value;
+    return { text, pageTexts: [text], pages: 0 };
+  }
+  const text = new TextDecoder().decode(bytes);
+  return { text, pageTexts: [text], pages: 0 };
+}
+
+function cleanSourceText(value: string) {
+  return value
+    .replace(/\u0000/g, " ")
+    .replace(/([A-Za-z])-[ \t]*\n[ \t]*([a-z])/g, "$1$2")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .filter((line) => !/^(\d{1,4}|contents|index|copyright|all rights reserved)$/i.test(line))
+    .filter((line) => !/z[ -]?library|singlelogin|isbn|cataloguing in publication|no part of this book may be reproduced/i.test(line))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function usefulSentences(value: string) {
+  return cleanSourceText(value)
+    .split(/(?<=[.!?])\s+(?=[A-ZÀ-ÖØ-Þ“‘])/u)
+    .map((sentence) => sentence.replace(/\s+/g, " ").trim())
+    .filter((sentence) => sentence.length >= 55 && sentence.length <= 700)
+    .filter((sentence) => (sentence.match(/[\p{L}]/gu) ?? []).length >= 40)
+    .filter((sentence) => !/^(chapter|figure|table)\s+[\divxlc]+\b/i.test(sentence));
+}
+
+function contentWords(value: string) {
+  return value.toLowerCase().match(/[\p{L}\p{N}’'-]+/gu) ?? [];
+}
+
+function chapterKeywords(title: string, terms: string[]) {
+  const titleWords = contentWords(title).filter((word) => word.length > 3 && !stopWords.has(word));
+  return [...new Set([...titleWords, ...terms.filter((term) => term.length > 3).slice(0, 4)])];
+}
+
+function sentenceScore(sentence: string, keywords: string[]) {
+  const lower = sentence.toLowerCase();
+  const matches = keywords.reduce((sum, word) => sum + (lower.includes(word) ? 1 : 0), 0);
+  const usefulLength = Math.min(sentence.length, 360) / 360;
+  return matches * 8 + usefulLength;
+}
+
+function selectChapterPages(pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, terms: string[]) {
+  const keywords = chapterKeywords(chapter.title, terms);
+  const cleanedPages = pageTexts.map(cleanSourceText);
+  const exactWords = contentWords(chapter.title).filter((word) => word.length > 3).slice(0, 6);
+  const exactMatches = cleanedPages
+    .map((page, pageIndex) => ({ pageIndex, hits: exactWords.filter((word) => page.toLowerCase().includes(word)).length }))
+    .filter((entry) => exactWords.length > 0 && entry.hits >= Math.max(1, Math.ceil(exactWords.length * .6)));
+  const distributedAnchor = Math.min(cleanedPages.length - 1, Math.floor((index + .5) * cleanedPages.length / Math.max(1, total)));
+  const anchor = exactMatches.length ? exactMatches[exactMatches.length - 1].pageIndex : distributedAnchor;
+  const wantedPages = Math.max(4, Math.min(10, Math.ceil(chapter.pages * .75)));
+  const candidates = cleanedPages.map((page, pageIndex) => {
+    const keywordHits = keywords.reduce((sum, word) => sum + Math.min(5, page.toLowerCase().split(word).length - 1), 0);
+    const distance = Math.abs(pageIndex - anchor);
+    const proximity = Math.max(0, wantedPages * 1.5 - distance);
+    return { pageIndex, page, score: keywordHits * 5 + proximity };
+  }).filter((entry) => entry.page.length > 120);
+  const selected = candidates.sort((a, b) => b.score - a.score).slice(0, wantedPages).sort((a, b) => a.pageIndex - b.pageIndex);
+  return { selected, keywords };
+}
+
+function buildSourceDraft(pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput) {
+  const { selected, keywords } = selectChapterPages(pageTexts, chapter, index, total, project.sourceTerms ?? []);
+  const targetWords = Math.max(700, Math.min(2000, chapter.pages * 190));
+  const seen = new Set<string>();
+  const evidence: Array<{ page: number; sentence: string }> = [];
+  for (const entry of selected) {
+    const ranked = usefulSentences(entry.page)
+      .map((sentence) => ({ sentence, score: sentenceScore(sentence, keywords) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 14);
+    for (const item of ranked) {
+      const signature = item.sentence.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").slice(0, 140);
+      if (seen.has(signature)) continue;
+      seen.add(signature);
+      evidence.push({ page: entry.pageIndex + 1, sentence: item.sentence });
+    }
+  }
+  if (!evidence.length) {
+    for (const sentence of usefulSentences(pageTexts.join(" ")).slice(0, 24)) evidence.push({ page: 0, sentence });
+  }
+
+  const chosen: typeof evidence = [];
+  let words = 0;
+  for (const item of evidence) {
+    chosen.push(item);
+    words += contentWords(item.sentence).length;
+    if (words >= targetWords) break;
+  }
+  const safeTitle = escapeHtml(chapter.title);
+  const audience = escapeHtml((project.audience || "the selected readers").toLowerCase());
+  const tone = escapeHtml((project.tone || "clear and engaging").toLowerCase());
+  const focusTerms = keywords.slice(0, 3).map((term) => escapeHtml(term));
+  const sectionTitles = [
+    `Opening the idea`,
+    focusTerms[0] ? `Understanding ${focusTerms[0]}` : `Ideas in context`,
+    focusTerms[1] ? `${focusTerms[1][0].toUpperCase()}${focusTerms[1].slice(1)} and its wider setting` : `Evidence and interpretation`,
+    `Connections and consequences`,
+    `Questions to carry forward`,
+  ];
+  const groupSize = Math.max(2, Math.ceil(chosen.length / sectionTitles.length));
+  const sections = sectionTitles.map((heading, sectionIndex) => {
+    const slice = chosen.slice(sectionIndex * groupSize, (sectionIndex + 1) * groupSize);
+    if (!slice.length) return "";
+    const paragraphs: string[] = [];
+    for (let cursor = 0; cursor < slice.length; cursor += 2) {
+      const pair = slice.slice(cursor, cursor + 2);
+      paragraphs.push(`<p>${pair.map((item) => escapeHtml(item.sentence)).join(" ")} <sup>${[...new Set(pair.map((item) => item.page).filter(Boolean))].map((page) => `p. ${page}`).join(", ")}</sup></p>`);
+    }
+    return `<h2>${heading}</h2>${paragraphs.join("")}`;
+  }).join("");
+  const refs = [...new Map(chosen.filter((item) => item.page > 0).map((item) => [item.page, item])).values()].slice(0, 8)
+    .map((item) => ({ title: chapter.title, page: item.page, excerpt: item.sentence.slice(0, 520) }));
+  const visual = escapeHtml(`${project.illustrationStyle || "Editorial illustration"} in a ${(project.aesthetic || "coherent editorial").toLowerCase()} direction, grounded in the source evidence for ${chapter.title}.`);
+  const body = `<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${safeTitle}</h1><p class="chapter-deck">A ${tone} source-grounded chapter for ${audience}, developed from ${refs.length || selected.length} referenced source locations.</p><div class="source-draft-notice"><b>SOURCE-GROUNDED MANUSCRIPT</b><span>This is a substantial editable draft assembled from the uploaded book. Page markers show where its evidence came from.</span></div>${sections}<div class="illustration"><span>ILLUSTRATION DIRECTION</span><strong>${safeTitle}</strong><small>${visual}</small></div><div class="takeaway"><b>READER REFLECTION</b><p>Which idea in this chapter most changes how you understand the subject? Return to the linked source pages before approving important claims or quotations.</p></div>`;
+  return { ...chapter, status: "draft" as const, body, sourceRefs: refs, wordCount: words };
 }
 
 function analyseText(text: string) {
@@ -254,32 +414,42 @@ async function sourceApi(request: Request, env: Env) {
   const file = form.get("file");
   const projectId = String(form.get("projectId") || crypto.randomUUID());
   if (!(file instanceof File)) return json({ error: "Choose a source file" }, 400);
-  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  const extension = sourceExtension(file.name);
   if (!allowedExtensions.has(extension)) return json({ error: "Use a PDF, DOCX, TXT or MD file" }, 415);
   if (file.size > 30 * 1024 * 1024) return json({ error: "The source must be smaller than 30 MB" }, 413);
   const bytes = await file.arrayBuffer();
-  let text = "";
-  let pages = 0;
-  let pageTexts: string[] = [];
-  if (extension === "pdf") {
-    const pdf = await getDocumentProxy(new Uint8Array(bytes));
-    const extracted = await extractText(pdf, { mergePages: false });
-    pageTexts = typeof extracted.text === "string" ? [extracted.text] : extracted.text;
-    text = pageTexts.join("\n\n");
-    pages = extracted.totalPages;
-  } else if (extension === "docx") {
-    text = (await mammoth.extractRawText({ arrayBuffer: bytes })).value;
-    pageTexts = [text];
-  } else {
-    text = new TextDecoder().decode(bytes);
-    pageTexts = [text];
-  }
-  const analysis = analyseText(text);
-  const sections = makeSections(analysis.headings, pageTexts, text);
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, "-");
   const objectKey = `sources/${ownerKey(request)}/${projectId}/${crypto.randomUUID()}-${safeName}`;
-  await env.BUCKET.put(objectKey, bytes, { httpMetadata: { contentType: file.type || "application/octet-stream" }, customMetadata: { originalName: file.name } });
+  // Persist before PDF parsing because some PDF engines transfer/detach the
+  // supplied ArrayBuffer while loading the document.
+  await env.BUCKET.put(objectKey, bytes.slice(0), { httpMetadata: { contentType: file.type || "application/octet-stream" }, customMetadata: { originalName: file.name } });
+  const { text, pageTexts, pages } = await extractSourcePages(bytes, extension);
+  const analysis = analyseText(text);
+  const sections = makeSections(analysis.headings, pageTexts, text);
   return json({ source: { name: file.name, size: file.size, objectKey, pages, ...analysis, sections, quality: analysis.words > 200 ? "Good" : "Needs review — OCR may be required" } });
+}
+
+async function draftApi(request: Request, env: Env) {
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const project = await request.json() as DraftProjectInput;
+  if (!project.sourceObjectKey || !project.source || !project.chapters?.length || !project.chapterIds?.length) {
+    return json({ error: "This project is missing its source or chapter plan" }, 400);
+  }
+  const ownerPrefix = `sources/${ownerKey(request)}/`;
+  if (!project.sourceObjectKey.startsWith(ownerPrefix)) return json({ error: "The source does not belong to this project" }, 403);
+  const source = await env.BUCKET.get(project.sourceObjectKey);
+  if (!source) return json({ error: "The original source file is unavailable. Upload it again to rebuild chapters." }, 404);
+  const bytes = await source.arrayBuffer();
+  const extension = sourceExtension(project.source);
+  if (!allowedExtensions.has(extension)) return json({ error: "This source format cannot be drafted" }, 415);
+  const extracted = await extractSourcePages(bytes, extension);
+  const requested = new Set(project.chapterIds.map(Number));
+  const chapters = project.chapters.map((chapter, index) => {
+    if (!requested.has(chapter.id) || chapter.locked) return null;
+    return buildSourceDraft(extracted.pageTexts, chapter, index, project.chapters.length, project);
+  }).filter(Boolean);
+  if (!chapters.length) return json({ error: "No unlocked chapters were selected" }, 400);
+  return json({ chapters, sourcePages: extracted.pages });
 }
 
 // Image security config. SVG sources with .svg extension auto-skip the
@@ -298,6 +468,7 @@ const worker = {
       if (url.pathname === "/api/versions") return await versionsApi(request, env);
       if (url.pathname === "/api/preferences") return await preferencesApi(request, env);
       if (url.pathname === "/api/source") return await sourceApi(request, env);
+      if (url.pathname === "/api/draft") return await draftApi(request, env);
       if (url.pathname === "/api/image") return await imageApi(request, env);
       if (url.pathname === "/api/asset") return await assetApi(request, env);
       if (url.pathname === "/api/export/docx") return await exportDocxApi(request);

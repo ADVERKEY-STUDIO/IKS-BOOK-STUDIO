@@ -17,6 +17,7 @@ type Chapter = {
   imageKey?: string;
   imageUrl?: string;
   imageCaption?: string;
+  wordCount?: number;
 };
 
 type Project = {
@@ -194,6 +195,10 @@ function escapeHtml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#039;");
 }
 
+function chapterWordCount(chapter: Chapter) {
+  return chapter.body.replace(/<[^>]+>/g, " ").match(/[\p{L}\p{N}’'-]+/gu)?.length ?? 0;
+}
+
 function sourceSentences(project: Project) {
   const sentences = project.sourcePreview
     .replace(/\s+/g, " ")
@@ -233,6 +238,7 @@ export default function Home() {
   const [showVersions, setShowVersions] = useState(false);
   const [versions, setVersions] = useState<{ label: string; date: string; snapshot: Project }[]>([]);
   const [sourceBusy, setSourceBusy] = useState(false);
+  const [draftBusy, setDraftBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [designerPreferences, setDesignerPreferences] = useState<string[]>([]);
   const [aiRequest, setAiRequest] = useState<{ action: string; prompt: string; selection: string; result: string } | null>(null);
@@ -315,6 +321,39 @@ export default function Home() {
       notify(`${file.name} analysed successfully`);
     } catch (error) {
       notify(error instanceof Error ? error.message : "Could not analyse this source");
+    } finally {
+      setSourceBusy(false);
+    }
+  }
+
+  async function refreshSource(file: File) {
+    setSourceBusy(true);
+    try {
+      const form = new FormData();
+      form.set("file", file);
+      form.set("projectId", project.id);
+      const response = await fetch("/api/source", { method: "POST", headers: ownerHeaders(), body: form });
+      const data = await response.json() as { source?: { name: string; size: number; objectKey: string; pages: number; words: number; headings: string[]; terms: string[]; sections: SourceSection[]; preview: string; quality: string }; error?: string };
+      if (!response.ok || !data.source) throw new Error(data.error || "Source upload failed");
+      const source = data.source;
+      const next = {
+        ...project,
+        source: source.name,
+        sourceSize: source.size,
+        sourceObjectKey: source.objectKey,
+        sourcePages: source.pages,
+        sourceWords: source.words,
+        sourceQuality: source.quality,
+        sourceHeadings: source.headings,
+        sourceTerms: source.terms,
+        sourceSections: source.sections,
+        sourcePreview: source.preview,
+      };
+      setProject(next);
+      await persistProject(next);
+      notify("Source refreshed. You can now rebuild the full chapters.");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not refresh the source");
     } finally {
       setSourceBusy(false);
     }
@@ -463,14 +502,55 @@ export default function Home() {
     patchProject({ chapters: project.chapters.map((chapter) => chapter.id === chapterId ? { ...chapter, ...patch } : chapter) });
   }
 
-  function prepareDraft(scope: "sample" | "all" | "active") {
+  async function prepareDraft(scope: "sample" | "all" | "active" | "thin") {
     const activeIndex = project.chapters.findIndex((chapter) => chapter.id === activeChapter);
-    const nextChapters = project.chapters.map((chapter, index) => {
-      const shouldDraft = scope === "all" || (scope === "sample" && index === 0) || (scope === "active" && index === activeIndex);
-      return shouldDraft && !chapter.locked ? createChapterDraft(project, chapter, index) : chapter;
-    });
-    patchProject({ chapters: nextChapters });
-    notify(scope === "all" ? "All chapter drafts prepared" : "Chapter draft prepared");
+    const chapterIds = project.chapters.filter((chapter, index) => {
+      if (chapter.locked) return false;
+      if (scope === "all") return true;
+      if (scope === "sample") return index === 0;
+      if (scope === "active") return index === activeIndex;
+      return chapterWordCount(chapter) < 350;
+    }).map((chapter) => chapter.id);
+    if (!chapterIds.length) { notify("All chapters already contain substantial content"); return; }
+    setDraftBusy(true);
+    try {
+      if (!project.sourceObjectKey) {
+        const fallback = project.chapters.map((chapter, index) => chapterIds.includes(chapter.id) ? createChapterDraft(project, chapter, index) : chapter);
+        const next = { ...project, chapters: fallback };
+        setProject(next);
+        await persistProject(next).catch(() => undefined);
+        notify(scope === "all" || scope === "thin" ? "Chapter drafts prepared" : "Chapter draft prepared");
+        return;
+      }
+      const response = await fetch("/api/draft", {
+        method: "POST",
+        headers: requestHeaders(),
+        body: JSON.stringify({
+          source: project.source,
+          sourceObjectKey: project.sourceObjectKey,
+          audience: project.audience,
+          readingLevel: project.readingLevel,
+          tone: project.tone,
+          aesthetic: project.aesthetic,
+          illustrationStyle: project.illustrationStyle,
+          imageFrequency: project.imageFrequency,
+          sourceTerms: project.sourceTerms,
+          chapters: project.chapters.map(({ id, title, pages, locked }) => ({ id, title, pages, locked })),
+          chapterIds,
+        }),
+      });
+      const data = await response.json() as { chapters?: Chapter[]; error?: string };
+      if (!response.ok || !data.chapters) throw new Error(data.error || "Chapter drafting failed");
+      const replacements = new Map(data.chapters.map((chapter) => [chapter.id, chapter]));
+      const next = { ...project, chapters: project.chapters.map((chapter) => replacements.has(chapter.id) ? { ...chapter, ...replacements.get(chapter.id)! } : chapter) };
+      setProject(next);
+      await persistProject(next);
+      notify(scope === "all" || scope === "thin" ? `${data.chapters.length} full chapters prepared and saved` : "Full chapter prepared and saved");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not prepare the chapters");
+    } finally {
+      setDraftBusy(false);
+    }
   }
 
   if (view === "dashboard") return <Dashboard projects={projects} onNew={startNewBook} onOpen={(selected) => { setProject(selected); setView("editor"); setActiveChapter(selected.chapters[0]?.id ?? 1); }} onDuplicate={duplicateProject} onDelete={deleteProject} />;
@@ -482,6 +562,7 @@ export default function Home() {
         <div className="current-project"><i /> <span><strong>{project.title}</strong><small>{project.source}</small></span></div>
         <div className="top-actions">
           {view === "editor" && <button onClick={() => setView("brief")}>☷ <span>Book plan</span></button>}
+          {(view === "editor" || view === "brief") && <label className="top-upload">{sourceBusy ? "Reading…" : "↥ Source"}<input type="file" accept=".pdf,.docx,.txt,.md" disabled={sourceBusy || draftBusy} onChange={(event) => event.target.files?.[0] && refreshSource(event.target.files[0])}/></label>}
           <button onClick={openVersions}>↺ <span>Versions</span></button>
           <button onClick={saveProject}>✓ <span>Save</span></button>
           <button onClick={() => setShowPreview(true)}>Preview</button>
@@ -491,10 +572,10 @@ export default function Home() {
 
       {view === "wizard" && <Wizard step={wizardStep} project={project} sourceBusy={sourceBusy} onPatch={patchProject} onFile={handleFile} onBack={() => wizardStep === 0 ? setView("dashboard") : setWizardStep((step) => step - 1)} onNext={() => wizardStep < 4 ? setWizardStep((step) => step + 1) : setView("analysis")} />}
       {view === "analysis" && <Analysis project={project} onPatch={patchProject} onBack={() => { setView("wizard"); setWizardStep(4); }} onContinue={() => setView("brief")} />}
-      {view === "brief" && <BookBrief project={project} allocated={allocatedPages} onBack={() => setView("analysis")} onUpdateChapter={updateChapter} onPrepare={prepareDraft} onContinue={() => { patchProject({ briefApproved: true }); setActiveChapter(project.chapters[0]?.id ?? 1); setView("editor"); }} />}
-      {view === "editor" && <Editor project={project} active={active} activeId={activeChapter} allocated={allocatedPages} onSelect={setActiveChapter} onSaveBody={saveChapterBody} editorRef={editorRef} onAi={aiAction} onRemember={rememberPreference} onDraft={() => prepareDraft("active")} onToggleLock={() => patchProject({ chapters: project.chapters.map((chapter) => chapter.id === active?.id ? { ...chapter, locked: !chapter.locked } : chapter) })} onAddChapter={addChapter} onUploadImage={uploadChapterImage} onPatchProject={patchProject} onUpdateChapter={updateChapter} />}
+      {view === "brief" && <BookBrief project={project} allocated={allocatedPages} draftBusy={draftBusy} onBack={() => setView("analysis")} onUpdateChapter={updateChapter} onPrepare={prepareDraft} onContinue={() => { patchProject({ briefApproved: true }); setActiveChapter(project.chapters[0]?.id ?? 1); setView("editor"); }} />}
+      {view === "editor" && <Editor project={project} active={active} activeId={activeChapter} allocated={allocatedPages} draftBusy={draftBusy} onSelect={setActiveChapter} onSaveBody={saveChapterBody} editorRef={editorRef} onAi={aiAction} onRemember={rememberPreference} onDraft={() => prepareDraft("active")} onToggleLock={() => patchProject({ chapters: project.chapters.map((chapter) => chapter.id === active?.id ? { ...chapter, locked: !chapter.locked } : chapter) })} onAddChapter={addChapter} onUploadImage={uploadChapterImage} onPatchProject={patchProject} onUpdateChapter={updateChapter} />}
 
-      {showPreview && <Preview project={project} onClose={() => setShowPreview(false)} onPrint={() => window.print()} />}
+      {showPreview && <Preview project={project} draftBusy={draftBusy} onFill={() => prepareDraft("thin")} onClose={() => setShowPreview(false)} onPrint={() => window.print()} />}
       {showVersions && <Versions versions={versions} onCreate={createVersion} onRestore={(snapshot) => { setProject(snapshot); setShowVersions(false); notify("Version restored"); }} onClose={() => setShowVersions(false)} />}
       {aiRequest && <AiRoundTrip request={aiRequest} onChange={(result) => setAiRequest({ ...aiRequest, result })} onClose={() => setAiRequest(null)} onApply={applyAiResult} />}
       {toast && <div className="toast">✓ {toast}</div>}
@@ -544,7 +625,7 @@ function Analysis({ project, onPatch, onBack, onContinue }: { project: Project; 
   return <main className="analysis-page"><button className="text-button" onClick={onBack}>← Change setup</button><p className="eyebrow">SOURCE ANALYSIS</p><h1>Your source is ready.</h1><p className="lead">Review the structure detected from this uploaded book before building the new book plan.</p><section className="stats"><div><span>PAGES</span><strong>{project.sourcePages || "—"}</strong></div><div><span>WORDS</span><strong>{project.sourceWords ? project.sourceWords.toLocaleString() : "Pending"}</strong></div><div><span>QUALITY</span><strong>{project.sourceQuality}</strong></div><div><span>OUTPUT LIMIT</span><strong>{project.maxPages}</strong></div></section><div className="analysis-grid"><section className="analysis-card"><header><div><p className="eyebrow">DETECTED OUTLINE</p><h2>{headings.length} chapter candidates</h2></div><span className="good">✓ Reviewable</span></header>{headings.map((heading, index) => <div className="heading-row" key={`${index}-${heading}`}><span>{String(index + 1).padStart(2, "0")}</span><input value={heading} onChange={(event) => renameHeading(index, event.target.value)}/></div>)}</section><aside><div className="analysis-card"><p className="eyebrow">KEY TERMS</p><div className="tags">{(project.sourceTerms.length ? project.sourceTerms : ["analysis pending"]).map((term) => <span key={term}>{term}</span>)}</div></div><div className="analysis-card note"><p className="eyebrow">FRESH FOR EVERY BOOK</p><p>This analysis belongs only to <strong>{project.source}</strong>. Uploading another source begins again.</p></div></aside></div><footer className="analysis-footer"><span>You can rename any detected chapter now or later.</span><button className="primary" onClick={onContinue}>Build book plan →</button></footer></main>;
 }
 
-function BookBrief({ project, allocated, onBack, onUpdateChapter, onPrepare, onContinue }: { project: Project; allocated: number; onBack: () => void; onUpdateChapter: (id: number, patch: Partial<Chapter>) => void; onPrepare: (scope: "sample" | "all" | "active") => void; onContinue: () => void }) {
+function BookBrief({ project, allocated, draftBusy, onBack, onUpdateChapter, onPrepare, onContinue }: { project: Project; allocated: number; draftBusy: boolean; onBack: () => void; onUpdateChapter: (id: number, patch: Partial<Chapter>) => void; onPrepare: (scope: "sample" | "all" | "active") => void; onContinue: () => void }) {
   const drafted = project.chapters.filter((chapter) => chapter.status !== "planned").length;
   const first = project.chapters[0];
   const overBudget = allocated > project.maxPages;
@@ -552,13 +633,13 @@ function BookBrief({ project, allocated, onBack, onUpdateChapter, onPrepare, onC
     <button className="text-button" onClick={onBack}>← Back to source analysis</button>
     <header className="brief-hero"><div><p className="eyebrow">BOOK BRIEF & PAGE PLAN</p><h1>{project.title}</h1><p className="lead">A {project.bookType.toLowerCase()} for {project.audience.toLowerCase()}, adapted in a {project.tone.toLowerCase()} voice with a {project.aesthetic.toLowerCase()} visual direction.</p><div className="brief-chips"><span>{project.language}</span><span>{project.adaptation}</span><span>{project.imageFrequency}</span></div></div><aside><span>READER PROMISE</span><p>Make the source understandable, visually inviting and faithful enough for an editor to verify every important idea.</p></aside></header>
     <div className="brief-layout"><section className="plan-card"><header><div><p className="eyebrow">STRUCTURE</p><h2>Chapter and page plan</h2></div><div className={overBudget ? "budget-pill warning" : "budget-pill"}>{allocated} / {project.maxPages} pages</div></header><div className="plan-head"><span>CHAPTER</span><span>TITLE</span><span>PAGES</span><span>STATE</span></div>{project.chapters.map((chapter, index) => <div className="plan-row" key={chapter.id}><span>{String(index + 1).padStart(2, "0")}</span><input value={chapter.title} onChange={(event) => onUpdateChapter(chapter.id, { title: event.target.value })}/><input aria-label={`Pages for ${chapter.title}`} type="number" min="2" max="30" value={chapter.pages} onChange={(event) => onUpdateChapter(chapter.id, { pages: Math.max(2, Number(event.target.value) || 2) })}/><b className={`draft-state ${chapter.status}`}>{chapter.status}</b></div>)}<footer><span>Includes 8 reserved pages for cover, contents, preface and references.</span>{overBudget && <strong>Reduce {allocated - project.maxPages} pages before approval.</strong>}</footer></section>
-      <aside className="generation-card"><p className="eyebrow">DRAFT ENGINE</p><h2>Prepare the manuscript</h2><p>Build an editable draft from this book’s extracted text, audience, tone and terminology. Approved or locked chapters are never overwritten.</p><div className="draft-progress"><span><b>{drafted}</b> of {project.chapters.length} drafted</span><i><b style={{ width: `${project.chapters.length ? drafted / project.chapters.length * 100 : 0}%` }}/></i></div><button className="secondary full" onClick={() => onPrepare("sample")}>Prepare sample chapter</button><button className="primary full" onClick={() => onPrepare("all")}>Prepare all chapter drafts</button><small>No OpenAI API key is used. Final rewriting and images remain editor-guided inside ChatGPT.</small></aside></div>
+      <aside className="generation-card"><p className="eyebrow">FULL CHAPTER BUILDER</p><h2>Prepare the manuscript</h2><p>Build substantial editable chapters from multiple relevant passages in the uploaded source. Page markers and source evidence are added automatically. Locked chapters are never overwritten.</p><div className="draft-progress"><span><b>{drafted}</b> of {project.chapters.length} drafted</span><i><b style={{ width: `${project.chapters.length ? drafted / project.chapters.length * 100 : 0}%` }}/></i></div><button className="secondary full" disabled={draftBusy} onClick={() => onPrepare("sample")}>{draftBusy ? "Reading the source…" : "Build full sample chapter"}</button><button className="primary full" disabled={draftBusy} onClick={() => onPrepare("all")}>{draftBusy ? "Building full chapters…" : "Build all full chapters"}</button><small>This source-grounded builder works without an AI key. Use the editorial assistant afterward when you want stylistic rewriting.</small></aside></div>
     {first && <section className="sample-spread"><div className="sample-copy"><p className="eyebrow">SAMPLE SPREAD</p><span>CHAPTER 01</span><h2>{first.title}</h2><p>{first.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 420)}</p><button className="text-button" onClick={() => onPrepare("sample")}>{first.status === "planned" ? "Create this sample" : "Refresh sample draft"} →</button></div><div className="sample-art"><span>ILLUSTRATION DIRECTION</span><strong>{project.aesthetic}</strong><p>{first.title} · {project.imageFrequency}</p><b>✦</b></div></section>}
     <footer className="brief-actions"><div><b>{overBudget ? "Page plan needs attention" : "Ready for editorial review"}</b><span>{drafted ? `${drafted} chapter draft${drafted === 1 ? "" : "s"} prepared` : "Prepare at least one chapter now, or begin with a blank structure."}</span></div><button className="primary" disabled={overBudget} onClick={onContinue}>Approve brief & open studio →</button></footer>
   </main>;
 }
 
-function Editor({ project, active, activeId, allocated, onSelect, editorRef, onSaveBody, onAi, onRemember, onDraft, onToggleLock, onAddChapter, onUploadImage, onPatchProject, onUpdateChapter }: { project: Project; active?: Chapter; activeId: number; allocated: number; onSelect: (id: number) => void; editorRef: React.RefObject<HTMLDivElement | null>; onSaveBody: () => void; onAi: (action: string) => void; onRemember: (scope: "book" | "designer") => void; onDraft: () => void; onToggleLock: () => void; onAddChapter: () => void; onUploadImage: (file: File) => void; onPatchProject: (patch: Partial<Project>) => void; onUpdateChapter: (id: number, patch: Partial<Chapter>) => void }) {
+function Editor({ project, active, activeId, allocated, draftBusy, onSelect, editorRef, onSaveBody, onAi, onRemember, onDraft, onToggleLock, onAddChapter, onUploadImage, onPatchProject, onUpdateChapter }: { project: Project; active?: Chapter; activeId: number; allocated: number; draftBusy: boolean; onSelect: (id: number) => void; editorRef: React.RefObject<HTMLDivElement | null>; onSaveBody: () => void; onAi: (action: string) => void; onRemember: (scope: "book" | "designer") => void; onDraft: () => void; onToggleLock: () => void; onAddChapter: () => void; onUploadImage: (file: File) => void; onPatchProject: (patch: Partial<Project>) => void; onUpdateChapter: (id: number, patch: Partial<Chapter>) => void }) {
   const [tab, setTab] = useState<"ai" | "design" | "sources">("ai");
   if (!active) return null;
   const fontClass = project.fontTheme.toLowerCase().replace(/[^a-z]+/g, "-");
@@ -566,7 +647,7 @@ function Editor({ project, active, activeId, allocated, onSelect, editorRef, onS
     <aside className="chapters"><header><p className="eyebrow">BOOK STRUCTURE</p><button onClick={onAddChapter} aria-label="Add chapter">＋</button></header><div className="front-matter"><span>FM</span><div><b>Front matter</b><small>Cover · Contents · Preface</small></div></div>{project.chapters.map((chapter) => <button className={chapter.id === activeId ? "chapter active" : "chapter"} onClick={() => onSelect(chapter.id)} key={chapter.id}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small>{chapter.pages} pages · {chapter.status}</small></div><i>{chapter.locked ? "◆" : ""}</i></button>)}<div className="page-budget"><span><b>{allocated}</b> / {project.maxPages} pages</span><i><b style={{ width: `${Math.min(100, allocated / project.maxPages * 100)}%` }}/></i><small>{Math.max(0, project.maxPages - allocated)} pages available</small></div></aside>
     <section className="canvas"><nav className="editor-tools"><div><button onClick={() => document.execCommand("bold")}><b>B</b></button><button onClick={() => document.execCommand("italic")}><i>I</i></button><button onClick={() => document.execCommand("formatBlock", false, "h2")}>H2</button><button onClick={() => document.execCommand("insertUnorderedList")}>• List</button></div><div className="chapter-meter"><span>{active.pages} target pages</span><i><b style={{ width: active.status === "planned" ? "18%" : "67%" }}/></i><button onClick={onToggleLock}>{active.locked ? "◆ Locked" : "◇ Lock"}</button></div></nav><div className="page-stage"><article className={`paper font-${fontClass}`}><header><span>{project.title}</span><span>{project.aesthetic}</span></header><div className="ornament">✦</div><div key={active.id} ref={editorRef} className="book-copy" contentEditable={!active.locked} suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: active.body }}/>{active.imageUrl && <figure className="chapter-image"><img src={active.imageUrl} alt={active.imageCaption || active.title}/><figcaption>{active.imageCaption || active.title}</figcaption></figure>}<footer><span>{project.source}</span><span>{active.id}</span></footer></article></div><button className="save-float" onClick={onSaveBody}>✓ Save chapter</button></section>
     <aside className="assistant"><nav><button className={tab === "ai" ? "active" : ""} onClick={() => setTab("ai")}>✦<span>AI EDIT</span></button><button className={tab === "design" ? "active" : ""} onClick={() => setTab("design")}>◈<span>DESIGN</span></button><button className={tab === "sources" ? "active" : ""} onClick={() => setTab("sources")}>⌕<span>SOURCES</span></button></nav><div className="assistant-body">
-      {tab === "ai" && <><div className="assistant-title"><span>✦</span><div><b>Editorial assistant</b><small>Select text, then choose an action.</small></div></div>{active.status === "planned" && <button className="draft-chapter-button" onClick={onDraft}>✦ Prepare this chapter draft</button>}<p className="selection-tip">No API key is needed. The guided window opens ChatGPT, then applies the approved reply here.</p><div className="ai-list">{["Simplify language", "Shorten selection", "Expand with examples", "Make age-appropriate", "Improve storytelling", "Check against source", "Suggest an illustration"].map((action) => <button onClick={() => onAi(action)} key={action}><span>✦</span>{action}<i>→</i></button>)}</div><div className="memory-box"><p className="eyebrow">EDITORIAL MEMORY</p><p>{project.editorialPreferences.length ? project.editorialPreferences.join(" · ") : "No saved preferences yet"}</p><button onClick={() => onRemember("book")}>＋ Remember for this book</button><button onClick={() => onRemember("designer")}>＋ Remember for future books</button></div></>}
+      {tab === "ai" && <><div className="assistant-title"><span>✦</span><div><b>Editorial assistant</b><small>Select text, then choose an action.</small></div></div>{!active.locked && <button className="draft-chapter-button" disabled={draftBusy} onClick={onDraft}>{draftBusy ? "Reading the source…" : chapterWordCount(active) < 350 ? "✦ Build this full chapter" : "↻ Rebuild full chapter from source"}</button>}<p className="selection-tip">This chapter has <b>{chapterWordCount(active).toLocaleString()} words</b>. The full chapter builder uses the uploaded source; the guided edit actions can then refine the writing in ChatGPT.</p><div className="ai-list">{["Simplify language", "Shorten selection", "Expand with examples", "Make age-appropriate", "Improve storytelling", "Check against source", "Suggest an illustration"].map((action) => <button onClick={() => onAi(action)} key={action}><span>✦</span>{action}<i>→</i></button>)}</div><div className="memory-box"><p className="eyebrow">EDITORIAL MEMORY</p><p>{project.editorialPreferences.length ? project.editorialPreferences.join(" · ") : "No saved preferences yet"}</p><button onClick={() => onRemember("book")}>＋ Remember for this book</button><button onClick={() => onRemember("designer")}>＋ Remember for future books</button></div></>}
       {tab === "design" && <><div className="assistant-title"><span>◈</span><div><b>Book design</b><small>Changes update the current project.</small></div></div><div className="design-controls"><label>Aesthetic<select value={project.aesthetic} onChange={(e) => onPatchProject({ aesthetic: e.target.value })}><option>Classical Indian</option><option>Modern academic</option><option>Minimal editorial</option><option>Warm children’s</option></select></label><label>Typography<select value={project.fontTheme} onChange={(e) => onPatchProject({ fontTheme: e.target.value })}><option>Literary serif</option><option>Modern sans-serif</option><option>Academic classic</option><option>Friendly rounded</option></select></label><label>Illustration style<select value={project.illustrationStyle} onChange={(e) => onPatchProject({ illustrationStyle: e.target.value })}><option>Editorial watercolour</option><option>Historical ink drawing</option><option>Modern flat illustration</option><option>Playful children’s art</option><option>Documentary photography</option></select></label><label className="image-upload">Add chapter image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && onUploadImage(e.target.files[0])}/></label>{active.imageUrl && <label>Image caption<input value={active.imageCaption || ""} onChange={(e) => onUpdateChapter(active.id, { imageCaption: e.target.value })}/></label>}</div></>}
       {tab === "sources" && <><div className="assistant-title"><span>⌕</span><div><b>Source evidence</b><small>{active.sourceRefs.length} reference{active.sourceRefs.length === 1 ? "" : "s"} linked to this chapter.</small></div></div><div className="source-list">{active.sourceRefs.length ? active.sourceRefs.map((ref, index) => <article key={`${ref.title}-${index}`}><span>PAGE {ref.page || "—"}</span><b>{ref.title}</b><p>{ref.excerpt}</p></article>) : <p className="empty">No source reference is linked yet. Prepare this chapter to attach the closest extracted section.</p>}</div><div className="source-policy"><b>{project.citationStyle}</b><p>Verify important names, dates and quotations before marking the chapter approved.</p></div></>}
     </div></aside>
@@ -581,8 +662,9 @@ function AiRoundTrip({ request, onChange, onClose, onApply }: { request: { actio
   return <div className="modal-backdrop"><section className="ai-modal"><header><div><p className="eyebrow">CHATGPT EDIT</p><h2>{request.action}</h2></div><button onClick={onClose}>×</button></header><ol><li><button className="primary" onClick={openChatGPT}>Open this edit in ChatGPT ↗</button><small>The instruction is also copied automatically.</small></li><li><label>Paste ChatGPT’s revised text here<textarea value={request.result} onChange={(e) => onChange(e.target.value)} placeholder="Paste the approved revision…"/></label></li></ol><footer><button className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={!request.result.trim()} onClick={onApply}>Apply and save revision</button></footer></section></div>;
 }
 
-function Preview({ project, onClose, onPrint }: { project: Project; onClose: () => void; onPrint: () => void }) {
-  return <div className="modal-backdrop"><section className="preview-modal"><header><div><p className="eyebrow">FINAL BOOK PREVIEW</p><h2>{project.title}</h2></div><div><button onClick={onPrint}>Print / Save PDF</button><button onClick={onClose}>×</button></div></header><div className="preview-scroll"><article className="preview-cover"><p>{project.bookType}</p><h1>{project.title}</h1><span>Adapted from {project.source}</span><b>✦</b></article><article className="preview-page contents-page"><span>CONTENTS</span><h2>Inside this book</h2><ol>{project.chapters.map((chapter, index) => <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{chapter.pages} pages</i></li>)}</ol></article>{project.chapters.map((chapter) => <article className="preview-page" key={chapter.id}><span>CHAPTER {chapter.id}</span><h2>{chapter.title}</h2><div dangerouslySetInnerHTML={{ __html: chapter.body }}/>{chapter.imageUrl && <figure className="chapter-image"><img src={chapter.imageUrl} alt={chapter.imageCaption || chapter.title}/><figcaption>{chapter.imageCaption || chapter.title}</figcaption></figure>}{chapter.sourceRefs.length > 0 && <div className="preview-sources"><b>SOURCE NOTES</b>{chapter.sourceRefs.map((ref, index) => <p key={`${ref.title}-${index}`}>{ref.title}, p. {ref.page || "—"}</p>)}</div>}</article>)}<article className="preview-page backmatter"><span>EDITORIAL NOTES</span><h2>References and production brief</h2><p>Adapted from <b>{project.source}</b>. Citation approach: {project.citationStyle}.</p><p>Designed in the {project.aesthetic.toLowerCase()} aesthetic with {project.illustrationStyle.toLowerCase()} visuals.</p><h3>Remembered editorial decisions</h3><ul>{project.editorialPreferences.map((preference) => <li key={preference}>{preference}</li>)}</ul></article></div></section></div>;
+function Preview({ project, draftBusy, onFill, onClose, onPrint }: { project: Project; draftBusy: boolean; onFill: () => void; onClose: () => void; onPrint: () => void }) {
+  const thinChapters = project.chapters.filter((chapter) => chapterWordCount(chapter) < 350 && !chapter.locked);
+  return <div className="modal-backdrop"><section className="preview-modal"><header><div><p className="eyebrow">FINAL BOOK PREVIEW</p><h2>{project.title}</h2></div><div>{thinChapters.length > 0 && <button className="fill-chapters" disabled={draftBusy} onClick={onFill}>{draftBusy ? "Building chapters…" : `Fill ${thinChapters.length} short chapter${thinChapters.length === 1 ? "" : "s"}`}</button>}<button onClick={onPrint}>Print / Save PDF</button><button onClick={onClose}>×</button></div></header>{thinChapters.length > 0 && <div className="preview-warning"><b>{thinChapters.length} chapter{thinChapters.length === 1 ? " is" : "s are"} still too short.</b><span>Fill them from the uploaded source before exporting the final book.</span></div>}<div className="preview-scroll"><article className="preview-cover"><p>{project.bookType}</p><h1>{project.title}</h1><span>Adapted from {project.source}</span><b>✦</b></article><article className="preview-page contents-page"><span>CONTENTS</span><h2>Inside this book</h2><ol>{project.chapters.map((chapter, index) => <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{chapter.pages} pages</i></li>)}</ol></article>{project.chapters.map((chapter) => <article className="preview-page" key={chapter.id}><span>CHAPTER {chapter.id} · {chapterWordCount(chapter).toLocaleString()} WORDS</span><h2>{chapter.title}</h2><div dangerouslySetInnerHTML={{ __html: chapter.body }}/>{chapter.imageUrl && <figure className="chapter-image"><img src={chapter.imageUrl} alt={chapter.imageCaption || chapter.title}/><figcaption>{chapter.imageCaption || chapter.title}</figcaption></figure>}{chapter.sourceRefs.length > 0 && <div className="preview-sources"><b>SOURCE NOTES</b>{chapter.sourceRefs.map((ref, index) => <p key={`${ref.title}-${index}`}>{ref.title}, p. {ref.page || "—"}</p>)}</div>}</article>)}<article className="preview-page backmatter"><span>EDITORIAL NOTES</span><h2>References and production brief</h2><p>Adapted from <b>{project.source}</b>. Citation approach: {project.citationStyle}.</p><p>Designed in the {project.aesthetic.toLowerCase()} aesthetic with {project.illustrationStyle.toLowerCase()} visuals.</p><h3>Remembered editorial decisions</h3><ul>{project.editorialPreferences.map((preference) => <li key={preference}>{preference}</li>)}</ul></article></div></section></div>;
 }
 
 function Versions({ versions, onCreate, onRestore, onClose }: { versions: { label: string; date: string; snapshot: Project }[]; onCreate: () => void; onRestore: (project: Project) => void; onClose: () => void }) {
