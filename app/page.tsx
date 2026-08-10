@@ -199,6 +199,30 @@ function chapterWordCount(chapter: Chapter) {
   return chapter.body.replace(/<[^>]+>/g, " ").match(/[\p{L}\p{N}’'-]+/gu)?.length ?? 0;
 }
 
+function printableChapters(chapters: Chapter[]) {
+  const seenParagraphs = new Set<string>();
+  let duplicatesRemoved = 0;
+  const cleaned = chapters.map((chapter) => ({
+    ...chapter,
+    body: chapter.body.replace(/<p\b([^>]*)>([\s\S]*?)<\/p>/gi, (paragraph, attributes: string, content: string) => {
+      if (/\bclass\s*=/i.test(attributes)) return paragraph;
+      const signature = content
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&\w+;|&#\d+;/g, " ")
+        .toLowerCase()
+        .match(/[\p{L}\p{N}’'-]+/gu)?.slice(0, 55).join(" ") ?? "";
+      if (signature.length < 90) return paragraph;
+      if (seenParagraphs.has(signature)) {
+        duplicatesRemoved += 1;
+        return "";
+      }
+      seenParagraphs.add(signature);
+      return paragraph;
+    }),
+  }));
+  return { chapters: cleaned, duplicatesRemoved };
+}
+
 function sourceSentences(project: Project) {
   const sentences = project.sourcePreview
     .replace(/\s+/g, " ")
@@ -535,7 +559,7 @@ export default function Home() {
           illustrationStyle: project.illustrationStyle,
           imageFrequency: project.imageFrequency,
           sourceTerms: project.sourceTerms,
-          chapters: project.chapters.map(({ id, title, pages, locked }) => ({ id, title, pages, locked })),
+          chapters: project.chapters.map(({ id, title, pages, locked, body }) => ({ id, title, pages, locked, body })),
           chapterIds,
         }),
       });
@@ -664,7 +688,8 @@ function AiRoundTrip({ request, onChange, onClose, onApply }: { request: { actio
 
 function Preview({ project, draftBusy, onFill, onClose, onPrint }: { project: Project; draftBusy: boolean; onFill: () => void; onClose: () => void; onPrint: () => void }) {
   const thinChapters = project.chapters.filter((chapter) => chapterWordCount(chapter) < 350 && !chapter.locked);
-  return <div className="modal-backdrop"><section className="preview-modal"><header><div><p className="eyebrow">FINAL BOOK PREVIEW</p><h2>{project.title}</h2></div><div>{thinChapters.length > 0 && <button className="fill-chapters" disabled={draftBusy} onClick={onFill}>{draftBusy ? "Building chapters…" : `Fill ${thinChapters.length} short chapter${thinChapters.length === 1 ? "" : "s"}`}</button>}<button onClick={onPrint}>Print / Save PDF</button><button onClick={onClose}>×</button></div></header>{thinChapters.length > 0 && <div className="preview-warning"><b>{thinChapters.length} chapter{thinChapters.length === 1 ? " is" : "s are"} still too short.</b><span>Fill them from the uploaded source before exporting the final book.</span></div>}<div className="preview-scroll"><article className="preview-cover"><p>{project.bookType}</p><h1>{project.title}</h1><span>Adapted from {project.source}</span><b>✦</b></article><article className="preview-page contents-page"><span>CONTENTS</span><h2>Inside this book</h2><ol>{project.chapters.map((chapter, index) => <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{chapter.pages} pages</i></li>)}</ol></article>{project.chapters.map((chapter) => <article className="preview-page" key={chapter.id}><span>CHAPTER {chapter.id} · {chapterWordCount(chapter).toLocaleString()} WORDS</span><h2>{chapter.title}</h2><div dangerouslySetInnerHTML={{ __html: chapter.body }}/>{chapter.imageUrl && <figure className="chapter-image"><img src={chapter.imageUrl} alt={chapter.imageCaption || chapter.title}/><figcaption>{chapter.imageCaption || chapter.title}</figcaption></figure>}{chapter.sourceRefs.length > 0 && <div className="preview-sources"><b>SOURCE NOTES</b>{chapter.sourceRefs.map((ref, index) => <p key={`${ref.title}-${index}`}>{ref.title}, p. {ref.page || "—"}</p>)}</div>}</article>)}<article className="preview-page backmatter"><span>EDITORIAL NOTES</span><h2>References and production brief</h2><p>Adapted from <b>{project.source}</b>. Citation approach: {project.citationStyle}.</p><p>Designed in the {project.aesthetic.toLowerCase()} aesthetic with {project.illustrationStyle.toLowerCase()} visuals.</p><h3>Remembered editorial decisions</h3><ul>{project.editorialPreferences.map((preference) => <li key={preference}>{preference}</li>)}</ul></article></div></section></div>;
+  const printable = useMemo(() => printableChapters(project.chapters), [project.chapters]);
+  return <div className="modal-backdrop"><section className="preview-modal"><header><div><p className="eyebrow">FINAL BOOK PREVIEW</p><h2>{project.title}</h2></div><div>{thinChapters.length > 0 && <button className="fill-chapters" disabled={draftBusy} onClick={onFill}>{draftBusy ? "Building chapters…" : `Fill ${thinChapters.length} short chapter${thinChapters.length === 1 ? "" : "s"}`}</button>}<button onClick={onPrint}>Print / Save PDF</button><button onClick={onClose}>×</button></div></header>{(thinChapters.length > 0 || printable.duplicatesRemoved > 0) && <div className="preview-warning"><b>{thinChapters.length > 0 ? `${thinChapters.length} chapter${thinChapters.length === 1 ? " is" : "s are"} still too short.` : "Repeated content repaired."}</b><span>{printable.duplicatesRemoved > 0 ? `${printable.duplicatesRemoved} repeated paragraph${printable.duplicatesRemoved === 1 ? " was" : "s were"} omitted from this preview and PDF.` : "Fill the short chapters from the uploaded source before exporting."}</span></div>}<div className="preview-scroll"><article className="preview-cover"><p>{project.bookType}</p><h1>{project.title}</h1><span>Adapted from {project.source}</span><b>✦</b></article><article className="preview-page contents-page"><span>CONTENTS</span><h2>Inside this book</h2><ol>{printable.chapters.map((chapter, index) => <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{chapter.pages} pages</i></li>)}</ol></article>{printable.chapters.map((chapter) => <article className="preview-page chapter-preview" key={chapter.id}><header className="print-chapter-header"><span>CHAPTER {chapter.id}</span><span>{chapterWordCount(chapter).toLocaleString()} WORDS</span></header><h2>{chapter.title}</h2><div className="preview-body" dangerouslySetInnerHTML={{ __html: chapter.body }}/>{chapter.imageUrl && <figure className="chapter-image"><img src={chapter.imageUrl} alt={chapter.imageCaption || chapter.title}/><figcaption>{chapter.imageCaption || chapter.title}</figcaption></figure>}{chapter.sourceRefs.length > 0 && <div className="preview-sources"><b>SOURCE NOTES</b>{chapter.sourceRefs.map((ref, index) => <p key={`${ref.title}-${index}`}>{ref.title}, p. {ref.page || "—"}</p>)}</div>}</article>)}<article className="preview-page backmatter"><span>EDITORIAL NOTES</span><h2>References and production brief</h2><p>Adapted from <b>{project.source}</b>. Citation approach: {project.citationStyle}.</p><p>Designed in the {project.aesthetic.toLowerCase()} aesthetic with {project.illustrationStyle.toLowerCase()} visuals.</p><h3>Remembered editorial decisions</h3><ul>{project.editorialPreferences.map((preference) => <li key={preference}>{preference}</li>)}</ul></article></div></section></div>;
 }
 
 function Versions({ versions, onCreate, onRestore, onClose }: { versions: { label: string; date: string; snapshot: Project }[]; onCreate: () => void; onRestore: (project: Project) => void; onClose: () => void }) {

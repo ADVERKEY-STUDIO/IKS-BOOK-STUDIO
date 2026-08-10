@@ -23,6 +23,7 @@ type DraftChapterInput = {
   title: string;
   pages: number;
   locked?: boolean;
+  body?: string;
 };
 
 type DraftProjectInput = {
@@ -125,6 +126,20 @@ function contentWords(value: string) {
   return value.toLowerCase().match(/[\p{L}\p{N}’'-]+/gu) ?? [];
 }
 
+function evidenceSignature(value: string) {
+  return contentWords(value).slice(0, 42).join(" ");
+}
+
+function existingEvidence(body = "") {
+  const plain = body
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&(?:nbsp|amp|quot|#039);/g, " ")
+    .replace(/\s+/g, " ");
+  return usefulSentences(plain).map(evidenceSignature).filter((signature) => signature.length > 45);
+}
+
 function chapterKeywords(title: string, terms: string[]) {
   const titleWords = contentWords(title).filter((word) => word.length > 3 && !stopWords.has(word));
   return [...new Set([...titleWords, ...terms.filter((term) => term.length > 3).slice(0, 4)])];
@@ -157,7 +172,7 @@ function selectChapterPages(pageTexts: string[], chapter: DraftChapterInput, ind
   return { selected, keywords };
 }
 
-function buildSourceDraft(pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput) {
+function buildSourceDraft(pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput, usedEvidence: Set<string>) {
   const { selected, keywords } = selectChapterPages(pageTexts, chapter, index, total, project.sourceTerms ?? []);
   const targetWords = Math.max(700, Math.min(2000, chapter.pages * 190));
   const seen = new Set<string>();
@@ -168,8 +183,9 @@ function buildSourceDraft(pageTexts: string[], chapter: DraftChapterInput, index
       .sort((a, b) => b.score - a.score)
       .slice(0, 14);
     for (const item of ranked) {
-      const signature = item.sentence.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").slice(0, 140);
+      const signature = evidenceSignature(item.sentence);
       if (seen.has(signature)) continue;
+      if (usedEvidence.has(signature)) continue;
       seen.add(signature);
       evidence.push({ page: entry.pageIndex + 1, sentence: item.sentence });
     }
@@ -182,6 +198,7 @@ function buildSourceDraft(pageTexts: string[], chapter: DraftChapterInput, index
   let words = 0;
   for (const item of evidence) {
     chosen.push(item);
+    usedEvidence.add(evidenceSignature(item.sentence));
     words += contentWords(item.sentence).length;
     if (words >= targetWords) break;
   }
@@ -444,9 +461,15 @@ async function draftApi(request: Request, env: Env) {
   if (!allowedExtensions.has(extension)) return json({ error: "This source format cannot be drafted" }, 415);
   const extracted = await extractSourcePages(bytes, extension);
   const requested = new Set(project.chapterIds.map(Number));
+  const usedEvidence = new Set<string>();
+  for (const chapter of project.chapters) {
+    if (!requested.has(chapter.id) || chapter.locked) {
+      for (const signature of existingEvidence(chapter.body)) usedEvidence.add(signature);
+    }
+  }
   const chapters = project.chapters.map((chapter, index) => {
     if (!requested.has(chapter.id) || chapter.locked) return null;
-    return buildSourceDraft(extracted.pageTexts, chapter, index, project.chapters.length, project);
+    return buildSourceDraft(extracted.pageTexts, chapter, index, project.chapters.length, project, usedEvidence);
   }).filter(Boolean);
   if (!chapters.length) return json({ error: "No unlocked chapters were selected" }, 400);
   return json({ chapters, sourcePages: extracted.pages });
