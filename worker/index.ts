@@ -75,7 +75,7 @@ function analyseText(text: string) {
     frequency.set(word, (frequency.get(word) ?? 0) + 1);
   }
   const terms = [...frequency.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([word]) => word);
-  return { words: words.length, headings, terms, preview: compact.slice(0, 1200) };
+  return { words: words.length, headings, terms, preview: compact.slice(0, 12000) };
 }
 
 async function projectsApi(request: Request, env: Env) {

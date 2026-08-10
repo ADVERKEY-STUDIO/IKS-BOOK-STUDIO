@@ -2,7 +2,7 @@
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 
-type View = "dashboard" | "wizard" | "analysis" | "editor";
+type View = "dashboard" | "wizard" | "analysis" | "brief" | "editor";
 
 type Chapter = {
   id: number;
@@ -24,6 +24,7 @@ type Project = {
   sourceQuality: string;
   sourceHeadings: string[];
   sourceTerms: string[];
+  sourcePreview: string;
   audience: string;
   readingLevel: string;
   tone: string;
@@ -35,6 +36,7 @@ type Project = {
   adaptation: string;
   chapters: Chapter[];
   editorialPreferences: string[];
+  briefApproved: boolean;
   updatedAt: string;
 };
 
@@ -49,6 +51,7 @@ const seedProject: Project = {
   sourceQuality: "Good",
   sourceHeadings: ["Foundations and Context", "Knowledge and Learning", "Leadership and Welfare", "Economy and Resources", "Strategy and Diplomacy"],
   sourceTerms: ["governance", "learning", "welfare", "strategy", "dharma", "economy", "leadership", "statecraft"],
+  sourcePreview: "The Arthashastra presents knowledge, discipline, public welfare, economic organisation and statecraft as connected responsibilities. It asks how institutions can be designed, how leaders should be educated, and how prosperity can be protected through careful administration.",
   audience: "Young adults (15–18)",
   readingLevel: "Accessible academic",
   tone: "Clear and engaging",
@@ -59,6 +62,7 @@ const seedProject: Project = {
   imageFrequency: "Medium — 1 per 3 pages",
   adaptation: "Faithful, reader-friendly adaptation",
   editorialPreferences: ["Clear sentences", "Preserve specialist terms", "Explain Sanskrit words on first use"],
+  briefApproved: true,
   updatedAt: "Today",
   chapters: [
     {
@@ -116,6 +120,7 @@ const emptyProject: Project = {
   sourceQuality: "Pending",
   sourceHeadings: [],
   sourceTerms: [],
+  sourcePreview: "",
   audience: "General readers (18+)",
   readingLevel: "Clear and accessible",
   maxPages: 60,
@@ -123,9 +128,27 @@ const emptyProject: Project = {
     { id: 1, title: "Opening chapter", pages: 10, status: "planned", locked: false, body: `<p class="chapter-kicker">CHAPTER ONE</p><h1>Opening chapter</h1><p class="chapter-deck">Your generated chapter will appear here after the book brief is approved.</p>` },
   ],
   editorialPreferences: [],
+  briefApproved: false,
 };
 
 const wizardSteps = ["Source", "Reader", "Writing", "Design", "Review"];
+
+function normalizeProject(saved: Project): Project {
+  return {
+    ...emptyProject,
+    ...saved,
+    sourcePreview: saved.sourcePreview ?? "",
+    briefApproved: saved.briefApproved ?? false,
+    chapters: (saved.chapters ?? []).map((chapter, index) => ({
+      id: chapter.id ?? index + 1,
+      title: chapter.title || `Chapter ${index + 1}`,
+      pages: chapter.pages || 6,
+      status: chapter.status || "planned",
+      locked: Boolean(chapter.locked),
+      body: chapter.body || `<p class="chapter-kicker">CHAPTER ${index + 1}</p><h1>${chapter.title || `Chapter ${index + 1}`}</h1>`,
+    })),
+  };
+}
 
 function makeId() {
   const bytes = new Uint8Array(12);
@@ -141,6 +164,35 @@ function saveTextFile(name: string, contents: string, type: string) {
   anchor.download = name;
   anchor.click();
   URL.revokeObjectURL(href);
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#039;");
+}
+
+function sourceSentences(project: Project) {
+  const sentences = project.sourcePreview
+    .replace(/\s+/g, " ")
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 55 && sentence.length < 420 && !/copyright|isbn|contents/i.test(sentence));
+  return sentences.length ? sentences : [`This chapter will be developed from the reviewed source material in ${project.source}.`];
+}
+
+function createChapterDraft(project: Project, chapter: Chapter, index: number): Chapter {
+  const sentences = sourceSentences(project);
+  const first = escapeHtml(sentences[(index * 2) % sentences.length]);
+  const second = escapeHtml(sentences[(index * 2 + 1) % sentences.length]);
+  const term = escapeHtml(project.sourceTerms[index % Math.max(1, project.sourceTerms.length)] || "key idea");
+  const nextTerm = escapeHtml(project.sourceTerms[(index + 1) % Math.max(1, project.sourceTerms.length)] || "context");
+  const title = escapeHtml(chapter.title);
+  const audience = escapeHtml(project.audience.toLowerCase());
+  const visual = escapeHtml(`${project.aesthetic} editorial illustration connecting ${chapter.title} with ${term}; ${project.imageFrequency.toLowerCase()}`);
+  return {
+    ...chapter,
+    status: "draft",
+    body: `<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${title}</h1><p class="chapter-deck">A ${escapeHtml(project.tone.toLowerCase())} exploration of this part of the source, shaped for ${audience}.</p><h2>The central idea</h2><p>${first}</p><p>${second}</p><blockquote>This draft remains anchored to the uploaded source and is ready for an editor to refine.</blockquote><h2>${term.charAt(0).toUpperCase() + term.slice(1)} in context</h2><p>This section connects <strong>${term}</strong> with <strong>${nextTerm}</strong>. Use the source-reference view during editing to verify names, dates, quotations and specialist terminology before approval.</p><div class="illustration"><span>ILLUSTRATION DIRECTION</span><strong>${title}</strong><small>${visual}</small></div><div class="takeaway"><b>KEY TAKEAWAYS</b><p>Review the source evidence, explain specialist language for the selected reader, and preserve the meaning while improving clarity.</p></div>`,
+  };
 }
 
 export default function Home() {
@@ -166,8 +218,9 @@ export default function Home() {
       .then((response) => response.ok ? response.json() : null)
       .then((data: { projects: Project[] } | null) => {
         if (data?.projects.length) {
-          setProjects(data.projects);
-          setProject(data.projects[0]);
+          const restored = data.projects.map(normalizeProject);
+          setProjects(restored);
+          setProject(restored[0]);
         }
       }).catch(() => undefined);
   }, []);
@@ -205,7 +258,7 @@ export default function Home() {
       form.set("file", file);
       form.set("projectId", project.id || makeId());
       const response = await fetch("/api/source", { method: "POST", body: form });
-      const data = await response.json() as { source?: { name: string; size: number; objectKey: string; pages: number; words: number; headings: string[]; terms: string[]; quality: string }; error?: string };
+      const data = await response.json() as { source?: { name: string; size: number; objectKey: string; pages: number; words: number; headings: string[]; terms: string[]; preview: string; quality: string }; error?: string };
       if (!response.ok || !data.source) throw new Error(data.error || "Upload failed");
       const headings = data.source.headings.length ? data.source.headings.slice(0, 10) : ["Opening chapter", "Core ideas", "Applications and examples", "Closing reflections"];
       const chapterBudget = Math.max(4, Math.floor((project.maxPages - 8) / headings.length));
@@ -218,6 +271,8 @@ export default function Home() {
         sourceQuality: data.source.quality,
         sourceHeadings: headings,
         sourceTerms: data.source.terms,
+        sourcePreview: data.source.preview,
+        briefApproved: false,
         chapters: headings.map((title, index) => ({ id: index + 1, title, pages: chapterBudget, status: "planned", locked: false, body: `<p class="chapter-kicker">CHAPTER ${index + 1}</p><h1>${title}</h1><p class="chapter-deck">This chapter is ready for adaptation from the uploaded source.</p>` })),
       });
       notify(`${file.name} analysed successfully`);
@@ -292,6 +347,20 @@ export default function Home() {
     notify("Editable document downloaded");
   }
 
+  function updateChapter(chapterId: number, patch: Partial<Chapter>) {
+    patchProject({ chapters: project.chapters.map((chapter) => chapter.id === chapterId ? { ...chapter, ...patch } : chapter) });
+  }
+
+  function prepareDraft(scope: "sample" | "all" | "active") {
+    const activeIndex = project.chapters.findIndex((chapter) => chapter.id === activeChapter);
+    const nextChapters = project.chapters.map((chapter, index) => {
+      const shouldDraft = scope === "all" || (scope === "sample" && index === 0) || (scope === "active" && index === activeIndex);
+      return shouldDraft && !chapter.locked ? createChapterDraft(project, chapter, index) : chapter;
+    });
+    patchProject({ chapters: nextChapters });
+    notify(scope === "all" ? "All chapter drafts prepared" : "Chapter draft prepared");
+  }
+
   if (view === "dashboard") return <Dashboard projects={projects} onNew={startNewBook} onOpen={(selected) => { setProject(selected); setView("editor"); setActiveChapter(selected.chapters[0]?.id ?? 1); }} />;
 
   return (
@@ -300,6 +369,7 @@ export default function Home() {
         <button className="brand" onClick={() => setView("dashboard")}><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></button>
         <div className="current-project"><i /> <span><strong>{project.title}</strong><small>{project.source}</small></span></div>
         <div className="top-actions">
+          {view === "editor" && <button onClick={() => setView("brief")}>☷ <span>Book plan</span></button>}
           <button onClick={openVersions}>↺ <span>Versions</span></button>
           <button onClick={saveProject}>✓ <span>Save</span></button>
           <button onClick={() => setShowPreview(true)}>Preview</button>
@@ -308,8 +378,9 @@ export default function Home() {
       </header>
 
       {view === "wizard" && <Wizard step={wizardStep} project={project} sourceBusy={sourceBusy} onPatch={patchProject} onFile={handleFile} onBack={() => wizardStep === 0 ? setView("dashboard") : setWizardStep((step) => step - 1)} onNext={() => wizardStep < 4 ? setWizardStep((step) => step + 1) : setView("analysis")} />}
-      {view === "analysis" && <Analysis project={project} onBack={() => { setView("wizard"); setWizardStep(4); }} onContinue={() => { setActiveChapter(project.chapters[0]?.id ?? 1); setView("editor"); }} />}
-      {view === "editor" && <Editor project={project} active={active} activeId={activeChapter} allocated={allocatedPages} onSelect={setActiveChapter} onSaveBody={saveChapterBody} editorRef={editorRef} onAi={aiAction} onRemember={rememberPreference} onToggleLock={() => patchProject({ chapters: project.chapters.map((chapter) => chapter.id === active?.id ? { ...chapter, locked: !chapter.locked } : chapter) })} />}
+      {view === "analysis" && <Analysis project={project} onPatch={patchProject} onBack={() => { setView("wizard"); setWizardStep(4); }} onContinue={() => setView("brief")} />}
+      {view === "brief" && <BookBrief project={project} allocated={allocatedPages} onBack={() => setView("analysis")} onUpdateChapter={updateChapter} onPrepare={prepareDraft} onContinue={() => { patchProject({ briefApproved: true }); setActiveChapter(project.chapters[0]?.id ?? 1); setView("editor"); }} />}
+      {view === "editor" && <Editor project={project} active={active} activeId={activeChapter} allocated={allocatedPages} onSelect={setActiveChapter} onSaveBody={saveChapterBody} editorRef={editorRef} onAi={aiAction} onRemember={rememberPreference} onDraft={() => prepareDraft("active")} onToggleLock={() => patchProject({ chapters: project.chapters.map((chapter) => chapter.id === active?.id ? { ...chapter, locked: !chapter.locked } : chapter) })} />}
 
       {showPreview && <Preview project={project} onClose={() => setShowPreview(false)} onPrint={() => window.print()} />}
       {showVersions && <Versions versions={versions} onCreate={createVersion} onRestore={(snapshot) => { setProject(snapshot); setShowVersions(false); notify("Version restored"); }} onClose={() => setShowVersions(false)} />}
@@ -351,14 +422,32 @@ function Wizard({ step, project, sourceBusy, onPatch, onFile, onBack, onNext }: 
   </div>;
 }
 
-function Analysis({ project, onBack, onContinue }: { project: Project; onBack: () => void; onContinue: () => void }) {
+function Analysis({ project, onPatch, onBack, onContinue }: { project: Project; onPatch: (patch: Partial<Project>) => void; onBack: () => void; onContinue: () => void }) {
   const headings = project.sourceHeadings.length ? project.sourceHeadings : ["Opening chapter"];
-  return <main className="analysis-page"><button className="text-button" onClick={onBack}>← Change setup</button><p className="eyebrow">SOURCE ANALYSIS</p><h1>Your source is ready.</h1><p className="lead">Review the structure detected from this uploaded book before entering the editorial studio.</p><section className="stats"><div><span>PAGES</span><strong>{project.sourcePages || "—"}</strong></div><div><span>WORDS</span><strong>{project.sourceWords ? project.sourceWords.toLocaleString() : "Pending"}</strong></div><div><span>QUALITY</span><strong>{project.sourceQuality}</strong></div><div><span>OUTPUT LIMIT</span><strong>{project.maxPages}</strong></div></section><div className="analysis-grid"><section className="analysis-card"><header><div><p className="eyebrow">DETECTED OUTLINE</p><h2>{headings.length} chapter candidates</h2></div><span className="good">✓ Reviewable</span></header>{headings.map((heading, index) => <div className="heading-row" key={`${heading}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><input defaultValue={heading}/></div>)}</section><aside><div className="analysis-card"><p className="eyebrow">KEY TERMS</p><div className="tags">{(project.sourceTerms.length ? project.sourceTerms : ["analysis pending"]).map((term) => <span key={term}>{term}</span>)}</div></div><div className="analysis-card note"><p className="eyebrow">FRESH FOR EVERY BOOK</p><p>This analysis belongs only to <strong>{project.source}</strong>. Uploading another source begins again.</p></div></aside></div><footer className="analysis-footer"><span>You can change every chapter later.</span><button className="primary" onClick={onContinue}>Open Editorial Studio →</button></footer></main>;
+  const renameHeading = (index: number, title: string) => onPatch({
+    sourceHeadings: headings.map((heading, headingIndex) => headingIndex === index ? title : heading),
+    chapters: project.chapters.map((chapter, chapterIndex) => chapterIndex === index ? { ...chapter, title } : chapter),
+  });
+  return <main className="analysis-page"><button className="text-button" onClick={onBack}>← Change setup</button><p className="eyebrow">SOURCE ANALYSIS</p><h1>Your source is ready.</h1><p className="lead">Review the structure detected from this uploaded book before building the new book plan.</p><section className="stats"><div><span>PAGES</span><strong>{project.sourcePages || "—"}</strong></div><div><span>WORDS</span><strong>{project.sourceWords ? project.sourceWords.toLocaleString() : "Pending"}</strong></div><div><span>QUALITY</span><strong>{project.sourceQuality}</strong></div><div><span>OUTPUT LIMIT</span><strong>{project.maxPages}</strong></div></section><div className="analysis-grid"><section className="analysis-card"><header><div><p className="eyebrow">DETECTED OUTLINE</p><h2>{headings.length} chapter candidates</h2></div><span className="good">✓ Reviewable</span></header>{headings.map((heading, index) => <div className="heading-row" key={`${index}-${heading}`}><span>{String(index + 1).padStart(2, "0")}</span><input value={heading} onChange={(event) => renameHeading(index, event.target.value)}/></div>)}</section><aside><div className="analysis-card"><p className="eyebrow">KEY TERMS</p><div className="tags">{(project.sourceTerms.length ? project.sourceTerms : ["analysis pending"]).map((term) => <span key={term}>{term}</span>)}</div></div><div className="analysis-card note"><p className="eyebrow">FRESH FOR EVERY BOOK</p><p>This analysis belongs only to <strong>{project.source}</strong>. Uploading another source begins again.</p></div></aside></div><footer className="analysis-footer"><span>You can rename any detected chapter now or later.</span><button className="primary" onClick={onContinue}>Build book plan →</button></footer></main>;
 }
 
-function Editor({ project, active, activeId, allocated, onSelect, editorRef, onSaveBody, onAi, onRemember, onToggleLock }: { project: Project; active?: Chapter; activeId: number; allocated: number; onSelect: (id: number) => void; editorRef: React.RefObject<HTMLDivElement | null>; onSaveBody: () => void; onAi: (action: string) => void; onRemember: () => void; onToggleLock: () => void }) {
+function BookBrief({ project, allocated, onBack, onUpdateChapter, onPrepare, onContinue }: { project: Project; allocated: number; onBack: () => void; onUpdateChapter: (id: number, patch: Partial<Chapter>) => void; onPrepare: (scope: "sample" | "all" | "active") => void; onContinue: () => void }) {
+  const drafted = project.chapters.filter((chapter) => chapter.status !== "planned").length;
+  const first = project.chapters[0];
+  const overBudget = allocated > project.maxPages;
+  return <main className="brief-page">
+    <button className="text-button" onClick={onBack}>← Back to source analysis</button>
+    <header className="brief-hero"><div><p className="eyebrow">BOOK BRIEF & PAGE PLAN</p><h1>{project.title}</h1><p className="lead">A {project.bookType.toLowerCase()} for {project.audience.toLowerCase()}, adapted in a {project.tone.toLowerCase()} voice with a {project.aesthetic.toLowerCase()} visual direction.</p><div className="brief-chips"><span>{project.language}</span><span>{project.adaptation}</span><span>{project.imageFrequency}</span></div></div><aside><span>READER PROMISE</span><p>Make the source understandable, visually inviting and faithful enough for an editor to verify every important idea.</p></aside></header>
+    <div className="brief-layout"><section className="plan-card"><header><div><p className="eyebrow">STRUCTURE</p><h2>Chapter and page plan</h2></div><div className={overBudget ? "budget-pill warning" : "budget-pill"}>{allocated} / {project.maxPages} pages</div></header><div className="plan-head"><span>CHAPTER</span><span>TITLE</span><span>PAGES</span><span>STATE</span></div>{project.chapters.map((chapter, index) => <div className="plan-row" key={chapter.id}><span>{String(index + 1).padStart(2, "0")}</span><input value={chapter.title} onChange={(event) => onUpdateChapter(chapter.id, { title: event.target.value })}/><input aria-label={`Pages for ${chapter.title}`} type="number" min="2" max="30" value={chapter.pages} onChange={(event) => onUpdateChapter(chapter.id, { pages: Math.max(2, Number(event.target.value) || 2) })}/><b className={`draft-state ${chapter.status}`}>{chapter.status}</b></div>)}<footer><span>Includes 8 reserved pages for cover, contents, preface and references.</span>{overBudget && <strong>Reduce {allocated - project.maxPages} pages before approval.</strong>}</footer></section>
+      <aside className="generation-card"><p className="eyebrow">DRAFT ENGINE</p><h2>Prepare the manuscript</h2><p>Build an editable draft from this book’s extracted text, audience, tone and terminology. Approved or locked chapters are never overwritten.</p><div className="draft-progress"><span><b>{drafted}</b> of {project.chapters.length} drafted</span><i><b style={{ width: `${project.chapters.length ? drafted / project.chapters.length * 100 : 0}%` }}/></i></div><button className="secondary full" onClick={() => onPrepare("sample")}>Prepare sample chapter</button><button className="primary full" onClick={() => onPrepare("all")}>Prepare all chapter drafts</button><small>No OpenAI API key is used. Final rewriting and images remain editor-guided inside ChatGPT.</small></aside></div>
+    {first && <section className="sample-spread"><div className="sample-copy"><p className="eyebrow">SAMPLE SPREAD</p><span>CHAPTER 01</span><h2>{first.title}</h2><p>{first.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 420)}</p><button className="text-button" onClick={() => onPrepare("sample")}>{first.status === "planned" ? "Create this sample" : "Refresh sample draft"} →</button></div><div className="sample-art"><span>ILLUSTRATION DIRECTION</span><strong>{project.aesthetic}</strong><p>{first.title} · {project.imageFrequency}</p><b>✦</b></div></section>}
+    <footer className="brief-actions"><div><b>{overBudget ? "Page plan needs attention" : "Ready for editorial review"}</b><span>{drafted ? `${drafted} chapter draft${drafted === 1 ? "" : "s"} prepared` : "Prepare at least one chapter now, or begin with a blank structure."}</span></div><button className="primary" disabled={overBudget} onClick={onContinue}>Approve brief & open studio →</button></footer>
+  </main>;
+}
+
+function Editor({ project, active, activeId, allocated, onSelect, editorRef, onSaveBody, onAi, onRemember, onDraft, onToggleLock }: { project: Project; active?: Chapter; activeId: number; allocated: number; onSelect: (id: number) => void; editorRef: React.RefObject<HTMLDivElement | null>; onSaveBody: () => void; onAi: (action: string) => void; onRemember: () => void; onDraft: () => void; onToggleLock: () => void }) {
   if (!active) return null;
-  return <main className="editor-layout"><aside className="chapters"><header><p className="eyebrow">BOOK STRUCTURE</p><button>＋</button></header><div className="front-matter"><span>FM</span><div><b>Front matter</b><small>Cover · Contents · Preface</small></div></div>{project.chapters.map((chapter) => <button className={chapter.id === activeId ? "chapter active" : "chapter"} onClick={() => onSelect(chapter.id)} key={chapter.id}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small>{chapter.pages} pages · {chapter.status}</small></div><i>{chapter.locked ? "◆" : ""}</i></button>)}<div className="page-budget"><span><b>{allocated}</b> / {project.maxPages} pages</span><i><b style={{ width: `${Math.min(100, allocated / project.maxPages * 100)}%` }}/></i><small>{Math.max(0, project.maxPages - allocated)} pages available</small></div></aside><section className="canvas"><nav className="editor-tools"><div><button onClick={() => document.execCommand("bold")}><b>B</b></button><button onClick={() => document.execCommand("italic")}><i>I</i></button><button onClick={() => document.execCommand("formatBlock", false, "h2")}>H2</button><button onClick={() => document.execCommand("insertUnorderedList")}>• List</button></div><div className="chapter-meter"><span>{active.pages} target pages</span><i><b style={{ width: "67%" }}/></i><button onClick={onToggleLock}>{active.locked ? "◆ Locked" : "◇ Lock"}</button></div></nav><div className="page-stage"><article className="paper"><header><span>{project.title}</span><span>{project.aesthetic}</span></header><div className="ornament">✦</div><div key={active.id} ref={editorRef} className="book-copy" contentEditable={!active.locked} suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: active.body }}/><footer><span>{project.source}</span><span>{active.id}</span></footer></article></div><button className="save-float" onClick={onSaveBody}>✓ Save chapter</button></section><aside className="assistant"><nav><button className="active">✦<span>AI EDIT</span></button><button>◈<span>DESIGN</span></button><button>⌕<span>SOURCES</span></button></nav><div className="assistant-body"><div className="assistant-title"><span>✦</span><div><b>Editorial assistant</b><small>Select text, then choose an action.</small></div></div><p className="selection-tip">AI actions are copied to this ChatGPT conversation—no API key is used.</p><div className="ai-list">{["Simplify language", "Shorten selection", "Expand with examples", "Make age-appropriate", "Improve storytelling", "Check against source", "Suggest an illustration"].map((action) => <button onClick={() => onAi(action)} key={action}><span>✦</span>{action}<i>→</i></button>)}</div><div className="memory-box"><p className="eyebrow">BOOK MEMORY</p><p>{project.editorialPreferences.length ? project.editorialPreferences.join(" · ") : "No saved preferences yet"}</p><button onClick={onRemember}>＋ Remember a preference</button></div></div></aside></main>;
+  return <main className="editor-layout"><aside className="chapters"><header><p className="eyebrow">BOOK STRUCTURE</p><button>＋</button></header><div className="front-matter"><span>FM</span><div><b>Front matter</b><small>Cover · Contents · Preface</small></div></div>{project.chapters.map((chapter) => <button className={chapter.id === activeId ? "chapter active" : "chapter"} onClick={() => onSelect(chapter.id)} key={chapter.id}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small>{chapter.pages} pages · {chapter.status}</small></div><i>{chapter.locked ? "◆" : ""}</i></button>)}<div className="page-budget"><span><b>{allocated}</b> / {project.maxPages} pages</span><i><b style={{ width: `${Math.min(100, allocated / project.maxPages * 100)}%` }}/></i><small>{Math.max(0, project.maxPages - allocated)} pages available</small></div></aside><section className="canvas"><nav className="editor-tools"><div><button onClick={() => document.execCommand("bold")}><b>B</b></button><button onClick={() => document.execCommand("italic")}><i>I</i></button><button onClick={() => document.execCommand("formatBlock", false, "h2")}>H2</button><button onClick={() => document.execCommand("insertUnorderedList")}>• List</button></div><div className="chapter-meter"><span>{active.pages} target pages</span><i><b style={{ width: active.status === "planned" ? "18%" : "67%" }}/></i><button onClick={onToggleLock}>{active.locked ? "◆ Locked" : "◇ Lock"}</button></div></nav><div className="page-stage"><article className="paper"><header><span>{project.title}</span><span>{project.aesthetic}</span></header><div className="ornament">✦</div><div key={active.id} ref={editorRef} className="book-copy" contentEditable={!active.locked} suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: active.body }}/><footer><span>{project.source}</span><span>{active.id}</span></footer></article></div><button className="save-float" onClick={onSaveBody}>✓ Save chapter</button></section><aside className="assistant"><nav><button className="active">✦<span>AI EDIT</span></button><button>◈<span>DESIGN</span></button><button>⌕<span>SOURCES</span></button></nav><div className="assistant-body"><div className="assistant-title"><span>✦</span><div><b>Editorial assistant</b><small>Select text, then choose an action.</small></div></div>{active.status === "planned" && <button className="draft-chapter-button" onClick={onDraft}>✦ Prepare this chapter draft</button>}<p className="selection-tip">AI actions are copied to this ChatGPT conversation—no API key is used.</p><div className="ai-list">{["Simplify language", "Shorten selection", "Expand with examples", "Make age-appropriate", "Improve storytelling", "Check against source", "Suggest an illustration"].map((action) => <button onClick={() => onAi(action)} key={action}><span>✦</span>{action}<i>→</i></button>)}</div><div className="memory-box"><p className="eyebrow">BOOK MEMORY</p><p>{project.editorialPreferences.length ? project.editorialPreferences.join(" · ") : "No saved preferences yet"}</p><button onClick={onRemember}>＋ Remember a preference</button></div></div></aside></main>;
 }
 
 function Preview({ project, onClose, onPrint }: { project: Project; onClose: () => void; onPrint: () => void }) {
