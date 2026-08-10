@@ -5,6 +5,8 @@ import test from "node:test";
 test("printed chapters start on clean A4 pages", async () => {
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   assert.match(css, /\.preview-scroll>article\{[^}]*break-before:page[^}]*page-break-before:always/);
+  assert.match(css, /\.preview-scroll>article\{[^}]*break-after:auto[^}]*page-break-after:auto/);
+  assert.doesNotMatch(css, /\.preview-scroll>article\{[^}]*break-after:page[^}]*page-break-after:always/);
   assert.match(css, /\.preview-body p[^}]*orphans:3;widows:3/);
   assert.match(css, /\.source-draft-notice[^}]*break-inside:avoid-page/);
 });
