@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { generationProfileKey, modeParagraphParts } from "../lib/child-summary";
 
 type View = "dashboard" | "wizard" | "analysis" | "brief" | "editor";
 
@@ -20,6 +21,7 @@ type Chapter = {
   imageAlt?: string;
   visualType?: string;
   wordCount?: number;
+  generationProfile?: string;
 };
 
 type Project = {
@@ -523,6 +525,7 @@ function reconcileOriginalChapters(project: Project, titles: string[], sections:
       imageAlt: existing?.imageAlt,
       visualType: existing?.visualType,
       wordCount: existing?.wordCount,
+      generationProfile: existing?.generationProfile,
     };
   });
 }
@@ -587,6 +590,7 @@ function normalizeProject(saved: Project): Project {
       imageAlt: chapter.imageAlt,
       visualType: chapter.visualType,
       wordCount: chapter.wordCount,
+      generationProfile: chapter.generationProfile,
     };
   });
   const hierarchy = repairChapterHierarchy(normalizedChapters);
@@ -662,18 +666,24 @@ function createChapterDraft(project: Project, chapter: Chapter, index: number): 
   const sentences = sourceSentences(project);
   const sourceRef = project.sourceSections[index % Math.max(1, project.sourceSections.length)];
   const refSentences = sourceRef?.excerpt.split(/(?<=[.!?])\s+/).filter(Boolean) ?? [];
-  const first = escapeHtml(refSentences[0] || sentences[(index * 2) % sentences.length]);
-  const second = escapeHtml(refSentences[1] || sentences[(index * 2 + 1) % sentences.length]);
-  const term = escapeHtml(project.sourceTerms[index % Math.max(1, project.sourceTerms.length)] || "key idea");
-  const nextTerm = escapeHtml(project.sourceTerms[(index + 1) % Math.max(1, project.sourceTerms.length)] || "context");
+  const first = refSentences[0] || sentences[(index * 2) % sentences.length];
+  const second = refSentences[1] || sentences[(index * 2 + 1) % sentences.length];
+  const rawTerm = project.sourceTerms[index % Math.max(1, project.sourceTerms.length)] || "key idea";
+  const rawNextTerm = project.sourceTerms[(index + 1) % Math.max(1, project.sourceTerms.length)] || "context";
+  const term = escapeHtml(rawTerm);
+  const nextTerm = escapeHtml(rawNextTerm);
   const title = escapeHtml(chapter.title);
   const writing = childWritingProfile(project.tone);
-  const visual = escapeHtml(`${project.illustrationStyle} in a ${project.aesthetic.toLowerCase()} direction, connecting ${chapter.title} with ${term}; ${project.imageFrequency.toLowerCase()}`);
+  const firstParts = modeParagraphParts({ sentence: first, tone: project.tone, audience: project.audience, focus: rawTerm, related: rawNextTerm, chapterTitle: chapter.title, paragraphIndex: 0 });
+  const secondParts = modeParagraphParts({ sentence: second, tone: project.tone, audience: project.audience, focus: rawNextTerm, related: rawTerm, chapterTitle: chapter.title, paragraphIndex: 1 });
+  const fallbackParagraph = (parts: ReturnType<typeof modeParagraphParts>) => `<p class="mode-summary mode-summary-${normalizedTitle(writing.value).replace(/[^a-z]+/g, "-")}"><span class="reading-bridge">${escapeHtml(parts.lead)}</span><span class="mode-setup">${escapeHtml(parts.setup)}</span> <span class="mode-evidence">${escapeHtml(parts.evidence)}</span> <span class="mode-response">${escapeHtml(parts.response)}</span></p>`;
+  const visual = escapeHtml(`${project.illustrationStyle} in a ${project.aesthetic.toLowerCase()} direction, connecting ${chapter.title} with ${rawTerm}; ${project.imageFrequency.toLowerCase()}`);
   return {
     ...chapter,
     status: "draft",
     sourceRefs: sourceRef ? [sourceRef] : chapter.sourceRefs,
-    body: `<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${title}</h1><div class="child-opening child-opening-${normalizedTitle(writing.value).replace(/[^a-z]+/g, "-")}"><b>${writing.hookLabel}</b><p>${writing.hook}</p></div><h2>${writing.sections[0]}</h2><p>${first}</p><h2>${writing.sections[1]}</h2><p>${second}</p><h2>${writing.sections[2]}</h2><p>This section connects <strong>${term}</strong> with <strong>${nextTerm}</strong> so the chapter’s big idea is easier to see.</p><div class="illustration"><span>ILLUSTRATION DIRECTION</span><strong>${title}</strong><small>${visual}</small></div><div class="takeaway child-activity"><b>${writing.activityLabel}</b><p>${writing.activity}</p></div>${sourceRef ? `<p class="source-note">Source note: ${escapeHtml(sourceRef.title)}, p. ${sourceRef.page}</p>` : ""}`,
+    body: `<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${title}</h1><div class="child-opening child-opening-${normalizedTitle(writing.value).replace(/[^a-z]+/g, "-")}"><b>${writing.hookLabel}</b><p>${writing.hook}</p></div><h2>${writing.sections[0]}</h2>${fallbackParagraph(firstParts)}<h2>${writing.sections[1]}</h2>${fallbackParagraph(secondParts)}<h2>${writing.sections[2]}</h2><p>This section connects <strong>${term}</strong> with <strong>${nextTerm}</strong> so the chapter’s big idea is easier to see.</p><div class="illustration"><span>ILLUSTRATION DIRECTION</span><strong>${title}</strong><small>${visual}</small></div><div class="takeaway child-activity"><b>${writing.activityLabel}</b><p>${writing.activity}</p></div>${sourceRef ? `<p class="source-note">Source note: ${escapeHtml(sourceRef.title)}, p. ${sourceRef.page}</p>` : ""}`,
+    generationProfile: generationProfileKey(project.audience, project.tone, project.language),
   };
 }
 
@@ -1101,7 +1111,7 @@ export default function Home() {
       {view === "brief" && <BookBrief project={project} allocated={allocatedPages} draftBusy={draftBusy} onBack={() => setView("analysis")} onUpdateChapter={updateChapter} onPrepare={prepareDraft} onContinue={() => { patchProject({ briefApproved: true }); setActiveChapter(project.chapters[0]?.id ?? 1); setView("editor"); }} />}
       {view === "editor" && <Editor project={project} active={active} activeId={activeChapter} allocated={allocatedPages} draftBusy={draftBusy} onSelect={setActiveChapter} onSaveBody={saveChapterBody} editorRef={editorRef} onAi={aiAction} onRemember={rememberPreference} onDraft={() => prepareDraft("active")} onToggleLock={() => patchProject({ chapters: project.chapters.map((chapter) => chapter.id === active?.id ? { ...chapter, locked: !chapter.locked } : chapter) })} onAddChapter={addChapter} onUploadImage={uploadChapterImage} onPatchProject={patchProject} onUpdateChapter={updateChapter} />}
 
-      {showPreview && <Preview project={project} draftBusy={draftBusy} onFill={() => prepareDraft("thin")} onClose={() => setShowPreview(false)} onPrint={() => window.print()} />}
+      {showPreview && <Preview project={project} draftBusy={draftBusy} onFill={() => prepareDraft("thin")} onRefresh={() => prepareDraft("all")} onClose={() => setShowPreview(false)} onPrint={() => window.print()} />}
       {showVersions && <Versions versions={versions} onCreate={createVersion} onRestore={(snapshot) => { setProject(snapshot); setShowVersions(false); notify("Version restored"); }} onClose={() => setShowVersions(false)} />}
       {aiRequest && <AiRoundTrip request={aiRequest} onChange={(result) => setAiRequest({ ...aiRequest, result })} onClose={() => setAiRequest(null)} onApply={applyAiResult} />}
       {toast && <div className="toast">✓ {toast}</div>}
@@ -1218,12 +1228,14 @@ function AiRoundTrip({ request, onChange, onClose, onApply }: { request: { actio
   return <div className="modal-backdrop"><section className="ai-modal"><header><div><p className="eyebrow">CHATGPT EDIT</p><h2>{request.action}</h2></div><button onClick={onClose}>×</button></header><ol><li><button className="primary" onClick={openChatGPT}>Open this edit in ChatGPT ↗</button><small>The instruction is also copied automatically.</small></li><li><label>Paste ChatGPT’s revised text here<textarea value={request.result} onChange={(e) => onChange(e.target.value)} placeholder="Paste the approved revision…"/></label></li></ol><footer><button className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={!request.result.trim()} onClick={onApply}>Apply and save revision</button></footer></section></div>;
 }
 
-function Preview({ project, draftBusy, onFill, onClose, onPrint }: { project: Project; draftBusy: boolean; onFill: () => void; onClose: () => void; onPrint: () => void }) {
+function Preview({ project, draftBusy, onFill, onRefresh, onClose, onPrint }: { project: Project; draftBusy: boolean; onFill: () => void; onRefresh: () => void; onClose: () => void; onPrint: () => void }) {
   const thinChapters = project.chapters.filter((chapter) => chapterWordCount(chapter) < 350 && !chapter.locked);
+  const selectedProfile = generationProfileKey(project.audience, project.tone, project.language);
+  const staleChapters = project.chapters.filter((chapter) => !chapter.locked && chapterWordCount(chapter) >= 350 && chapter.generationProfile !== selectedProfile);
   const printable = useMemo(() => printableChapters(project.chapters), [project.chapters]);
   const worldClass = `world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")}`;
   const ageClass = `age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}`;
-  return <div className="modal-backdrop"><section className="preview-modal"><header><div><p className="eyebrow">FINAL CHILDREN’S BOOK PREVIEW</p><h2>{project.title}</h2></div><div>{thinChapters.length > 0 && <button className="fill-chapters" disabled={draftBusy} onClick={onFill}>{draftBusy ? "Building chapters…" : `Fill ${thinChapters.length} short chapter${thinChapters.length === 1 ? "" : "s"}`}</button>}<button onClick={onPrint}>Print / Save PDF</button><button onClick={onClose}>×</button></div></header>{(thinChapters.length > 0 || printable.duplicatesRemoved > 0) && <div className="preview-warning"><b>{thinChapters.length > 0 ? `${thinChapters.length} chapter${thinChapters.length === 1 ? " is" : "s are"} still too short.` : "Repeated content repaired."}</b><span>{printable.duplicatesRemoved > 0 ? `${printable.duplicatesRemoved} repeated paragraph${printable.duplicatesRemoved === 1 ? " was" : "s were"} omitted from this preview and PDF.` : "Fill the short chapters from the uploaded source before exporting."}</span></div>}<div className="preview-scroll"><article className={`preview-cover ${worldClass}`}><p>{project.bookType} · {project.audience}</p><h1>{project.title}</h1><span>Adapted from {project.source}</span><b>✦</b></article><article className={`preview-page contents-page ${worldClass}`}><span>CONTENTS</span><h2>Inside this book</h2><ol>{printable.chapters.map((chapter, index) => <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{chapter.pages} pages</i></li>)}</ol></article>{printable.chapters.map((chapter) => <article className={`preview-page chapter-preview ${worldClass} ${ageClass}${chapter.imageUrl ? " has-chapter-image" : ""}`} key={chapter.id}><header className="print-chapter-header"><span>CHAPTER {chapter.id}</span><span>{project.tone.toUpperCase()}</span></header><h2>{chapter.title}</h2><div className="preview-body" dangerouslySetInnerHTML={{ __html: chapter.body }}/>{chapter.imageUrl && <figure className="chapter-image"><img src={chapter.imageUrl} alt={chapter.imageAlt || chapter.imageCaption || chapter.title}/><figcaption>{chapter.imageCaption || chapter.title}</figcaption></figure>}{chapter.sourceRefs.length > 0 && <div className="preview-sources"><b>EDITOR’S SOURCE NOTES</b>{chapter.sourceRefs.map((ref, index) => <p key={`${ref.title}-${index}`}>{ref.title}, p. {ref.page || "—"}</p>)}</div>}</article>)}<article className={`preview-page backmatter ${worldClass}`}><span>EDITORIAL NOTES</span><h2>References and production brief</h2><p>Adapted from <b>{project.source}</b>. Citation approach: {project.citationStyle}.</p><p>Designed in the {project.aesthetic.toLowerCase()} book world with {project.illustrationStyle.toLowerCase()} visuals for {project.audience.toLowerCase()}.</p><h3>Remembered editorial decisions</h3><ul>{project.editorialPreferences.map((preference) => <li key={preference}>{preference}</li>)}</ul></article></div></section></div>;
+  return <div className="modal-backdrop"><section className="preview-modal"><header><div><p className="eyebrow">FINAL CHILDREN’S BOOK PREVIEW</p><h2>{project.title}</h2></div><div>{staleChapters.length > 0 ? <button className="fill-chapters" disabled={draftBusy} onClick={onRefresh}>{draftBusy ? "Rewriting chapters…" : `Apply ${project.tone} writing`}</button> : thinChapters.length > 0 && <button className="fill-chapters" disabled={draftBusy} onClick={onFill}>{draftBusy ? "Building chapters…" : `Fill ${thinChapters.length} short chapter${thinChapters.length === 1 ? "" : "s"}`}</button>}<button onClick={onPrint}>Print / Save PDF</button><button onClick={onClose}>×</button></div></header>{(staleChapters.length > 0 || thinChapters.length > 0 || printable.duplicatesRemoved > 0) && <div className="preview-warning"><b>{staleChapters.length > 0 ? `${staleChapters.length} chapter${staleChapters.length === 1 ? " needs" : "s need"} the selected writing style.` : thinChapters.length > 0 ? `${thinChapters.length} chapter${thinChapters.length === 1 ? " is" : "s are"} still too short.` : "Repeated content repaired."}</b><span>{staleChapters.length > 0 ? `Rebuild the writing as ${project.tone.toLowerCase()} for ${project.audience.toLowerCase()}; locked chapters will stay unchanged.` : printable.duplicatesRemoved > 0 ? `${printable.duplicatesRemoved} repeated paragraph${printable.duplicatesRemoved === 1 ? " was" : "s were"} omitted from this preview and PDF.` : "Fill the short chapters from the uploaded source before exporting."}</span></div>}<div className="preview-scroll"><article className={`preview-cover ${worldClass}`}><p>{project.bookType} · {project.audience}</p><h1>{project.title}</h1><span>Adapted from {project.source}</span><b>✦</b></article><article className={`preview-page contents-page ${worldClass}`}><span>CONTENTS</span><h2>Inside this book</h2><ol>{printable.chapters.map((chapter, index) => <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{chapter.pages} pages</i></li>)}</ol></article>{printable.chapters.map((chapter) => <article className={`preview-page chapter-preview ${worldClass} ${ageClass}${chapter.imageUrl ? " has-chapter-image" : ""}`} key={chapter.id}><header className="print-chapter-header"><span>CHAPTER {chapter.id}</span><span>{project.tone.toUpperCase()}</span></header><h2>{chapter.title}</h2><div className="preview-body" dangerouslySetInnerHTML={{ __html: chapter.body }}/>{chapter.imageUrl && <figure className="chapter-image"><img src={chapter.imageUrl} alt={chapter.imageAlt || chapter.imageCaption || chapter.title}/><figcaption>{chapter.imageCaption || chapter.title}</figcaption></figure>}{chapter.sourceRefs.length > 0 && <div className="preview-sources"><b>EDITOR’S SOURCE NOTES</b>{chapter.sourceRefs.map((ref, index) => <p key={`${ref.title}-${index}`}>{ref.title}, p. {ref.page || "—"}</p>)}</div>}</article>)}<article className={`preview-page backmatter ${worldClass}`}><span>EDITORIAL NOTES</span><h2>References and production brief</h2><p>Adapted from <b>{project.source}</b>. Citation approach: {project.citationStyle}.</p><p>Designed in the {project.aesthetic.toLowerCase()} book world with {project.illustrationStyle.toLowerCase()} visuals for {project.audience.toLowerCase()}.</p><h3>Remembered editorial decisions</h3><ul>{project.editorialPreferences.map((preference) => <li key={preference}>{preference}</li>)}</ul></article></div></section></div>;
 }
 
 function Versions({ versions, onCreate, onRestore, onClose }: { versions: { label: string; date: string; snapshot: Project }[]; onCreate: () => void; onRestore: (project: Project) => void; onClose: () => void }) {

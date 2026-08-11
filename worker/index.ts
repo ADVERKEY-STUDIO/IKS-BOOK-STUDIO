@@ -4,6 +4,7 @@ import handler from "vinext/server/app-router-entry";
 import mammoth from "mammoth";
 import { extractText, getDocumentProxy } from "unpdf";
 import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, TextRun } from "docx";
+import { childWritingMode, generationProfileKey, modeEvidenceOrder, modeParagraphParts } from "../lib/child-summary";
 
 interface Env {
   ASSETS: Fetcher;
@@ -223,8 +224,8 @@ function selectChapterPages(pageTexts: string[], chapter: DraftChapterInput, ind
 }
 
 function childWritingProfile(tone = "") {
-  const key = tone.toLowerCase();
-  if (key.includes("story")) return {
+  const mode = childWritingMode(tone);
+  if (mode === "story-journey") return {
     id: "story-journey",
     hookLabel: "STEP INTO THE STORY",
     hook: "Imagine entering the world of this chapter. Each discovery will reveal another part of the source.",
@@ -233,7 +234,7 @@ function childWritingProfile(tone = "") {
     activityLabel: "STORY PAUSE",
     activity: "What would you notice, ask or do if you were part of this chapter’s world?",
   };
-  if (key.includes("friendly") || key.includes("warm") || key.includes("clear")) return {
+  if (mode === "friendly-guide") return {
     id: "friendly-guide",
     hookLabel: "LET’S BEGIN",
     hook: "We will unpack this idea together, using clear steps and a helpful word guide.",
@@ -283,13 +284,15 @@ function buildSourceDraft(pageTexts: string[], chapter: DraftChapterInput, index
     for (const sentence of usefulSentences(pageTexts.join(" ")).slice(0, 24)) evidence.push({ page: 0, sentence });
   }
 
+  const orderedEvidence = modeEvidenceOrder(evidence, project.tone ?? "", keywords);
   const chosen: typeof evidence = [];
   let words = 0;
-  for (const item of evidence) {
+  const evidenceBudgetRatio = writing.id === "story-journey" ? .58 : writing.id === "curious-explorer" ? .68 : .78;
+  for (const item of orderedEvidence) {
     chosen.push(item);
     usedEvidence.add(evidenceSignature(item.sentence));
     words += contentWords(item.sentence).length;
-    if (words >= targetWords) break;
+    if (words >= targetWords * evidenceBudgetRatio) break;
   }
   const safeTitle = escapeHtml(chapter.title);
   const focusTerms = keywords.slice(0, 3).map((term) => escapeHtml(term));
@@ -305,8 +308,17 @@ function buildSourceDraft(pageTexts: string[], chapter: DraftChapterInput, index
     const paragraphs: string[] = [];
     for (let cursor = 0; cursor < slice.length; cursor += reading.evidencePerParagraph) {
       const pair = slice.slice(cursor, cursor + reading.evidencePerParagraph);
-      const bridge = writing.bridges[(sectionIndex + cursor) % writing.bridges.length];
-      paragraphs.push(`<p><span class="reading-bridge">${escapeHtml(bridge)}</span>${pair.map((item) => escapeHtml(item.sentence)).join(" ")} <sup>${[...new Set(pair.map((item) => item.page).filter(Boolean))].map((page) => `p. ${page}`).join(", ")}</sup></p>`);
+      const paragraphNumber = sectionIndex * groupSize + cursor;
+      const rendered = pair.map((item, pairIndex) => modeParagraphParts({
+        sentence: item.sentence,
+        tone: project.tone ?? "",
+        audience: project.audience ?? "",
+        focus: focusTerms[(sectionIndex + pairIndex) % Math.max(1, focusTerms.length)] || "the main idea",
+        related: focusTerms[(sectionIndex + pairIndex + 1) % Math.max(1, focusTerms.length)] || "the chapter context",
+        chapterTitle: chapter.title,
+        paragraphIndex: paragraphNumber + pairIndex,
+      }));
+      paragraphs.push(rendered.map((parts, renderedIndex) => `<p class="mode-summary mode-summary-${writing.id}"><span class="reading-bridge">${escapeHtml(parts.lead)}</span><span class="mode-setup">${escapeHtml(parts.setup)}</span> <span class="mode-evidence">${escapeHtml(parts.evidence)}</span> <span class="mode-response">${escapeHtml(parts.response)}</span> <sup>${pair[renderedIndex]?.page ? `p. ${pair[renderedIndex].page}` : ""}</sup></p>`).join(""));
     }
     return `<h2>${heading}</h2>${paragraphs.join("")}`;
   }).join("");
@@ -314,7 +326,8 @@ function buildSourceDraft(pageTexts: string[], chapter: DraftChapterInput, index
     .map((item) => ({ title: chapter.title, page: item.page, excerpt: item.sentence.slice(0, 520) }));
   const visual = escapeHtml(`${project.illustrationStyle || "Editorial illustration"} in a ${(project.aesthetic || "coherent editorial").toLowerCase()} direction, grounded in the source evidence for ${chapter.title}.`);
   const body = `<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${safeTitle}</h1><div class="child-opening child-opening-${writing.id}"><b>${writing.hookLabel}</b><p>${writing.hook}</p></div><div class="source-draft-notice"><b>EDITOR’S SOURCE CHECK</b><span>Page markers connect the child-friendly chapter back to the uploaded book. Verify important names, dates and quotations before approval.</span></div>${sections}<div class="illustration"><span>ILLUSTRATION DIRECTION</span><strong>${safeTitle}</strong><small>${visual}</small></div><div class="takeaway child-activity"><b>${writing.activityLabel}</b><p>${writing.activity}</p></div>`;
-  return { ...chapter, status: "draft" as const, body, sourceRefs: refs, wordCount: words };
+  const wordCount = contentWords(body.replace(/<[^>]+>/g, " ")).length;
+  return { ...chapter, status: "draft" as const, body, sourceRefs: refs, wordCount, generationProfile: generationProfileKey(project.audience, project.tone, project.language) };
 }
 
 function analyseText(text: string) {

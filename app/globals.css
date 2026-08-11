@@ -105,6 +105,7 @@
 .child-opening>p{margin:0!important;font-family:ui-rounded,"Trebuchet MS",sans-serif!important}
 .child-opening-story-journey{background:#fff1df;border-left-color:#d98945}.child-opening-curious-explorer{background:#e8f4f5;border-left-color:#3f7d83}
 .reading-bridge{font-weight:800;color:var(--forest)}
+.mode-summary{margin:0 0 14px}.mode-summary .reading-bridge{display:block;font-family:ui-rounded,"Trebuchet MS",sans-serif;font-size:.78em;letter-spacing:.02em;margin-bottom:3px}.mode-setup{font-weight:700}.mode-response{display:block;margin-top:5px;color:#4d625c;font-family:ui-rounded,"Trebuchet MS",sans-serif;font-size:.9em}.mode-summary-story-journey{border-left:3px solid #d98945;padding:4px 0 4px 13px}.mode-summary-story-journey .mode-setup{color:#8e4f27}.mode-summary-curious-explorer{background:#f0f7f7;border-left:3px solid #3f7d83;padding:10px 12px}.mode-summary-curious-explorer .mode-evidence{display:block;margin-top:4px}.mode-summary-friendly-guide .mode-evidence{display:block;margin-top:3px}
 .child-activity{border-color:var(--child-accent,var(--terra));background:#fff5df}
 .design-summary{display:flex;flex-direction:column;gap:3px;background:#f5f0e7;padding:11px;border-left:3px solid var(--terra)}
 .design-summary b{font:11px Georgia,serif}.design-summary span{font-size:8px;color:var(--muted)}
