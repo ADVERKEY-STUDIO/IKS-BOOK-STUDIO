@@ -34,8 +34,6 @@
 .choice strong{font:14px/1.2 Georgia,serif}
 .choice small{font-size:8px;line-height:1.45;color:var(--muted)}
 .choice i{font:8px/1.45 Georgia,serif;color:#5f6d67}
-.writing-choices .choice{grid-template-columns:40px minmax(0,1fr)}
-.choice-icon{grid-row:1/4!important;display:grid!important;place-items:center;width:34px;height:34px;border-radius:50%;background:#f5e9d8;color:var(--terra)!important;font:18px Georgia,serif!important}
 .language-choice{display:grid;grid-template-columns:1fr repeat(3,auto);gap:7px;align-items:center;margin-top:16px;padding-top:15px;border-top:1px solid var(--line)}
 .language-choice>span{font-size:8px;font-weight:900;letter-spacing:.12em;color:var(--muted)}
 .language-choice button{border:1px solid var(--line);background:#fff;padding:8px 10px;font-size:8px}
@@ -99,9 +97,6 @@
 .child-opening{margin:24px 0;padding:18px 20px;background:#eef6f1;border-left:5px solid var(--forest)}
 .child-opening>b{display:block;font:8px/1.3 ui-sans-serif,sans-serif;letter-spacing:.15em;color:var(--terra);margin-bottom:7px}
 .child-opening>p{margin:0!important;font-family:ui-rounded,"Trebuchet MS",sans-serif!important}
-.child-opening-story-journey{background:#fff1df;border-left-color:#d98945}.child-opening-curious-explorer{background:#e8f4f5;border-left-color:#3f7d83}
-.reading-bridge{font-weight:800;color:var(--forest)}
-.mode-summary{margin:0 0 14px}.mode-summary .reading-bridge{display:block;font-family:ui-rounded,"Trebuchet MS",sans-serif;font-size:.78em;letter-spacing:.02em;margin-bottom:3px}.mode-setup{font-weight:700}.mode-response{display:block;margin-top:5px;color:#4d625c;font-family:ui-rounded,"Trebuchet MS",sans-serif;font-size:.9em}.mode-summary-story-journey{border-left:3px solid #d98945;padding:4px 0 4px 13px}.mode-summary-story-journey .mode-setup{color:#8e4f27}.mode-summary-curious-explorer{background:#f0f7f7;border-left:3px solid #3f7d83;padding:10px 12px}.mode-summary-curious-explorer .mode-evidence{display:block;margin-top:4px}.mode-summary-friendly-guide .mode-evidence{display:block;margin-top:3px}
 .child-activity{border-color:var(--child-accent,var(--terra));background:#fff5df}
 .design-summary{display:flex;flex-direction:column;gap:3px;background:#f5f0e7;padding:11px;border-left:3px solid var(--terra)}
 .design-summary b{font:11px Georgia,serif}.design-summary span{font-size:8px;color:var(--muted)}

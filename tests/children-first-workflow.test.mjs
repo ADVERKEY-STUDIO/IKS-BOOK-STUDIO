@@ -15,55 +15,53 @@ test("the new-book workflow is limited to children aged 7 to 15", () => {
   assert.match(page, /Built first for children aged 7–15/);
 });
 
-test("reader, writing and design choices show a live book glimpse", () => {
+test("the writing-style step is removed and the wizard has four steps", () => {
+  assert.match(page, /const wizardSteps = \["Source", "Reader", "Design", "Review"\]/);
+  assert.match(page, /STEP \{step \+ 1\} OF 4/);
+  assert.doesNotMatch(page, /WRITING MODE/);
+  assert.doesNotMatch(page, /Friendly guide|Story journey|Curious explorer/);
+  assert.doesNotMatch(page, /focus="writing"/);
+  assert.match(page, /Natural writing is automatic/);
+});
+
+test("reader and design choices show a live book glimpse", () => {
   assert.match(page, /function BookGlimpse/);
   assert.match(page, /LIVE BOOK GLIMPSE/);
   assert.match(page, /This is how the choice feels/);
   assert.match(page, /focus="reader"/);
-  assert.match(page, /focus="writing"/);
   assert.match(page, /focus="design"/);
   assert.match(css, /\.glimpse-spread/);
   assert.match(css, /\.age-7-9 \.glimpse-page>p/);
 });
 
-test("writing choices change generated chapter structure", () => {
-  for (const mode of ["Friendly guide", "Story journey", "Curious explorer"]) assert.match(page, new RegExp(mode));
-  assert.match(worker, /function childWritingProfile/);
-  assert.match(worker, /child-opening-\$\{writing\.id\}/);
-  assert.match(worker, /writing\.sectionTitles/);
-  assert.match(worker, /writing\.activityLabel/);
-  assert.match(page, /learningFeatures: project\.learningFeatures/);
-  assert.match(worker, /modeEvidenceOrder/);
-  assert.match(worker, /modeParagraphParts/);
+test("one natural writing pipeline changes prose only by age band", () => {
+  assert.match(worker, /function ageWritingProfile/);
+  assert.match(worker, /ageEvidenceOrder/);
+  assert.match(worker, /ageParagraphText/);
   assert.match(worker, /generationProfileKey/);
-});
+  assert.doesNotMatch(worker, /childWritingMode|modeParagraphParts|modeEvidenceOrder/);
 
-test("writing modes and age bands produce genuinely different adaptation prose", () => {
   const sentence = "The council consequently constitutes the main body, and its members consider how duties should be shared between the different offices.";
-  const common = { sentence, audience: "Ages 10–12", focus: "council", related: "duties", chapterTitle: "The Council", paragraphIndex: 0 };
-  const friendly = summary.modeParagraphParts({ ...common, tone: "Friendly guide" });
-  const story = summary.modeParagraphParts({ ...common, tone: "Story journey" });
-  const curious = summary.modeParagraphParts({ ...common, tone: "Curious explorer" });
-  assert.notDeepEqual(friendly, story);
-  assert.notDeepEqual(story, curious);
-  assert.notDeepEqual(friendly, curious);
-  assert.match(story.evidence, /Our first discovery/);
-  assert.match(curious.evidence, /Clue 1:/);
-  assert.notEqual(friendly.evidence, story.evidence);
-  assert.notEqual(story.evidence, curious.evidence);
-  assert.match(curious.setup, /What does this evidence show/);
-
-  const early = summary.adaptEvidenceForAge(sentence, "Ages 7–9");
-  const teen = summary.adaptEvidenceForAge(sentence, "Ages 13–15");
+  const common = { sentence, focus: "council", related: "duties", chapterTitle: "The Council", paragraphIndex: 0 };
+  const early = summary.ageParagraphText({ ...common, audience: "Ages 7–9" });
+  const middle = summary.ageParagraphText({ ...common, audience: "Ages 10–12" });
+  const teen = summary.ageParagraphText({ ...common, audience: "Ages 13–15" });
+  assert.notEqual(early, middle);
+  assert.notEqual(middle, teen);
   assert.notEqual(early, teen);
   assert.match(early, /so forms/i);
+  assert.match(middle, /Together, these ideas/);
+  assert.match(teen, /wider context|wider consequences/);
 });
 
-test("generation profiles invalidate drafts made for another setting", () => {
-  const friendly = summary.generationProfileKey("Ages 7–9", "Friendly guide", "English");
-  const explorer = summary.generationProfileKey("Ages 10–12", "Curious explorer", "English");
-  assert.notEqual(friendly, explorer);
-  assert.match(page, /Apply \$\{project\.tone\} writing/);
+test("generation profiles invalidate drafts made for another age or language", () => {
+  const early = summary.generationProfileKey("Ages 7–9", "English");
+  const teen = summary.generationProfileKey("Ages 13–15", "English");
+  const hindi = summary.generationProfileKey("Ages 7–9", "Hindi");
+  assert.notEqual(early, teen);
+  assert.notEqual(early, hindi);
+  assert.match(early, /natural:7-9:english/);
+  assert.match(page, /Update writing for \$\{project\.audience\}/);
 });
 
 test("three child-friendly book worlds replace academic design controls", () => {

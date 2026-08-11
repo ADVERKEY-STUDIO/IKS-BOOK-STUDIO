@@ -4,7 +4,7 @@ import handler from "vinext/server/app-router-entry";
 import mammoth from "mammoth";
 import { extractText, getDocumentProxy } from "unpdf";
 import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, TextRun } from "docx";
-import { childWritingMode, generationProfileKey, modeEvidenceOrder, modeParagraphParts } from "../lib/child-summary";
+import { ageEvidenceOrder, ageParagraphText, childAgeBand, generationProfileKey } from "../lib/child-summary";
 import { allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET, recommendedAdaptationPages } from "../lib/adaptation-pages";
 
 interface Env {
@@ -52,7 +52,6 @@ type DraftProjectInput = {
   sourceObjectKey: string;
   audience?: string;
   readingLevel?: string;
-  tone?: string;
   language?: string;
   adaptation?: string;
   learningFeatures?: string[];
@@ -334,34 +333,25 @@ function selectChapterPages(pageTexts: string[], chapter: DraftChapterInput, ind
   return { selected, keywords };
 }
 
-function childWritingProfile(tone = "") {
-  const mode = childWritingMode(tone);
-  if (mode === "story-journey") return {
-    id: "story-journey",
-    hookLabel: "STEP INTO THE STORY",
-    hook: "Imagine entering the world of this chapter. Each discovery will reveal another part of the source.",
-    sectionTitles: ["Where our journey begins", "A discovery", "The turning point", "What the journey teaches us", "Carry the story forward"],
-    bridges: ["Picture this: ", "As the journey continues: ", "Here is the next discovery: "],
-    activityLabel: "STORY PAUSE",
-    activity: "What would you notice, ask or do if you were part of this chapter’s world?",
+function ageWritingProfile(audience = "") {
+  const age = childAgeBand(audience);
+  if (age === "7-9") return {
+    intro: "This chapter explains the main idea with short sentences, familiar words and clear examples.",
+    sectionTitles: ["Getting started", "The main idea", "How it works", "Why it matters", "Remember this"],
+    activityLabel: "THINK ABOUT IT",
+    activity: "What is the most important idea in this chapter? Explain it in one or two sentences.",
   };
-  if (mode === "friendly-guide") return {
-    id: "friendly-guide",
-    hookLabel: "LET’S BEGIN",
-    hook: "We will unpack this idea together, using clear steps and a helpful word guide.",
-    sectionTitles: ["Let’s look closely", "One important idea", "Why it matters", "Connect it together", "Remember this"],
-    bridges: ["Start with this: ", "The helpful idea is: ", "Now connect it: "],
-    activityLabel: "QUICK CHECK",
-    activity: "Can you explain the chapter’s main idea in your own words?",
+  if (age === "13-15") return {
+    intro: "This chapter develops the source’s main argument, keeps important terms and examines their wider meaning.",
+    sectionTitles: ["Context and foundations", "The central concept", "Connections and consequences", "Why it matters", "Further reflection"],
+    activityLabel: "REFLECT",
+    activity: "Which connection in this chapter is most important, and what evidence from the source supports your view?",
   };
   return {
-    id: "curious-explorer",
-    hookLabel: "BIG QUESTION",
-    hook: "What can we discover here? Let’s collect clues, connect ideas and test what we learn.",
-    sectionTitles: ["The big question", "Clue one", "Connect the clues", "Look from another angle", "Try thinking like an explorer"],
-    bridges: ["Clue: ", "Look closely: ", "Connect this idea: "],
-    activityLabel: "MINI CHALLENGE",
-    activity: "Draw a three-part map that connects the chapter’s most important ideas.",
+    intro: "This chapter explains the source clearly, introduces important terms and connects each idea to the larger topic.",
+    sectionTitles: ["Understanding the idea", "The main concept", "Key connections", "Why it matters", "Think about it"],
+    activityLabel: "THINK ABOUT IT",
+    activity: "Explain the chapter’s main idea in your own words and give one example of how its parts connect.",
   };
 }
 
@@ -373,7 +363,7 @@ function childReadingDensity(audience = "") {
 
 function buildSourceDraft(pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput, usedEvidence: Set<string>) {
   const { selected, keywords } = selectChapterPages(pageTexts, chapter, index, total, project.sourceTerms ?? []);
-  const writing = childWritingProfile(project.tone);
+  const writing = ageWritingProfile(project.audience);
   const reading = childReadingDensity(project.audience);
   const targetWords = Math.max(Math.round(reading.wordsPerPage * 1.4), Math.round(chapter.pages * reading.wordsPerPage * .72));
   const seen = new Set<string>();
@@ -395,10 +385,10 @@ function buildSourceDraft(pageTexts: string[], chapter: DraftChapterInput, index
     for (const sentence of usefulSentences(pageTexts.join(" ")).slice(0, 24)) evidence.push({ page: 0, sentence });
   }
 
-  const orderedEvidence = modeEvidenceOrder(evidence, project.tone ?? "", keywords);
+  const orderedEvidence = ageEvidenceOrder(evidence, project.audience ?? "", keywords);
   const chosen: typeof evidence = [];
   let words = 0;
-  const evidenceBudgetRatio = writing.id === "story-journey" ? .58 : writing.id === "curious-explorer" ? .68 : .78;
+  const evidenceBudgetRatio = childAgeBand(project.audience ?? "") === "7-9" ? .62 : childAgeBand(project.audience ?? "") === "13-15" ? .78 : .7;
   for (const item of orderedEvidence) {
     chosen.push(item);
     usedEvidence.add(evidenceSignature(item.sentence));
@@ -420,25 +410,24 @@ function buildSourceDraft(pageTexts: string[], chapter: DraftChapterInput, index
     for (let cursor = 0; cursor < slice.length; cursor += reading.evidencePerParagraph) {
       const pair = slice.slice(cursor, cursor + reading.evidencePerParagraph);
       const paragraphNumber = sectionIndex * groupSize + cursor;
-      const rendered = pair.map((item, pairIndex) => modeParagraphParts({
+      const rendered = pair.map((item, pairIndex) => ageParagraphText({
         sentence: item.sentence,
-        tone: project.tone ?? "",
         audience: project.audience ?? "",
         focus: focusTerms[(sectionIndex + pairIndex) % Math.max(1, focusTerms.length)] || "the main idea",
         related: focusTerms[(sectionIndex + pairIndex + 1) % Math.max(1, focusTerms.length)] || "the chapter context",
         chapterTitle: chapter.title,
         paragraphIndex: paragraphNumber + pairIndex,
       }));
-      paragraphs.push(rendered.map((parts, renderedIndex) => `<p class="mode-summary mode-summary-${writing.id}"><span class="reading-bridge">${escapeHtml(parts.lead)}</span><span class="mode-setup">${escapeHtml(parts.setup)}</span> <span class="mode-evidence">${escapeHtml(parts.evidence)}</span> <span class="mode-response">${escapeHtml(parts.response)}</span> <sup>${pair[renderedIndex]?.page ? `p. ${pair[renderedIndex].page}` : ""}</sup></p>`).join(""));
+      paragraphs.push(rendered.map((paragraph, renderedIndex) => `<p>${escapeHtml(paragraph)} <sup>${pair[renderedIndex]?.page ? `p. ${pair[renderedIndex].page}` : ""}</sup></p>`).join(""));
     }
     return `<h2>${heading}</h2>${paragraphs.join("")}`;
   }).join("");
   const refs = [...new Map(chosen.filter((item) => item.page > 0).map((item) => [item.page, item])).values()].slice(0, 8)
     .map((item) => ({ title: chapter.title, page: item.page, excerpt: item.sentence.slice(0, 520) }));
   const visual = escapeHtml(`${project.illustrationStyle || "Editorial illustration"} in a ${(project.aesthetic || "coherent editorial").toLowerCase()} direction, grounded in the source evidence for ${chapter.title}.`);
-  const body = `<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${safeTitle}</h1><div class="child-opening child-opening-${writing.id}"><b>${writing.hookLabel}</b><p>${writing.hook}</p></div><div class="source-draft-notice"><b>EDITOR’S SOURCE CHECK</b><span>Page markers connect the child-friendly chapter back to the uploaded book. Verify important names, dates and quotations before approval.</span></div>${sections}<div class="illustration"><span>ILLUSTRATION DIRECTION</span><strong>${safeTitle}</strong><small>${visual}</small></div><div class="takeaway child-activity"><b>${writing.activityLabel}</b><p>${writing.activity}</p></div>`;
+  const body = `<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${safeTitle}</h1><div class="child-opening child-opening-natural"><p>${writing.intro}</p></div><div class="source-draft-notice"><b>EDITOR’S SOURCE CHECK</b><span>Page markers connect the child-friendly chapter back to the uploaded book. Verify important names, dates and quotations before approval.</span></div>${sections}<div class="illustration"><span>ILLUSTRATION DIRECTION</span><strong>${safeTitle}</strong><small>${visual}</small></div><div class="takeaway child-activity"><b>${writing.activityLabel}</b><p>${writing.activity}</p></div>`;
   const wordCount = contentWords(body.replace(/<[^>]+>/g, " ")).length;
-  return { ...chapter, status: "draft" as const, body, sourceRefs: refs, wordCount, generationProfile: generationProfileKey(project.audience, project.tone, project.language) };
+  return { ...chapter, status: "draft" as const, body, sourceRefs: refs, wordCount, generationProfile: generationProfileKey(project.audience, project.language) };
 }
 
 function analyseText(text: string) {

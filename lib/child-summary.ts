@@ -1,12 +1,4 @@
-export type ChildWritingMode = "friendly-guide" | "story-journey" | "curious-explorer";
 export type ChildAgeBand = "7-9" | "10-12" | "13-15";
-
-export function childWritingMode(tone = ""): ChildWritingMode {
-  const key = tone.toLowerCase();
-  if (key.includes("story")) return "story-journey";
-  if (key.includes("friendly") || key.includes("warm") || key.includes("clear")) return "friendly-guide";
-  return "curious-explorer";
-}
 
 export function childAgeBand(audience = ""): ChildAgeBand {
   if (/7\s*[–-]\s*9|7\s*[-–]\s*10/i.test(audience)) return "7-9";
@@ -14,8 +6,8 @@ export function childAgeBand(audience = ""): ChildAgeBand {
   return "10-12";
 }
 
-export function generationProfileKey(audience = "", tone = "", language = "English") {
-  return `child-adaptation-v4:${childAgeBand(audience)}:${childWritingMode(tone)}:${language.toLowerCase()}`;
+export function generationProfileKey(audience = "", language = "English") {
+  return `child-adaptation-v5:natural:${childAgeBand(audience)}:${language.toLowerCase()}`;
 }
 
 function cleanEvidence(value: string) {
@@ -75,50 +67,28 @@ export function adaptEvidenceForAge(sentence: string, audience = "") {
   let adapted = cleanEvidence(sentence);
   const replacements = age === "7-9" ? youngerReplacements : age === "10-12" ? middleReplacements : [];
   for (const [pattern, replacement] of replacements) adapted = adapted.replace(pattern, replacement);
-  return sentenceChunks(adapted, age === "7-9" ? 18 : age === "10-12" ? 28 : 42);
+  return sentenceChunks(adapted, age === "7-9" ? 16 : age === "10-12" ? 26 : 40);
 }
 
-function evidenceSteps(value: string) {
-  return value.split(/(?<=[.!?])\s+/).map((part) => part.trim()).filter(Boolean);
-}
-
-function lowerFirst(value: string) {
-  return value ? `${value[0].toLowerCase()}${value.slice(1)}` : value;
-}
-
-function friendlyEvidence(value: string) {
-  return evidenceSteps(value).map((step, index) => index === 0 ? step : `Next, ${lowerFirst(step)}`).join(" ");
-}
-
-function storyEvidence(value: string) {
-  const transitions = ["Our first discovery is that", "Then we learn that", "The next moment shows that"];
-  return evidenceSteps(value).map((step, index) => `${transitions[index % transitions.length]} ${lowerFirst(step)}`).join(" ");
-}
-
-function explorerEvidence(value: string) {
-  return evidenceSteps(value).map((step, index) => `Clue ${index + 1}: ${step}`).join(" ");
-}
-
-export function modeEvidenceOrder<T extends { page: number; sentence: string }>(evidence: T[], tone: string, keywords: string[]) {
-  const mode = childWritingMode(tone);
-  if (mode === "friendly-guide") return [...evidence].sort((a, b) => a.page - b.page);
-  if (mode === "story-journey") {
-    const ordered = [...evidence].sort((a, b) => a.page - b.page);
-    if (ordered.length < 4) return ordered;
-    return [...ordered.filter((_, index) => index % 2 === 0), ...ordered.filter((_, index) => index % 2 === 1)];
+export function ageEvidenceOrder<T extends { page: number; sentence: string }>(evidence: T[], audience = "", keywords: string[] = []) {
+  const age = childAgeBand(audience);
+  if (age === "7-9") {
+    return [...evidence].sort((a, b) => a.page - b.page || a.sentence.length - b.sentence.length);
   }
-  return [...evidence].sort((a, b) => {
-    const aText = a.sentence.toLowerCase();
-    const bText = b.sentence.toLowerCase();
-    const aHits = keywords.reduce((total, word) => total + (aText.includes(word) ? 1 : 0), 0);
-    const bHits = keywords.reduce((total, word) => total + (bText.includes(word) ? 1 : 0), 0);
-    return bHits - aHits || a.sentence.length - b.sentence.length || a.page - b.page;
-  });
+  if (age === "13-15") {
+    return [...evidence].sort((a, b) => {
+      const aText = a.sentence.toLowerCase();
+      const bText = b.sentence.toLowerCase();
+      const aHits = keywords.reduce((total, word) => total + (aText.includes(word) ? 1 : 0), 0);
+      const bHits = keywords.reduce((total, word) => total + (bText.includes(word) ? 1 : 0), 0);
+      return a.page - b.page || bHits - aHits;
+    });
+  }
+  return [...evidence].sort((a, b) => a.page - b.page);
 }
 
-export function modeParagraphParts({ sentence, tone, audience, focus, related, chapterTitle, paragraphIndex }: {
+export function ageParagraphText({ sentence, audience, focus, related, chapterTitle, paragraphIndex }: {
   sentence: string;
-  tone: string;
   audience: string;
   focus: string;
   related: string;
@@ -127,33 +97,29 @@ export function modeParagraphParts({ sentence, tone, audience, focus, related, c
 }) {
   const evidence = adaptEvidenceForAge(sentence, audience);
   const age = childAgeBand(audience);
-  const mode = childWritingMode(tone);
 
-  if (mode === "story-journey") {
-    const leads = ["Picture the scene:", "The next discovery:", "The journey changes:"];
-    return {
-      lead: leads[paragraphIndex % leads.length],
-      setup: paragraphIndex === 0 ? `Imagine stepping into the world of ${chapterTitle}. Watch for ${focus} as the ideas unfold.` : `Our journey now follows ${focus} and looks for its connection with ${related}.`,
-      evidence: storyEvidence(evidence),
-      response: age === "7-9" ? "Pause and picture this moment. What would you notice first?" : "This discovery gives the journey a new direction. Keep it in mind as the next part unfolds.",
-    };
+  if (age === "7-9") {
+    const openings = [
+      `${focus} is an important idea in ${chapterTitle}.`,
+      `Now we can connect ${focus} with ${related}.`,
+      `This part helps us understand ${focus}.`,
+    ];
+    return `${openings[paragraphIndex % openings.length]} ${evidence} This means ${focus} and ${related} are connected.`;
   }
 
-  if (mode === "curious-explorer") {
-    const leads = ["Question:", "Clue:", "Test the clue:"];
-    return {
-      lead: leads[paragraphIndex % leads.length],
-      setup: `What does this evidence show us about ${focus}?`,
-      evidence: explorerEvidence(evidence),
-      response: age === "13-15" ? `Compare this clue with the chapter’s other evidence. Does ${related} strengthen or challenge your first answer?` : `Circle the words that connect ${focus} and ${related}, then explain the link in one sentence.`,
-    };
+  if (age === "13-15") {
+    const openings = [
+      `${chapterTitle} introduces ${focus} as a concept that must be understood in its wider context.`,
+      `The relationship between ${focus} and ${related} becomes clearer in this part of the source.`,
+      `A closer reading of ${focus} reveals both its purpose and its wider consequences.`,
+    ];
+    return `${openings[paragraphIndex % openings.length]} ${evidence} This evidence helps explain how ${focus} shapes, and is shaped by, ${related}.`;
   }
 
-  const leads = ["Start with this:", "In simpler words:", "Now connect it:"];
-  return {
-    lead: leads[paragraphIndex % leads.length],
-    setup: age === "7-9" ? `We can understand ${focus} one small step at a time.` : `Let’s unpack how ${focus} works before connecting it with ${related}.`,
-    evidence: friendlyEvidence(evidence),
-    response: age === "13-15" ? `The key point is the relationship between ${focus} and ${related}; use the evidence above to state that relationship precisely.` : `The helpful idea is that ${focus} and ${related} belong in the same explanation.`,
-  };
+  const openings = [
+    `${chapterTitle} begins by explaining ${focus}.`,
+    `The next important connection is between ${focus} and ${related}.`,
+    `To understand this idea clearly, we need to look at ${focus} in context.`,
+  ];
+  return `${openings[paragraphIndex % openings.length]} ${evidence} Together, these ideas show why ${focus} matters in the chapter.`;
 }
