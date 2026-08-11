@@ -4,7 +4,7 @@ import handler from "vinext/server/app-router-entry";
 import mammoth from "mammoth";
 import { extractText, getDocumentProxy } from "unpdf";
 import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, TextRun } from "docx";
-import { ageEvidenceOrder, ageParagraphText, childAgeBand, generationProfileKey } from "../lib/child-summary";
+import { ageEvidenceOrder, ageParagraphText, authorialReaderHtml, childAgeBand, generationProfileKey } from "../lib/child-summary";
 import { allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET, recommendedAdaptationPages } from "../lib/adaptation-pages";
 
 interface Env {
@@ -342,13 +342,13 @@ function ageWritingProfile(audience = "") {
     activity: "What is the most important idea in this chapter? Explain it in one or two sentences.",
   };
   if (age === "13-15") return {
-    intro: "This chapter develops the source’s main argument, keeps important terms and examines their wider meaning.",
+    intro: "This chapter develops the central argument, keeps important terms and examines their wider meaning.",
     sectionTitles: ["Context and foundations", "The central concept", "Connections and consequences", "Why it matters", "Further reflection"],
     activityLabel: "REFLECT",
-    activity: "Which connection in this chapter is most important, and what evidence from the source supports your view?",
+    activity: "Which connection in this chapter is most important, and which details support your view?",
   };
   return {
-    intro: "This chapter explains the source clearly, introduces important terms and connects each idea to the larger topic.",
+    intro: "This chapter introduces important terms and connects each idea to the larger topic.",
     sectionTitles: ["Understanding the idea", "The main concept", "Key connections", "Why it matters", "Think about it"],
     activityLabel: "THINK ABOUT IT",
     activity: "Explain the chapter’s main idea in your own words and give one example of how its parts connect.",
@@ -418,14 +418,14 @@ function buildSourceDraft(pageTexts: string[], chapter: DraftChapterInput, index
         chapterTitle: chapter.title,
         paragraphIndex: paragraphNumber + pairIndex,
       }));
-      paragraphs.push(rendered.map((paragraph, renderedIndex) => `<p>${escapeHtml(paragraph)} <sup>${pair[renderedIndex]?.page ? `p. ${pair[renderedIndex].page}` : ""}</sup></p>`).join(""));
+      paragraphs.push(rendered.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join(""));
     }
     return `<h2>${heading}</h2>${paragraphs.join("")}`;
   }).join("");
   const refs = [...new Map(chosen.filter((item) => item.page > 0).map((item) => [item.page, item])).values()].slice(0, 8)
     .map((item) => ({ title: chapter.title, page: item.page, excerpt: item.sentence.slice(0, 520) }));
-  const visual = escapeHtml(`${project.illustrationStyle || "Editorial illustration"} in a ${(project.aesthetic || "coherent editorial").toLowerCase()} direction, grounded in the source evidence for ${chapter.title}.`);
-  const body = `<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${safeTitle}</h1><div class="child-opening child-opening-natural"><p>${writing.intro}</p></div><div class="source-draft-notice"><b>EDITOR’S SOURCE CHECK</b><span>Page markers connect the child-friendly chapter back to the uploaded book. Verify important names, dates and quotations before approval.</span></div>${sections}<div class="illustration"><span>ILLUSTRATION DIRECTION</span><strong>${safeTitle}</strong><small>${visual}</small></div><div class="takeaway child-activity"><b>${writing.activityLabel}</b><p>${writing.activity}</p></div>`;
+  const visual = escapeHtml(`${project.illustrationStyle || "Editorial illustration"} in a ${(project.aesthetic || "coherent editorial").toLowerCase()} direction, shaped by the central ideas in ${chapter.title}.`);
+  const body = authorialReaderHtml(`<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${safeTitle}</h1><div class="child-opening child-opening-natural"><p>${writing.intro}</p></div>${sections}<div class="illustration"><span>ILLUSTRATION DIRECTION</span><strong>${safeTitle}</strong><small>${visual}</small></div><div class="takeaway child-activity"><b>${writing.activityLabel}</b><p>${writing.activity}</p></div>`);
   const wordCount = contentWords(body.replace(/<[^>]+>/g, " ")).length;
   return { ...chapter, status: "draft" as const, body, sourceRefs: refs, wordCount, generationProfile: generationProfileKey(project.audience, project.language) };
 }
@@ -650,24 +650,19 @@ async function exportDocxApi(request: Request) {
   if (!project.title || !project.chapters?.length) return json({ error: "The book has no chapters" }, 400);
   const children: Paragraph[] = [
     new Paragraph({ text: project.title, heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER, spacing: { before: 1600, after: 360 } }),
-    new Paragraph({ text: `Adapted from ${project.source || "uploaded source"}`, alignment: AlignmentType.CENTER }),
-    new Paragraph({ text: `Prepared for ${project.audience || "the selected reader"}`, alignment: AlignmentType.CENTER }),
+    new Paragraph({ text: `An illustrated book for ${project.audience || "young readers"}`, alignment: AlignmentType.CENTER }),
     new Paragraph({ children: [new TextRun({ text: "Contents", bold: true, size: 36 })], pageBreakBefore: true, spacing: { after: 260 } }),
     ...project.chapters.map((chapter, index) => new Paragraph({ text: `${index + 1}. ${chapter.title || `Chapter ${index + 1}`}` })),
   ];
   project.chapters.forEach((chapter, index) => {
     children.push(new Paragraph({ text: chapter.title || `Chapter ${index + 1}`, heading: HeadingLevel.HEADING_1, pageBreakBefore: true }));
-    children.push(...manuscriptParagraphs(chapter.body || ""));
+    children.push(...manuscriptParagraphs(authorialReaderHtml(chapter.body || "")));
     if (chapter.imageCaption) children.push(new Paragraph({ children: [new TextRun({ text: `Illustration: ${chapter.imageCaption}`, italics: true, color: "7B6748" })], spacing: { before: 180, after: 180 } }));
-    if (chapter.sourceRefs?.length) {
-      children.push(new Paragraph({ text: "Source notes", heading: HeadingLevel.HEADING_2 }));
-      chapter.sourceRefs.forEach((ref) => children.push(new Paragraph({ text: `${ref.title || "Source"}, p. ${ref.page || "—"}`, bullet: { level: 0 } })));
-    }
   });
   const document = new Document({
     creator: "IKS Book Studio",
     title: project.title,
-    description: `Adapted from ${project.source || "an uploaded source"}`,
+    description: `An illustrated children’s book for ${project.audience || "young readers"}`,
     styles: { default: { document: { run: { font: "Aptos", size: 22 }, paragraph: { spacing: { line: 300 } } } } },
     sections: [{ properties: { page: { margin: { top: 1080, right: 1080, bottom: 1080, left: 1080 } } }, footers: { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ children: ["IKS Book Studio · ", PageNumber.CURRENT] })] })] }) }, children }],
   });

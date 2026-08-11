@@ -60,7 +60,7 @@ test("generation profiles invalidate drafts made for another age or language", (
   const hindi = summary.generationProfileKey("Ages 7–9", "Hindi");
   assert.notEqual(early, teen);
   assert.notEqual(early, hindi);
-  assert.match(early, /natural:7-9:english/);
+  assert.match(early, /authorial:7-9:english/);
   assert.match(page, /Update writing for \$\{project\.audience\}/);
 });
 

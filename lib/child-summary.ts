@@ -7,11 +7,35 @@ export function childAgeBand(audience = ""): ChildAgeBand {
 }
 
 export function generationProfileKey(audience = "", language = "English") {
-  return `child-adaptation-v5:natural:${childAgeBand(audience)}:${language.toLowerCase()}`;
+  return `child-adaptation-v6:authorial:${childAgeBand(audience)}:${language.toLowerCase()}`;
+}
+
+export const AUTHORIAL_READER_INSTRUCTION = "Write as the author of the children’s book. Present ideas directly and confidently. Never mention an uploaded book, source, original text, adaptation process, citation, reference, evidence page, or page number in reader-facing prose.";
+
+/**
+ * Keeps provenance available as chapter metadata while ensuring manuscript
+ * HTML reads as a finished book rather than as notes about another book.
+ */
+export function authorialReaderHtml(value = "") {
+  return value
+    .replace(/<div\b[^>]*class=["'][^"']*source-draft-notice[^"']*["'][^>]*>[\s\S]*?<\/div>/gi, "")
+    .replace(/<p\b[^>]*class=["'][^"']*source-note[^"']*["'][^>]*>[\s\S]*?<\/p>/gi, "")
+    .replace(/<sup\b[^>]*>[\s\S]*?<\/sup>/gi, "")
+    .replace(/This chapter explains the source clearly/gi, "This chapter introduces the main ideas clearly")
+    .replace(/This chapter develops the source[’']s main argument/gi, "This chapter develops the central argument")
+    .replace(/the source[’']s main argument/gi, "the central argument")
+    .replace(/in this part of the source/gi, "in this part of the chapter")
+    .replace(/evidence from the source/gi, "details in the chapter")
+    .replace(/source connections/gi, "idea connections")
+    .replace(/grounded in (?:the )?source evidence/gi, "shaped by the chapter’s central ideas")
+    .replace(/from the (?:uploaded|reviewed|original) (?:book|source|text|source material)(?:\s+in\s+[^.<]+)?/gi, "for this chapter")
+    .replace(/according to (?:(?:the|this|an?)\s+)?(?:original\s+)?(?:source|text|book|work),?\s*/gi, "")
+    .replace(/\b(?:the|this|an?) (?:original\s+)?(?:source|text|book|work)\b/gi, "this chapter")
+    .replace(/\s+([,.;:!?])/g, "$1");
 }
 
 function cleanEvidence(value: string) {
-  return value
+  return authorialReaderHtml(value)
     .replace(/\b\d{1,4}\s*\[\d+(?:\.\d+)?\]/g, " ")
     .replace(/\[(?:p(?:age)?\.?\s*)?\d+(?:[.:,-]\d+)*\]/gi, " ")
     .replace(/\s+([,.;:!?])/g, "$1")
@@ -110,10 +134,10 @@ export function ageParagraphText({ sentence, audience, focus, related, chapterTi
   if (age === "13-15") {
     const openings = [
       `${chapterTitle} introduces ${focus} as a concept that must be understood in its wider context.`,
-      `The relationship between ${focus} and ${related} becomes clearer in this part of the source.`,
+      `The relationship between ${focus} and ${related} becomes clearer here.`,
       `A closer reading of ${focus} reveals both its purpose and its wider consequences.`,
     ];
-    return `${openings[paragraphIndex % openings.length]} ${evidence} This evidence helps explain how ${focus} shapes, and is shaped by, ${related}.`;
+    return `${openings[paragraphIndex % openings.length]} ${evidence} These details help explain how ${focus} shapes, and is shaped by, ${related}.`;
   }
 
   const openings = [
