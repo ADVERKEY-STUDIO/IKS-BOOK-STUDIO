@@ -30,6 +30,16 @@ test("recommendations change with context and child age instead of repeating one
   assert.match(page, /↻ Recalculate/);
 });
 
+test("source-aware recommendations are proportionally fitted into a 100-page book", () => {
+  assert.match(worker, /TOTAL_BOOK_PAGE_LIMIT = 100/);
+  assert.match(worker, /CHAPTER_PAGE_BUDGET = TOTAL_BOOK_PAGE_LIMIT - FIXED_MATTER_PAGES/);
+  assert.match(worker, /allocatePagesWithinBudget/);
+  assert.match(worker, /rawPlans\.map\(\(plan, index\)/);
+  assert.match(worker, /Rebalanced proportionally so the complete book stays within 100 pages/);
+  assert.match(page, /92 chapter pages are shared proportionally/);
+  assert.match(page, /applyAutomaticAdaptationPlan\(sourceChapters, project\.audience, true\)/);
+});
+
 test("the full chapter builder uses the detected source range and the planned adaptation length", () => {
   assert.match(worker, /chapter\.sourceStartPage/);
   assert.match(worker, /chapter\.sourceEndPage/);

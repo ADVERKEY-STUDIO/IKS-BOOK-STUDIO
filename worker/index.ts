@@ -70,6 +70,9 @@ interface ExecutionContext {
 
 const allowedExtensions = new Set(["pdf", "docx", "txt", "md"]);
 const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+const TOTAL_BOOK_PAGE_LIMIT = 100;
+const FIXED_MATTER_PAGES = 8;
+const CHAPTER_PAGE_BUDGET = TOTAL_BOOK_PAGE_LIMIT - FIXED_MATTER_PAGES;
 const stopWords = new Set("about after again also among and are because been before being between book can chapter could did does each for from had has have into its may more most not other our out over page pages part should some such than that the their them then there these they this through under use used using very was were what when where which while who will with would your".split(" "));
 let schemaReady: Promise<void> | null = null;
 
@@ -251,6 +254,29 @@ function recommendedAdaptationPages(plan: Pick<ChapterContextPlan, "title" | "so
   return Math.max(3, Math.round(((transformedWords / age.wordsPerPage) * complexityAllowance + visualAndActivityPages + conceptAllowance) * shorterBackMatter));
 }
 
+function allocatePagesWithinBudget(weights: number[], budget = CHAPTER_PAGE_BUDGET) {
+  const requested = weights.map((weight) => Math.max(1, Math.round(Number.isFinite(weight) ? weight : 1)));
+  const requestedTotal = requested.reduce((sum, value) => sum + value, 0);
+  if (!requested.length || requestedTotal <= budget) return requested;
+  const distributable = Math.max(0, budget - requested.length);
+  const weightTotal = requested.reduce((sum, value) => sum + value, 0) || requested.length;
+  const exactExtras = requested.map((weight) => distributable * weight / weightTotal);
+  const allocated = exactExtras.map((extra) => 1 + Math.floor(extra));
+  let remaining = budget - allocated.reduce((sum, value) => sum + value, 0);
+  const remainderOrder = exactExtras
+    .map((extra, index) => ({ index, remainder: extra - Math.floor(extra) }))
+    .sort((a, b) => b.remainder - a.remainder || a.index - b.index);
+  for (let cursor = 0; remaining > 0 && remainderOrder.length; cursor += 1, remaining -= 1) {
+    allocated[remainderOrder[cursor % remainderOrder.length].index] += 1;
+  }
+  return allocated;
+}
+
+function fitDraftChaptersToBookLimit(chapters: DraftChapterInput[]) {
+  const pages = allocatePagesWithinBudget(chapters.map((chapter) => chapter.pages || 1));
+  return chapters.map((chapter, index) => ({ ...chapter, pages: pages[index] }));
+}
+
 function chapterContextPlans(headings: string[], pageTexts: string[], audience = "Ages 10–12"): ChapterContextPlan[] {
   const cleanedPages = pageTexts.map(cleanSourceText);
   const contentsPage = cleanedPages.findIndex((page, index) => index < Math.min(20, cleanedPages.length) && /\bcontents\b/i.test(page));
@@ -275,7 +301,7 @@ function chapterContextPlans(headings: string[], pageTexts: string[], audience =
     anchors.push(candidates[0]?.pageIndex ?? Math.max(minimumPage, distributed));
   }
 
-  return headings.map((title, index) => {
+  const rawPlans = headings.map((title, index) => {
     const start = Math.max(0, anchors[index] ?? 0);
     const nextStart = anchors[index + 1] ?? cleanedPages.length;
     const end = Math.max(start, Math.min(cleanedPages.length - 1, nextStart - 1));
@@ -304,6 +330,15 @@ function chapterContextPlans(headings: string[], pageTexts: string[], audience =
     const pageReason = `${complexity} chapter · ${sourceWordCount.toLocaleString()} source words · room for clear explanations, examples, a unique visual and an activity.`;
     return { ...base, recommendedPages, pageReason };
   });
+  const requestedTotal = rawPlans.reduce((sum, plan) => sum + plan.recommendedPages, 0);
+  const allocations = allocatePagesWithinBudget(rawPlans.map((plan) => plan.recommendedPages));
+  return rawPlans.map((plan, index) => ({
+    ...plan,
+    recommendedPages: allocations[index],
+    pageReason: requestedTotal > CHAPTER_PAGE_BUDGET
+      ? `${plan.pageReason} Rebalanced proportionally so the complete book stays within 100 pages.`
+      : plan.pageReason,
+  }));
 }
 
 function selectChapterPages(pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, terms: string[]) {
@@ -489,7 +524,8 @@ async function projectsApi(request: Request, env: Env) {
     return json({ projects: result.results.map((row) => JSON.parse(row.data_json)) });
   }
   if (request.method === "POST") {
-    const project = await request.json() as { id?: string; title?: string; source?: string };
+    const incoming = await request.json() as { id?: string; title?: string; source?: string; chapters?: DraftChapterInput[] } & Record<string, unknown>;
+    const project = { ...incoming, chapters: incoming.chapters ? fitDraftChaptersToBookLimit(incoming.chapters) : incoming.chapters };
     if (!project.id || !project.title || !project.source) return json({ error: "Incomplete book project" }, 400);
     const saved = { ...project, updatedAt: "Just now" };
     const now = new Date().toISOString();
@@ -726,8 +762,9 @@ async function reanalyseSourceApi(request: Request, env: Env) {
 
 async function draftApi(request: Request, env: Env) {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  const project = await request.json() as DraftProjectInput;
-  if (!project.sourceObjectKey || !project.source || !project.chapters?.length || !project.chapterIds?.length) {
+  const incoming = await request.json() as DraftProjectInput;
+  const project = { ...incoming, chapters: fitDraftChaptersToBookLimit(incoming.chapters ?? []) };
+  if (!project.sourceObjectKey || !project.source || !project.chapters.length || !project.chapterIds?.length) {
     return json({ error: "This project is missing its source or chapter plan" }, 400);
   }
   const ownerPrefix = `sources/${ownerKey(request)}/`;

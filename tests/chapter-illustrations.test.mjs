@@ -29,7 +29,7 @@ test("finished illustrations replace direction placeholders and remain print-saf
 
 test("illustrations are assigned after chapter hierarchy repair", () => {
   const repairPosition = page.indexOf("const hierarchy = repairChapterHierarchy(normalizedChapters)");
-  const assignmentPosition = page.indexOf("const illustratedChapters = attachChapterVisuals");
+  const assignmentPosition = page.indexOf("attachChapterVisuals(visualProject, hierarchy.chapters)");
   assert.ok(repairPosition >= 0, "chapter hierarchy repair is present");
   assert.ok(assignmentPosition > repairPosition, "all final chapters receive art after their titles are repaired");
   assert.match(page, /contextualIllustration\(project, chapter, index, usedImages\)/);
@@ -37,7 +37,7 @@ test("illustrations are assigned after chapter hierarchy repair", () => {
 });
 
 test("every newly uploaded adaptation receives one contextual visual per chapter", () => {
-  assert.match(page, /const chapters = attachChapterVisuals\(\{ \.\.\.project, sourceTerms: source\.terms \}, sourceChapters\)/);
+  assert.match(page, /const chapters = attachChapterVisuals\(\{ \.\.\.project, sourceTerms: source\.terms \}, applyAutomaticAdaptationPlan\(sourceChapters, project\.audience, true\)\)/);
   assert.match(page, /chapters: attachChapterVisuals\(\{ \.\.\.project, sourceTerms: source\.terms \}, reconcileOriginalChapters/);
   assert.match(page, /const next = \{ \.\.\.project, chapters: attachChapterVisuals\(project, merged\) \}/);
   assert.match(page, /const usedImages = new Set<string>\(\)/);
