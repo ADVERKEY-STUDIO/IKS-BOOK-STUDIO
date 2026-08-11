@@ -1,4 +1,10 @@
-# vinext-starter
+# IKS Book Studio
+
+IKS Book Studio turns an uploaded PDF, DOCX, TXT or Markdown source into a structured, editable adaptation. It preserves the source's original chapter names, asks for a summary length in pages, builds source-linked chapter drafts, and prepares PDF/DOCX output.
+
+Every detected chapter receives at least one visual in every new adaptation. Known themes use curated editorial art; all other chapters receive a deterministic context visual generated from the chapter title, chapter text and detected source terms. The fallback engine chooses between maps, timelines, relationship diagrams, hierarchy trees, cycles and concept maps while keeping one coherent book palette. Uploaded chapter images always take priority and are never overwritten.
+
+## Development foundation
 
 A clean full-stack starter running on
 [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and

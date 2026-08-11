@@ -17,6 +17,8 @@ type Chapter = {
   imageKey?: string;
   imageUrl?: string;
   imageCaption?: string;
+  imageAlt?: string;
+  visualType?: string;
   wordCount?: number;
 };
 
@@ -81,14 +83,72 @@ function normalizedTitle(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function curatedIllustration(title: string, body = "", id = 1) {
+function curatedIllustration(title: string, body = "") {
   const exact = curatedChapterIllustrations[normalizedTitle(title)];
   if (exact) return exact;
   const context = normalizedTitle(`${title} ${body.replace(/<[^>]+>/g, " ")}`).slice(0, 5000);
   const thematic = thematicIllustrations.find((illustration) => illustration.keywords.some((keyword) => context.includes(keyword)));
-  if (thematic) return thematic;
-  const fallback = Object.values(curatedChapterIllustrations);
-  return fallback[Math.abs(id - 1) % fallback.length];
+  return thematic;
+}
+
+const visualStopWords = new Set("about after again also among and are because been before being between book can chapter could did does each for from had has have into its may more most not other our out over page pages part should some such than that the their them then there these they this through under use used using very was were what when where which while who will with would your source idea ideas section chapter".split(" "));
+
+function visualKeywords(title: string, body: string, sourceTerms: string[]) {
+  const titleWords: string[] = normalizedTitle(title).match(/[\p{L}\p{N}’'-]+/gu) ?? [];
+  const bodyWords: string[] = body.replace(/<[^>]+>/g, " ").toLowerCase().match(/[\p{L}\p{N}’'-]+/gu) ?? [];
+  const frequency = new Map<string, number>();
+  for (const word of [...titleWords, ...sourceTerms, ...bodyWords.slice(0, 1800)]) {
+    const cleaned = word.toLowerCase().replace(/^['’-]+|['’-]+$/g, "");
+    if (cleaned.length < 4 || visualStopWords.has(cleaned) || /^\d+$/.test(cleaned)) continue;
+    frequency.set(cleaned, (frequency.get(cleaned) ?? 0) + (titleWords.includes(cleaned) ? 8 : 1));
+  }
+  return [...frequency.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([word]) => word);
+}
+
+function chooseVisualType(title: string, body: string, index: number) {
+  const context = normalizedTitle(`${title} ${body.replace(/<[^>]+>/g, " ")}`).slice(0, 7000);
+  if (/\b(?:map|geograph\w*|territor\w*|region\w*|route\w*|trade|border\w*|foreign|countr\w*|kingdom\w*|empire\w*|statecraft|rajya|rājya|coast\w*|ocean\w*|current\w*)\b/.test(context)) return "map";
+  if (/\b(?:compar\w*|contrast\w*|relationship\w*|balance\w*|intersection\w*|overlap\w*|dual\w*|between|constituent\w*|element\w*)\b/.test(context)) return "venn";
+  if (/\b(?:structure\w*|hierarch\w*|system\w*|govern\w*|administr\w*|branch\w*|classification\w*|organisation\w*|organization\w*|design\w*|network\w*|webs?)\b/.test(context)) return "tree";
+  if (/\b(?:origin\w*|histor\w*|develop\w*|evolution\w*|period\w*|ancient|introduction\w*|chronolog\w*|journey\w*)\b/.test(context)) return "timeline";
+  if (/\b(?:cycle\w*|process\w*|strateg\w*|econom\w*|agricultur\w*|production\w*|stage\w*|sequence\w*|method\w*)\b/.test(context)) return "cycle";
+  return ["concept", "tree", "venn", "timeline"][Math.abs(index) % 4];
+}
+
+function contextualIllustration(project: Pick<Project, "aesthetic" | "illustrationStyle" | "sourceTerms">, chapter: Pick<Chapter, "title" | "body">, index: number) {
+  const curated = curatedIllustration(chapter.title, chapter.body);
+  if (curated) return { ...curated, type: "illustration" };
+  const terms = visualKeywords(chapter.title, chapter.body, project.sourceTerms);
+  const type = chooseVisualType(chapter.title, chapter.body, index);
+  const params = new URLSearchParams({
+    title: chapter.title.slice(0, 180),
+    terms: terms.join("|"),
+    type,
+    style: project.illustrationStyle.slice(0, 80),
+    aesthetic: project.aesthetic.slice(0, 80),
+    chapter: String(index + 1),
+  });
+  const readableType = type === "venn" ? "relationship diagram" : type === "tree" ? "concept tree" : `${type} visual`;
+  return {
+    url: `/api/visual?${params.toString()}`,
+    caption: `${chapter.title}: a ${readableType} built from ${terms.slice(0, 3).join(", ") || "the chapter’s central ideas"}.`,
+    alt: `${readableType} for ${chapter.title}, showing ${terms.slice(0, 4).join(", ") || "the main chapter concepts"}.`,
+    type,
+  };
+}
+
+function attachChapterVisuals(project: Pick<Project, "aesthetic" | "illustrationStyle" | "sourceTerms">, chapters: Chapter[]) {
+  return chapters.map((chapter, index) => {
+    if (chapter.imageKey && chapter.imageUrl) return chapter;
+    const visual = contextualIllustration(project, chapter, index);
+    return {
+      ...chapter,
+      imageUrl: visual.url,
+      imageCaption: visual.caption,
+      imageAlt: visual.alt,
+      visualType: visual.type,
+    };
+  });
 }
 
 let seedProject: Project = {
@@ -271,6 +331,8 @@ function reconcileOriginalChapters(project: Project, titles: string[], sections:
       imageKey: existing?.imageKey,
       imageUrl: existing?.imageUrl,
       imageCaption: existing?.imageCaption,
+      imageAlt: existing?.imageAlt,
+      visualType: existing?.visualType,
       wordCount: existing?.wordCount,
     };
   });
@@ -315,6 +377,8 @@ function normalizeProject(saved: Project): Project {
       imageKey: chapter.imageKey,
       imageUrl: chapter.imageUrl,
       imageCaption: chapter.imageCaption,
+      imageAlt: chapter.imageAlt,
+      visualType: chapter.visualType,
       wordCount: chapter.wordCount,
     };
   });
@@ -322,14 +386,8 @@ function normalizeProject(saved: Project): Project {
   // Chapter labels and their following titles are merged above. Attach curated
   // art only after that repair so every final chapter title receives its own
   // matching illustration, including already-saved projects.
-  const illustratedChapters = hierarchy.chapters.map((chapter) => {
-    const illustration = curatedIllustration(chapter.title, chapter.body, chapter.id);
-    return {
-      ...chapter,
-      imageUrl: chapter.imageUrl || illustration.url,
-      imageCaption: chapter.imageCaption || illustration.caption,
-    };
-  });
+  const visualProject = { ...emptyProject, ...saved };
+  const illustratedChapters = attachChapterVisuals(visualProject, hierarchy.chapters);
   return {
     ...emptyProject,
     ...saved,
@@ -475,7 +533,11 @@ export default function Home() {
     setToast(message);
     window.setTimeout(() => setToast(""), 2300);
   };
-  const patchProject = (patch: Partial<Project>) => setProject((current) => ({ ...current, ...patch }));
+  const patchProject = (patch: Partial<Project>) => setProject((current) => {
+    const next = { ...current, ...patch };
+    if ("aesthetic" in patch || "illustrationStyle" in patch) return { ...next, chapters: attachChapterVisuals(next, next.chapters) };
+    return next;
+  });
 
   function startNewBook() {
     setProject({ ...emptyProject, id: makeId(), editorialPreferences: [...designerPreferences], chapters: emptyProject.chapters.map((chapter) => ({ ...chapter })) });
@@ -498,6 +560,8 @@ export default function Home() {
       const source = data.source;
       const headings = source.headings.length ? source.headings : ["Opening chapter", "Core ideas", "Applications and examples", "Closing reflections"];
       const chapterBudget = Math.max(1, Math.floor((project.maxPages - 8) / headings.length));
+      const sourceChapters: Chapter[] = headings.map((title, index) => ({ id: index + 1, title, pages: chapterBudget, status: "planned", locked: false, sourceRefs: source.sections[index] ? [source.sections[index]] : [], body: `<p class="chapter-kicker">CHAPTER ${index + 1}</p><h1>${title}</h1><p class="chapter-deck">This chapter is ready for adaptation from the uploaded source.</p>` }));
+      const chapters = attachChapterVisuals({ ...project, sourceTerms: source.terms }, sourceChapters);
       patchProject({
         source: source.name,
         sourceSize: source.size,
@@ -511,7 +575,7 @@ export default function Home() {
         sourcePreview: source.preview,
         briefApproved: false,
         summaryLengthConfirmed: false,
-        chapters: headings.map((title, index) => ({ id: index + 1, title, pages: chapterBudget, status: "planned", locked: false, sourceRefs: source.sections[index] ? [source.sections[index]] : [], body: `<p class="chapter-kicker">CHAPTER ${index + 1}</p><h1>${title}</h1><p class="chapter-deck">This chapter is ready for adaptation from the uploaded source.</p>` })),
+        chapters,
       });
       notify(`${file.name} analysed successfully`);
     } catch (error) {
@@ -546,7 +610,7 @@ export default function Home() {
         sourcePreview: source.preview,
         summaryLengthConfirmed: false,
         briefApproved: false,
-        chapters: reconcileOriginalChapters(project, titles, source.sections),
+        chapters: attachChapterVisuals({ ...project, sourceTerms: source.terms }, reconcileOriginalChapters(project, titles, source.sections)),
       };
       setProject(next);
       await persistProject(next);
@@ -605,7 +669,7 @@ export default function Home() {
         sourceTerms: data.source.terms,
         sourceSections: data.source.sections,
         sourcePreview: data.source.preview,
-        chapters: reconcileOriginalChapters(next, titles, data.source.sections),
+        chapters: attachChapterVisuals({ ...next, sourceTerms: data.source.terms }, reconcileOriginalChapters(next, titles, data.source.sections)),
       };
       setProject(next);
       await persistProject(next);
@@ -627,7 +691,8 @@ export default function Home() {
   async function saveChapterBody() {
     if (!active || !editorRef.current) return;
     const html = editorRef.current.innerHTML;
-    const next = { ...project, chapters: project.chapters.map((chapter) => chapter.id === active.id ? { ...chapter, body: html, status: "draft" as const } : chapter) };
+    const edited = project.chapters.map((chapter) => chapter.id === active.id ? { ...chapter, body: html, status: "draft" as const } : chapter);
+    const next = { ...project, chapters: attachChapterVisuals(project, edited) };
     setProject(next);
     try { await persistProject(next); notify("Chapter updated and saved"); } catch { notify("Chapter changed; save again when connected"); }
   }
@@ -708,7 +773,7 @@ export default function Home() {
   function addChapter() {
     const id = Math.max(0, ...project.chapters.map((chapter) => chapter.id)) + 1;
     const nextChapter: Chapter = { id, title: `New chapter ${id}`, pages: 6, status: "planned", locked: false, sourceRefs: [], body: `<p class="chapter-kicker">CHAPTER ${id}</p><h1>New chapter ${id}</h1><p class="chapter-deck">Add or prepare this chapter from the reviewed source.</p>` };
-    patchProject({ chapters: [...project.chapters, nextChapter] });
+    patchProject({ chapters: attachChapterVisuals(project, [...project.chapters, nextChapter]) });
     setActiveChapter(id);
     notify("Chapter added");
   }
@@ -721,7 +786,7 @@ export default function Home() {
     const response = await fetch("/api/image", { method: "POST", headers: ownerHeaders(), body: form });
     const data = await response.json() as { image?: { key: string; url: string }; error?: string };
     if (!response.ok || !data.image) { notify(data.error || "Image upload failed"); return; }
-    const next = { ...project, chapters: project.chapters.map((chapter) => chapter.id === active.id ? { ...chapter, imageKey: data.image?.key, imageUrl: data.image?.url, imageCaption: chapter.imageCaption || chapter.title } : chapter) };
+    const next = { ...project, chapters: project.chapters.map((chapter) => chapter.id === active.id ? { ...chapter, imageKey: data.image?.key, imageUrl: data.image?.url, imageCaption: chapter.imageCaption || chapter.title, imageAlt: `Uploaded illustration for ${chapter.title}`, visualType: "uploaded" } : chapter) };
     setProject(next);
     await persistProject(next).catch(() => undefined);
     notify("Illustration added to chapter");
@@ -763,7 +828,8 @@ export default function Home() {
     setDraftBusy(true);
     try {
       if (!project.sourceObjectKey) {
-        const fallback = project.chapters.map((chapter, index) => chapterIds.includes(chapter.id) ? createChapterDraft(project, chapter, index) : chapter);
+        const drafted = project.chapters.map((chapter, index) => chapterIds.includes(chapter.id) ? createChapterDraft(project, chapter, index) : chapter);
+        const fallback = attachChapterVisuals(project, drafted);
         const next = { ...project, chapters: fallback };
         setProject(next);
         await persistProject(next).catch(() => undefined);
@@ -790,7 +856,8 @@ export default function Home() {
       const data = await response.json() as { chapters?: Chapter[]; error?: string };
       if (!response.ok || !data.chapters) throw new Error(data.error || "Chapter drafting failed");
       const replacements = new Map(data.chapters.map((chapter) => [chapter.id, chapter]));
-      const next = { ...project, chapters: project.chapters.map((chapter) => replacements.has(chapter.id) ? { ...chapter, ...replacements.get(chapter.id)! } : chapter) };
+      const merged = project.chapters.map((chapter) => replacements.has(chapter.id) ? { ...chapter, ...replacements.get(chapter.id)! } : chapter);
+      const next = { ...project, chapters: attachChapterVisuals(project, merged) };
       setProject(next);
       await persistProject(next);
       notify(scope === "all" || scope === "thin" ? `${data.chapters.length} full chapters prepared and saved` : "Full chapter prepared and saved");
@@ -853,7 +920,7 @@ function Wizard({ step, project, sourceBusy, onPatch, onFile, onBack, onNext }: 
   return <div className="wizard-layout">
     <aside className="step-rail"><p>NEW BOOK</p>{wizardSteps.map((label, index) => <div className={index <= step ? "active" : ""} key={label}><span>{index < step ? "✓" : index + 1}</span><b>{label}</b></div>)}<blockquote>Every uploaded book starts a fresh project. Nothing is tied to Arthashastra.</blockquote></aside>
     <main className="wizard-main">
-      <p className="eyebrow">STEP {step + 1} OF 5</p><h1>{["Choose the source.", "Who is the reader?", "Shape the writing.", "Choose the visual world.", "Review your brief."][step]}</h1><p className="lead">{["Upload the book you are authorised to adapt.", "The same source becomes a different book for a different reader.", "Set the voice, language and level of transformation.", "Give the whole book one consistent design direction.", "These choices guide every generated chapter and illustration."][step]}</p>
+      <p className="eyebrow">STEP {step + 1} OF 5</p><h1>{["Choose the source.", "Who is the reader?", "Shape the writing.", "Choose the visual world.", "Review your brief."][step]}</h1><p className="lead">{["Upload the book you are authorised to adapt.", "The same source becomes a different book for a different reader.", "Set the voice, language and level of transformation.", "Every detected chapter receives at least one context-based visual in this consistent style.", "These choices guide every generated chapter and illustration."][step]}</p>
       {step === 0 && <section className="form-card"><label className={`upload ${sourceBusy ? "busy" : ""}`}><input type="file" accept=".pdf,.docx,.txt,.md" onChange={onFile} disabled={sourceBusy}/><span>{sourceBusy ? "…" : "↑"}</span><strong>{sourceBusy ? "Reading and analysing your book…" : project.source}</strong><small>{sourceBusy ? "Large PDFs can take a short while" : "Click to choose a PDF, DOCX or TXT book (maximum 30 MB)"}</small></label><div className="fields two"><label>New book title<input value={project.title} onChange={(e) => onPatch({ title: e.target.value })}/></label><label>Source book<input value={project.source} readOnly/></label></div></section>}
       {step === 1 && <section className="form-card"><div className="fields two"><label>Reader age<select value={project.audience} onChange={(e) => onPatch({ audience: e.target.value })}><option>Children (7–10)</option><option>Young readers (11–14)</option><option>Young adults (15–18)</option><option>General readers (18+)</option><option>University students</option></select></label><label>Reading level<select value={project.readingLevel} onChange={(e) => onPatch({ readingLevel: e.target.value })}><option>Very simple</option><option>Clear and accessible</option><option>Accessible academic</option><option>Advanced academic</option></select></label><label>Book type<select value={project.bookType} onChange={(e) => onPatch({ bookType: e.target.value })}><option>Illustrated learning book</option><option>Children’s story</option><option>Popular non-fiction</option><option>Academic guide</option><option>Training manual</option></select></label><label>Maximum pages <b>{project.maxPages}</b><input type="range" min="10" max="100" value={project.maxPages} onChange={(e) => onPatch({ maxPages: Number(e.target.value) })}/></label></div></section>}
       {step === 2 && <section className="form-card"><div className="fields two"><label>Writing tone<select value={project.tone} onChange={(e) => onPatch({ tone: e.target.value })}><option>Clear and engaging</option><option>Warm and conversational</option><option>Story-led</option><option>Formal and academic</option></select></label><label>Language<select value={project.language} onChange={(e) => onPatch({ language: e.target.value })}><option>English</option><option>Hindi</option><option>English + Hindi</option></select></label><label>Source notes<select value={project.citationStyle} onChange={(e) => onPatch({ citationStyle: e.target.value })}><option>Source page notes</option><option>Numbered endnotes</option><option>APA references</option><option>No visible citations</option></select></label><label>Learning features<select value={project.learningFeatures.join(", ")} onChange={(e) => onPatch({ learningFeatures: e.target.value.split(",").map((item) => item.trim()).filter(Boolean) })}><option>Key takeaways, Glossary</option><option>Learning objectives, Exercises, Key takeaways</option><option>Case studies, Discussion questions</option><option>None</option></select></label><label className="wide">Adaptation style<select value={project.adaptation} onChange={(e) => onPatch({ adaptation: e.target.value })}><option>Faithful, reader-friendly adaptation</option><option>Concise illustrated summary</option><option>Creative reinterpretation</option><option>Teaching-focused adaptation</option></select></label></div></section>}
@@ -884,7 +951,7 @@ function BookBrief({ project, allocated, draftBusy, onBack, onUpdateChapter, onP
     <header className="brief-hero"><div><p className="eyebrow">BOOK BRIEF & PAGE PLAN</p><h1>{project.title}</h1><p className="lead">A {project.bookType.toLowerCase()} for {project.audience.toLowerCase()}, adapted in a {project.tone.toLowerCase()} voice with a {project.aesthetic.toLowerCase()} visual direction.</p><div className="brief-chips"><span>{project.language}</span><span>{project.adaptation}</span><span>{project.imageFrequency}</span></div></div><aside><span>READER PROMISE</span><p>Make the source understandable, visually inviting and faithful enough for an editor to verify every important idea.</p></aside></header>
     <div className="brief-layout"><section className="plan-card"><header><div><p className="eyebrow">STRUCTURE</p><h2>Chapter and summary-page plan</h2></div><div className={overBudget ? "budget-pill warning" : "budget-pill"}>{allocated} / {project.maxPages} pages</div></header><div className="plan-head"><span>CHAPTER</span><span>ORIGINAL TITLE</span><span>PAGES</span><span>STATE</span></div>{project.chapters.map((chapter, index) => <div className="plan-row" key={chapter.id}><span>{String(index + 1).padStart(2, "0")}</span><strong className="preserved-title">{chapter.title}</strong><input aria-label={`Summary pages for ${chapter.title}`} type="number" min="1" max="30" value={chapter.pages} onChange={(event) => onUpdateChapter(chapter.id, { pages: Math.max(1, Number(event.target.value) || 1) })}/><b className={`draft-state ${chapter.status}`}>{chapter.status}</b></div>)}<footer><span>Includes 8 reserved pages for cover, contents, preface and references.</span>{overBudget && <strong>Reduce {allocated - project.maxPages} pages before approval.</strong>}</footer></section>
       <aside className="generation-card"><p className="eyebrow">FULL CHAPTER BUILDER</p><h2>Prepare the manuscript</h2><p>Build substantial editable chapters from multiple relevant passages in the uploaded source. Page markers and source evidence are added automatically. Locked chapters are never overwritten.</p><div className="draft-progress"><span><b>{drafted}</b> of {project.chapters.length} drafted</span><i><b style={{ width: `${project.chapters.length ? drafted / project.chapters.length * 100 : 0}%` }}/></i></div><button className="secondary full" disabled={draftBusy} onClick={() => onPrepare("sample")}>{draftBusy ? "Reading the source…" : "Build full sample chapter"}</button><button className="primary full" disabled={draftBusy} onClick={() => onPrepare("all")}>{draftBusy ? "Building full chapters…" : "Build all full chapters"}</button><small>This source-grounded builder works without an AI key. Use the editorial assistant afterward when you want stylistic rewriting.</small></aside></div>
-    {first && <section className="sample-spread"><div className="sample-copy"><p className="eyebrow">SAMPLE SPREAD</p><span>CHAPTER 01</span><h2>{first.title}</h2><p>{first.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 420)}</p><button className="text-button" onClick={() => onPrepare("sample")}>{first.status === "planned" ? "Create this sample" : "Refresh sample draft"} →</button></div>{first.imageUrl ? <figure className="sample-art sample-art-image"><img src={first.imageUrl} alt={curatedIllustration(first.title, first.body, first.id).alt || first.imageCaption || first.title}/><figcaption>{first.imageCaption || first.title}</figcaption></figure> : <div className="sample-art"><span>ILLUSTRATION DIRECTION</span><strong>{project.aesthetic}</strong><p>{first.title} · {project.imageFrequency}</p><b>✦</b></div>}</section>}
+    {first && <section className="sample-spread"><div className="sample-copy"><p className="eyebrow">SAMPLE SPREAD</p><span>CHAPTER 01</span><h2>{first.title}</h2><p>{first.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 420)}</p><button className="text-button" onClick={() => onPrepare("sample")}>{first.status === "planned" ? "Create this sample" : "Refresh sample draft"} →</button></div>{first.imageUrl ? <figure className="sample-art sample-art-image"><img src={first.imageUrl} alt={first.imageAlt || first.imageCaption || first.title}/><figcaption>{first.imageCaption || first.title}</figcaption></figure> : <div className="sample-art"><span>ILLUSTRATION DIRECTION</span><strong>{project.aesthetic}</strong><p>{first.title} · {project.imageFrequency}</p><b>✦</b></div>}</section>}
     <footer className="brief-actions"><div><b>{overBudget ? "Page plan needs attention" : "Ready for editorial review"}</b><span>{drafted ? `${drafted} chapter draft${drafted === 1 ? "" : "s"} prepared` : "Prepare at least one chapter now, or begin with a blank structure."}</span></div><button className="primary" disabled={overBudget} onClick={onContinue}>Approve brief & open studio →</button></footer>
   </main>;
 }
@@ -895,10 +962,10 @@ function Editor({ project, active, activeId, allocated, draftBusy, onSelect, edi
   const fontClass = project.fontTheme.toLowerCase().replace(/[^a-z]+/g, "-");
   return <main className="editor-layout">
     <aside className="chapters"><header><p className="eyebrow">BOOK STRUCTURE</p><button onClick={onAddChapter} aria-label="Add chapter">＋</button></header><div className="front-matter"><span>FM</span><div><b>Front matter</b><small>Cover · Contents · Preface</small></div></div>{project.chapters.map((chapter) => <button className={chapter.id === activeId ? "chapter active" : "chapter"} onClick={() => onSelect(chapter.id)} key={chapter.id}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small>{chapter.pages} pages · {chapter.status}</small></div><i>{chapter.locked ? "◆" : ""}</i></button>)}<div className="page-budget"><span><b>{allocated}</b> / {project.maxPages} pages</span><i><b style={{ width: `${Math.min(100, allocated / project.maxPages * 100)}%` }}/></i><small>{Math.max(0, project.maxPages - allocated)} pages available</small></div></aside>
-    <section className="canvas"><nav className="editor-tools"><div><button onClick={() => document.execCommand("bold")}><b>B</b></button><button onClick={() => document.execCommand("italic")}><i>I</i></button><button onClick={() => document.execCommand("formatBlock", false, "h2")}>H2</button><button onClick={() => document.execCommand("insertUnorderedList")}>• List</button></div><div className="chapter-meter"><span>{active.pages} target pages</span><i><b style={{ width: active.status === "planned" ? "18%" : "67%" }}/></i><button onClick={onToggleLock}>{active.locked ? "◆ Locked" : "◇ Lock"}</button></div></nav><div className="page-stage"><article className={`paper font-${fontClass}${active.imageUrl ? " has-chapter-image" : ""}`}><header><span>{project.title}</span><span>{project.aesthetic}</span></header><div className="ornament">✦</div><div key={active.id} ref={editorRef} className="book-copy" contentEditable={!active.locked} suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: active.body }}/>{active.imageUrl && <figure className="chapter-image"><img src={active.imageUrl} alt={curatedIllustration(active.title, active.body, active.id).alt || active.imageCaption || active.title}/><figcaption>{active.imageCaption || active.title}</figcaption></figure>}<footer><span>{project.source}</span><span>{active.id}</span></footer></article></div><button className="save-float" onClick={onSaveBody}>✓ Save chapter</button></section>
+    <section className="canvas"><nav className="editor-tools"><div><button onClick={() => document.execCommand("bold")}><b>B</b></button><button onClick={() => document.execCommand("italic")}><i>I</i></button><button onClick={() => document.execCommand("formatBlock", false, "h2")}>H2</button><button onClick={() => document.execCommand("insertUnorderedList")}>• List</button></div><div className="chapter-meter"><span>{active.pages} target pages</span><i><b style={{ width: active.status === "planned" ? "18%" : "67%" }}/></i><button onClick={onToggleLock}>{active.locked ? "◆ Locked" : "◇ Lock"}</button></div></nav><div className="page-stage"><article className={`paper font-${fontClass}${active.imageUrl ? " has-chapter-image" : ""}`}><header><span>{project.title}</span><span>{project.aesthetic}</span></header><div className="ornament">✦</div><div key={active.id} ref={editorRef} className="book-copy" contentEditable={!active.locked} suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: active.body }}/>{active.imageUrl && <figure className="chapter-image"><img src={active.imageUrl} alt={active.imageAlt || active.imageCaption || active.title}/><figcaption>{active.imageCaption || active.title}</figcaption></figure>}<footer><span>{project.source}</span><span>{active.id}</span></footer></article></div><button className="save-float" onClick={onSaveBody}>✓ Save chapter</button></section>
     <aside className="assistant"><nav><button className={tab === "ai" ? "active" : ""} onClick={() => setTab("ai")}>✦<span>AI EDIT</span></button><button className={tab === "design" ? "active" : ""} onClick={() => setTab("design")}>◈<span>DESIGN</span></button><button className={tab === "sources" ? "active" : ""} onClick={() => setTab("sources")}>⌕<span>SOURCES</span></button></nav><div className="assistant-body">
       {tab === "ai" && <><div className="assistant-title"><span>✦</span><div><b>Editorial assistant</b><small>Select text, then choose an action.</small></div></div>{!active.locked && <button className="draft-chapter-button" disabled={draftBusy} onClick={onDraft}>{draftBusy ? "Reading the source…" : chapterWordCount(active) < 350 ? "✦ Build this full chapter" : "↻ Rebuild full chapter from source"}</button>}<p className="selection-tip">This chapter has <b>{chapterWordCount(active).toLocaleString()} words</b>. The full chapter builder uses the uploaded source; the guided edit actions can then refine the writing in ChatGPT.</p><div className="ai-list">{["Simplify language", "Shorten selection", "Expand with examples", "Make age-appropriate", "Improve storytelling", "Check against source", "Suggest an illustration"].map((action) => <button onClick={() => onAi(action)} key={action}><span>✦</span>{action}<i>→</i></button>)}</div><div className="memory-box"><p className="eyebrow">EDITORIAL MEMORY</p><p>{project.editorialPreferences.length ? project.editorialPreferences.join(" · ") : "No saved preferences yet"}</p><button onClick={() => onRemember("book")}>＋ Remember for this book</button><button onClick={() => onRemember("designer")}>＋ Remember for future books</button></div></>}
-      {tab === "design" && <><div className="assistant-title"><span>◈</span><div><b>Book design</b><small>Changes update the current project.</small></div></div><div className="design-controls"><label>Aesthetic<select value={project.aesthetic} onChange={(e) => onPatchProject({ aesthetic: e.target.value })}><option>Classical Indian</option><option>Modern academic</option><option>Minimal editorial</option><option>Warm children’s</option></select></label><label>Typography<select value={project.fontTheme} onChange={(e) => onPatchProject({ fontTheme: e.target.value })}><option>Literary serif</option><option>Modern sans-serif</option><option>Academic classic</option><option>Friendly rounded</option></select></label><label>Illustration style<select value={project.illustrationStyle} onChange={(e) => onPatchProject({ illustrationStyle: e.target.value })}><option>Editorial watercolour</option><option>Historical ink drawing</option><option>Modern flat illustration</option><option>Playful children’s art</option><option>Documentary photography</option></select></label><label className="image-upload">Replace chapter image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && onUploadImage(e.target.files[0])}/></label>{active.imageUrl && <label>Image caption<input value={active.imageCaption || ""} onChange={(e) => onUpdateChapter(active.id, { imageCaption: e.target.value })}/></label>}</div></>}
+      {tab === "design" && <><div className="assistant-title"><span>◈</span><div><b>Book design</b><small>Changes update the current project.</small></div></div><div className="design-controls"><div className="visual-status"><b>✓ Chapter visual ready</b><span>{active.visualType === "uploaded" ? "Your uploaded image" : `${active.visualType || "context"} visual generated from this chapter`}</span></div><label>Aesthetic<select value={project.aesthetic} onChange={(e) => onPatchProject({ aesthetic: e.target.value })}><option>Classical Indian</option><option>Modern academic</option><option>Minimal editorial</option><option>Warm children’s</option></select></label><label>Typography<select value={project.fontTheme} onChange={(e) => onPatchProject({ fontTheme: e.target.value })}><option>Literary serif</option><option>Modern sans-serif</option><option>Academic classic</option><option>Friendly rounded</option></select></label><label>Illustration style<select value={project.illustrationStyle} onChange={(e) => onPatchProject({ illustrationStyle: e.target.value })}><option>Editorial watercolour</option><option>Historical ink drawing</option><option>Modern flat illustration</option><option>Playful children’s art</option><option>Documentary photography</option></select></label><label className="image-upload">Replace chapter image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && onUploadImage(e.target.files[0])}/></label>{active.imageUrl && <label>Image caption<input value={active.imageCaption || ""} onChange={(e) => onUpdateChapter(active.id, { imageCaption: e.target.value })}/></label>}</div></>}
       {tab === "sources" && <><div className="assistant-title"><span>⌕</span><div><b>Source evidence</b><small>{active.sourceRefs.length} reference{active.sourceRefs.length === 1 ? "" : "s"} linked to this chapter.</small></div></div><div className="source-list">{active.sourceRefs.length ? active.sourceRefs.map((ref, index) => <article key={`${ref.title}-${index}`}><span>PAGE {ref.page || "—"}</span><b>{ref.title}</b><p>{ref.excerpt}</p></article>) : <p className="empty">No source reference is linked yet. Prepare this chapter to attach the closest extracted section.</p>}</div><div className="source-policy"><b>{project.citationStyle}</b><p>Verify important names, dates and quotations before marking the chapter approved.</p></div></>}
     </div></aside>
   </main>;
@@ -915,7 +982,7 @@ function AiRoundTrip({ request, onChange, onClose, onApply }: { request: { actio
 function Preview({ project, draftBusy, onFill, onClose, onPrint }: { project: Project; draftBusy: boolean; onFill: () => void; onClose: () => void; onPrint: () => void }) {
   const thinChapters = project.chapters.filter((chapter) => chapterWordCount(chapter) < 350 && !chapter.locked);
   const printable = useMemo(() => printableChapters(project.chapters), [project.chapters]);
-  return <div className="modal-backdrop"><section className="preview-modal"><header><div><p className="eyebrow">FINAL BOOK PREVIEW</p><h2>{project.title}</h2></div><div>{thinChapters.length > 0 && <button className="fill-chapters" disabled={draftBusy} onClick={onFill}>{draftBusy ? "Building chapters…" : `Fill ${thinChapters.length} short chapter${thinChapters.length === 1 ? "" : "s"}`}</button>}<button onClick={onPrint}>Print / Save PDF</button><button onClick={onClose}>×</button></div></header>{(thinChapters.length > 0 || printable.duplicatesRemoved > 0) && <div className="preview-warning"><b>{thinChapters.length > 0 ? `${thinChapters.length} chapter${thinChapters.length === 1 ? " is" : "s are"} still too short.` : "Repeated content repaired."}</b><span>{printable.duplicatesRemoved > 0 ? `${printable.duplicatesRemoved} repeated paragraph${printable.duplicatesRemoved === 1 ? " was" : "s were"} omitted from this preview and PDF.` : "Fill the short chapters from the uploaded source before exporting."}</span></div>}<div className="preview-scroll"><article className="preview-cover"><p>{project.bookType}</p><h1>{project.title}</h1><span>Adapted from {project.source}</span><b>✦</b></article><article className="preview-page contents-page"><span>CONTENTS</span><h2>Inside this book</h2><ol>{printable.chapters.map((chapter, index) => <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{chapter.pages} pages</i></li>)}</ol></article>{printable.chapters.map((chapter) => <article className={`preview-page chapter-preview${chapter.imageUrl ? " has-chapter-image" : ""}`} key={chapter.id}><header className="print-chapter-header"><span>CHAPTER {chapter.id}</span><span>{chapterWordCount(chapter).toLocaleString()} WORDS</span></header><h2>{chapter.title}</h2><div className="preview-body" dangerouslySetInnerHTML={{ __html: chapter.body }}/>{chapter.imageUrl && <figure className="chapter-image"><img src={chapter.imageUrl} alt={curatedIllustration(chapter.title, chapter.body, chapter.id).alt || chapter.imageCaption || chapter.title}/><figcaption>{chapter.imageCaption || chapter.title}</figcaption></figure>}{chapter.sourceRefs.length > 0 && <div className="preview-sources"><b>SOURCE NOTES</b>{chapter.sourceRefs.map((ref, index) => <p key={`${ref.title}-${index}`}>{ref.title}, p. {ref.page || "—"}</p>)}</div>}</article>)}<article className="preview-page backmatter"><span>EDITORIAL NOTES</span><h2>References and production brief</h2><p>Adapted from <b>{project.source}</b>. Citation approach: {project.citationStyle}.</p><p>Designed in the {project.aesthetic.toLowerCase()} aesthetic with {project.illustrationStyle.toLowerCase()} visuals.</p><h3>Remembered editorial decisions</h3><ul>{project.editorialPreferences.map((preference) => <li key={preference}>{preference}</li>)}</ul></article></div></section></div>;
+  return <div className="modal-backdrop"><section className="preview-modal"><header><div><p className="eyebrow">FINAL BOOK PREVIEW</p><h2>{project.title}</h2></div><div>{thinChapters.length > 0 && <button className="fill-chapters" disabled={draftBusy} onClick={onFill}>{draftBusy ? "Building chapters…" : `Fill ${thinChapters.length} short chapter${thinChapters.length === 1 ? "" : "s"}`}</button>}<button onClick={onPrint}>Print / Save PDF</button><button onClick={onClose}>×</button></div></header>{(thinChapters.length > 0 || printable.duplicatesRemoved > 0) && <div className="preview-warning"><b>{thinChapters.length > 0 ? `${thinChapters.length} chapter${thinChapters.length === 1 ? " is" : "s are"} still too short.` : "Repeated content repaired."}</b><span>{printable.duplicatesRemoved > 0 ? `${printable.duplicatesRemoved} repeated paragraph${printable.duplicatesRemoved === 1 ? " was" : "s were"} omitted from this preview and PDF.` : "Fill the short chapters from the uploaded source before exporting."}</span></div>}<div className="preview-scroll"><article className="preview-cover"><p>{project.bookType}</p><h1>{project.title}</h1><span>Adapted from {project.source}</span><b>✦</b></article><article className="preview-page contents-page"><span>CONTENTS</span><h2>Inside this book</h2><ol>{printable.chapters.map((chapter, index) => <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{chapter.pages} pages</i></li>)}</ol></article>{printable.chapters.map((chapter) => <article className={`preview-page chapter-preview${chapter.imageUrl ? " has-chapter-image" : ""}`} key={chapter.id}><header className="print-chapter-header"><span>CHAPTER {chapter.id}</span><span>{chapterWordCount(chapter).toLocaleString()} WORDS</span></header><h2>{chapter.title}</h2><div className="preview-body" dangerouslySetInnerHTML={{ __html: chapter.body }}/>{chapter.imageUrl && <figure className="chapter-image"><img src={chapter.imageUrl} alt={chapter.imageAlt || chapter.imageCaption || chapter.title}/><figcaption>{chapter.imageCaption || chapter.title}</figcaption></figure>}{chapter.sourceRefs.length > 0 && <div className="preview-sources"><b>SOURCE NOTES</b>{chapter.sourceRefs.map((ref, index) => <p key={`${ref.title}-${index}`}>{ref.title}, p. {ref.page || "—"}</p>)}</div>}</article>)}<article className="preview-page backmatter"><span>EDITORIAL NOTES</span><h2>References and production brief</h2><p>Adapted from <b>{project.source}</b>. Citation approach: {project.citationStyle}.</p><p>Designed in the {project.aesthetic.toLowerCase()} aesthetic with {project.illustrationStyle.toLowerCase()} visuals.</p><h3>Remembered editorial decisions</h3><ul>{project.editorialPreferences.map((preference) => <li key={preference}>{preference}</li>)}</ul></article></div></section></div>;
 }
 
 function Versions({ versions, onCreate, onRestore, onClose }: { versions: { label: string; date: string; snapshot: Project }[]; onCreate: () => void; onRestore: (project: Project) => void; onClose: () => void }) {

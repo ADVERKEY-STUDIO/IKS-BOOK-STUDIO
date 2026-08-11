@@ -4,6 +4,7 @@ import test from "node:test";
 
 const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+const worker = await readFile(new URL("../worker/index.ts", import.meta.url), "utf8");
 
 test("curated chapter illustrations are packaged and assigned", async () => {
   const images = [
@@ -28,10 +29,26 @@ test("finished illustrations replace direction placeholders and remain print-saf
 
 test("illustrations are assigned after chapter hierarchy repair", () => {
   const repairPosition = page.indexOf("const hierarchy = repairChapterHierarchy(normalizedChapters)");
-  const assignmentPosition = page.indexOf("const illustratedChapters = hierarchy.chapters.map");
+  const assignmentPosition = page.indexOf("const illustratedChapters = attachChapterVisuals");
   assert.ok(repairPosition >= 0, "chapter hierarchy repair is present");
   assert.ok(assignmentPosition > repairPosition, "all final chapters receive art after their titles are repaired");
-  assert.match(page, /curatedIllustration\(chapter\.title, chapter\.body, chapter\.id\)/);
-  assert.match(page, /return fallback\[Math\.abs\(id - 1\) % fallback\.length\]/);
+  assert.match(page, /contextualIllustration\(project, chapter, index\)/);
   assert.match(page, /chapters: illustratedChapters/);
+});
+
+test("every newly uploaded adaptation receives one contextual visual per chapter", () => {
+  assert.match(page, /const chapters = attachChapterVisuals\(\{ \.\.\.project, sourceTerms: source\.terms \}, sourceChapters\)/);
+  assert.match(page, /chapters: attachChapterVisuals\(\{ \.\.\.project, sourceTerms: source\.terms \}, reconcileOriginalChapters/);
+  assert.match(page, /const next = \{ \.\.\.project, chapters: attachChapterVisuals\(project, merged\) \}/);
+  assert.match(page, /if \(chapter\.imageKey && chapter\.imageUrl\) return chapter/);
+});
+
+test("generic books use chapter-aware visual fallbacks instead of Arthashastra art", () => {
+  for (const visualType of ["map", "venn", "tree", "timeline", "cycle", "concept"]) {
+    assert.match(worker, new RegExp(`\\"${visualType}\\"`));
+  }
+  assert.match(worker, /url\.pathname === "\/api\/visual"/);
+  assert.match(worker, /GENERATED FROM THE CHAPTER CONTEXT/);
+  assert.match(page, /visualKeywords\(chapter\.title, chapter\.body, project\.sourceTerms\)/);
+  assert.doesNotMatch(page, /return fallback\[/);
 });

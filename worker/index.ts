@@ -397,6 +397,55 @@ async function imageApi(request: Request, env: Env) {
   return json({ image: { key, url: `/api/asset?key=${encodeURIComponent(key)}` } }, 201);
 }
 
+function escapeXml(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+function titleLines(value: string, limit = 34) {
+  const words = value.trim().split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  for (const word of words) {
+    const current = lines.at(-1);
+    if (!current || `${current} ${word}`.length > limit) lines.push(word);
+    else lines[lines.length - 1] = `${current} ${word}`;
+  }
+  return lines.slice(0, 3);
+}
+
+function visualPalette(aesthetic: string) {
+  const key = aesthetic.toLowerCase();
+  if (key.includes("modern") || key.includes("minimal")) return { background: "#F2F5F3", paper: "#FFFFFF", ink: "#173A33", accent: "#C96845", gold: "#D4A84F", muted: "#6A7C75" };
+  if (key.includes("children") || key.includes("playful")) return { background: "#FFF3DE", paper: "#FFFCF5", ink: "#24463D", accent: "#E66B50", gold: "#F1B94B", muted: "#697A72" };
+  return { background: "#EEE4D2", paper: "#FAF6EC", ink: "#173A33", accent: "#A64E35", gold: "#D8A94F", muted: "#66766F" };
+}
+
+function visualDiagram(type: string, terms: string[], palette: ReturnType<typeof visualPalette>) {
+  const labels = [...terms, "Context", "Meaning", "Connection", "Practice"].slice(0, 5).map((term) => escapeXml(term.replace(/(^|\s)\S/g, (letter) => letter.toUpperCase())));
+  const label = (x: number, y: number, value: string, anchor = "middle") => `<text x="${x}" y="${y}" text-anchor="${anchor}" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="${palette.ink}">${value}</text>`;
+  if (type === "map") return `<path d="M170 285 C250 205 345 242 410 192 C495 127 582 190 638 156 C729 102 831 169 964 130 L1000 420 C894 468 814 430 716 485 C622 538 530 470 452 513 C344 573 246 515 168 548 Z" fill="${palette.paper}" stroke="${palette.ink}" stroke-width="4"/><path d="M215 455 C340 373 430 425 532 319 C632 215 727 355 930 210" fill="none" stroke="${palette.accent}" stroke-width="9" stroke-linecap="round" stroke-dasharray="13 16"/><circle cx="248" cy="432" r="18" fill="${palette.gold}" stroke="${palette.ink}" stroke-width="4"/><circle cx="542" cy="309" r="18" fill="${palette.gold}" stroke="${palette.ink}" stroke-width="4"/><circle cx="914" cy="221" r="18" fill="${palette.gold}" stroke="${palette.ink}" stroke-width="4"/>${label(248,488,labels[0])}${label(542,365,labels[1])}${label(914,277,labels[2])}`;
+  if (type === "venn") return `<circle cx="440" cy="325" r="165" fill="${palette.accent}" fill-opacity=".28" stroke="${palette.accent}" stroke-width="4"/><circle cx="650" cy="325" r="165" fill="${palette.gold}" fill-opacity=".34" stroke="${palette.gold}" stroke-width="4"/><circle cx="545" cy="470" r="165" fill="${palette.ink}" fill-opacity=".14" stroke="${palette.ink}" stroke-width="4"/>${label(360,290,labels[0])}${label(730,290,labels[1])}${label(545,545,labels[2])}${label(545,390,labels[3])}`;
+  if (type === "tree") return `<path d="M600 520 V386 M600 386 L325 240 M600 386 L600 210 M600 386 L875 240" fill="none" stroke="${palette.ink}" stroke-width="8" stroke-linecap="round"/><rect x="455" y="500" width="290" height="88" rx="44" fill="${palette.ink}"/>${label(600,555,labels[0]).replace(`fill="${palette.ink}"`,`fill="${palette.paper}"`)}<rect x="180" y="180" width="290" height="95" rx="28" fill="${palette.paper}" stroke="${palette.accent}" stroke-width="4"/>${label(325,238,labels[1])}<rect x="455" y="120" width="290" height="95" rx="28" fill="${palette.paper}" stroke="${palette.gold}" stroke-width="4"/>${label(600,178,labels[2])}<rect x="730" y="180" width="290" height="95" rx="28" fill="${palette.paper}" stroke="${palette.accent}" stroke-width="4"/>${label(875,238,labels[3])}`;
+  if (type === "timeline") return `<path d="M155 360 H1045" stroke="${palette.ink}" stroke-width="8" stroke-linecap="round"/>${[235,475,715,955].map((x, index) => `<circle cx="${x}" cy="360" r="30" fill="${index % 2 ? palette.gold : palette.accent}" stroke="${palette.paper}" stroke-width="7"/><path d="M${x} ${index % 2 ? 330 : 390} V${index % 2 ? 245 : 475}" stroke="${palette.muted}" stroke-width="3"/>${label(x,index % 2 ? 218 : 520,labels[index])}`).join("")}`;
+  if (type === "cycle") return `<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="${palette.accent}"/></marker></defs><path d="M600 165 A205 205 0 0 1 795 505" fill="none" stroke="${palette.accent}" stroke-width="10" marker-end="url(#arrow)"/><path d="M775 530 A205 205 0 0 1 392 500" fill="none" stroke="${palette.gold}" stroke-width="10" marker-end="url(#arrow)"/><path d="M380 475 A205 205 0 0 1 570 165" fill="none" stroke="${palette.ink}" stroke-width="10" marker-end="url(#arrow)"/>${label(600,145,labels[0])}${label(850,535,labels[1])}${label(345,535,labels[2])}<circle cx="600" cy="370" r="92" fill="${palette.paper}" stroke="${palette.ink}" stroke-width="4"/>${label(600,378,labels[3])}`;
+  return `<circle cx="600" cy="360" r="116" fill="${palette.ink}"/>${label(600,369,labels[0]).replace(`fill="${palette.ink}"`,`fill="${palette.paper}"`)}${[[250,210],[950,210],[250,520],[950,520]].map(([x,y], index) => `<path d="M600 360 L${x} ${y}" stroke="${index % 2 ? palette.gold : palette.accent}" stroke-width="5"/><circle cx="${x}" cy="${y}" r="92" fill="${palette.paper}" stroke="${index % 2 ? palette.gold : palette.accent}" stroke-width="4"/>${label(x,y+8,labels[index+1])}`).join("")}`;
+}
+
+async function visualApi(request: Request) {
+  if (request.method !== "GET") return json({ error: "Method not allowed" }, 405);
+  const url = new URL(request.url);
+  const title = (url.searchParams.get("title") || "Chapter visual").slice(0, 180);
+  const terms = (url.searchParams.get("terms") || "Context|Meaning|Connection").split("|").map((term) => term.trim()).filter(Boolean).slice(0, 5);
+  const requestedType = url.searchParams.get("type") || "concept";
+  const type = new Set(["map", "venn", "tree", "timeline", "cycle", "concept"]).has(requestedType) ? requestedType : "concept";
+  const style = (url.searchParams.get("style") || "Editorial illustration").slice(0, 80);
+  const aesthetic = (url.searchParams.get("aesthetic") || "Classical Indian").slice(0, 80);
+  const chapter = Math.max(1, Math.min(99, Number(url.searchParams.get("chapter")) || 1));
+  const palette = visualPalette(`${aesthetic} ${style}`);
+  const titleMarkup = titleLines(title).map((line, index) => `<text x="70" y="${94 + index * 48}" font-family="Georgia, serif" font-size="40" font-weight="700" fill="${palette.ink}">${escapeXml(line)}</text>`).join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc"><title id="title">${escapeXml(title)}</title><desc id="desc">A ${escapeXml(type)} visual based on the chapter concepts ${escapeXml(terms.join(", "))}</desc><rect width="1200" height="760" fill="${palette.background}"/><path d="M0 0 H1200 V28 H0 Z" fill="${palette.accent}"/><text x="70" y="62" font-family="Arial, sans-serif" font-size="16" font-weight="700" letter-spacing="4" fill="${palette.accent}">CHAPTER ${String(chapter).padStart(2, "0")} · ${escapeXml(type.toUpperCase())} VISUAL</text>${titleMarkup}<g transform="translate(0 110)">${visualDiagram(type, terms, palette)}</g><text x="70" y="718" font-family="Arial, sans-serif" font-size="15" letter-spacing="2" fill="${palette.muted}">${escapeXml(style.toUpperCase())} · GENERATED FROM THE CHAPTER CONTEXT</text><circle cx="1120" cy="700" r="26" fill="${palette.gold}"/><path d="M1120 683 V717 M1103 700 H1137" stroke="${palette.ink}" stroke-width="4"/></svg>`;
+  return new Response(svg, { headers: { "content-type": "image/svg+xml; charset=utf-8", "cache-control": "public, max-age=31536000, immutable", "x-content-type-options": "nosniff" } });
+}
+
 async function assetApi(request: Request, env: Env) {
   if (request.method !== "GET") return json({ error: "Method not allowed" }, 405);
   const key = new URL(request.url).searchParams.get("key");
@@ -552,6 +601,7 @@ const worker = {
       if (url.pathname === "/api/source/reanalyse") return await reanalyseSourceApi(request, env);
       if (url.pathname === "/api/draft") return await draftApi(request, env);
       if (url.pathname === "/api/image") return await imageApi(request, env);
+      if (url.pathname === "/api/visual") return await visualApi(request);
       if (url.pathname === "/api/asset") return await assetApi(request, env);
       if (url.pathname === "/api/export/docx") return await exportDocxApi(request);
     } catch (error) {
