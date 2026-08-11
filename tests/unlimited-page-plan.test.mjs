@@ -14,8 +14,8 @@ test("adaptations have no global maximum page limit", () => {
   assert.match(page, /No fixed maximum page limit/);
 });
 
-test("chapter summary page inputs accept any positive length", () => {
+test("chapter adaptation page inputs accept any positive length", () => {
   assert.doesNotMatch(page, /max="30"/);
   assert.doesNotMatch(page, /Math\.min\(30/);
-  assert.match(page, /There is no maximum page limit\./);
+  assert.match(page, /There is no fixed maximum/);
 });

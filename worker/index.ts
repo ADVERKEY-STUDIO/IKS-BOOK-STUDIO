@@ -23,8 +23,27 @@ type DraftChapterInput = {
   id: number;
   title: string;
   pages: number;
+  sourceStartPage?: number;
+  sourceEndPage?: number;
+  sourcePageCount?: number;
+  sourceWordCount?: number;
+  complexityScore?: number;
   locked?: boolean;
   body?: string;
+};
+
+type ChapterContextPlan = {
+  title: string;
+  sourceStartPage: number;
+  sourceEndPage: number;
+  sourcePageCount: number;
+  sourceWordCount: number;
+  complexityScore: number;
+  complexity: "Accessible" | "Layered" | "Concept-rich" | "Dense";
+  keyTerms: string[];
+  context: string;
+  recommendedPages: number;
+  pageReason: string;
 };
 
 type DraftProjectInput = {
@@ -203,17 +222,108 @@ function sentenceScore(sentence: string, keywords: string[]) {
   return matches * 8 + usefulLength;
 }
 
+function chapterSpecificTerms(value: string, title: string) {
+  const titleWords = new Set(contentWords(title));
+  const frequency = new Map<string, number>();
+  for (const raw of contentWords(value)) {
+    const word = raw.toLowerCase().replace(/^['’-]+|['’-]+$/g, "");
+    if (word.length < 5 || stopWords.has(word) || titleWords.has(word) || /^\d+$/.test(word)) continue;
+    frequency.set(word, (frequency.get(word) ?? 0) + 1);
+  }
+  return [...frequency.entries()]
+    .filter(([, count]) => count >= 2)
+    .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
+    .slice(0, 5)
+    .map(([word]) => word);
+}
+
+function recommendedAdaptationPages(plan: Pick<ChapterContextPlan, "title" | "sourcePageCount" | "sourceWordCount" | "complexityScore" | "keyTerms">, audience = "Ages 10–12") {
+  const age = /7\s*[–-]\s*9/i.test(audience)
+    ? { wordsPerPage: 105, transformationRatio: .42, visualInterval: 3 }
+    : /13\s*[–-]\s*15/i.test(audience)
+      ? { wordsPerPage: 175, transformationRatio: .66, visualInterval: 6 }
+      : { wordsPerPage: 140, transformationRatio: .54, visualInterval: 4 };
+  const transformedWords = plan.sourceWordCount * age.transformationRatio;
+  const complexityAllowance = .88 + plan.complexityScore * .34;
+  const visualAndActivityPages = Math.max(1, Math.ceil(plan.sourcePageCount / age.visualInterval));
+  const conceptAllowance = Math.max(1, Math.ceil(plan.keyTerms.length / 3));
+  const shorterBackMatter = /^(appendix|conclusion|epilogue|references?)\b/i.test(plan.title) ? .78 : 1;
+  return Math.max(3, Math.round(((transformedWords / age.wordsPerPage) * complexityAllowance + visualAndActivityPages + conceptAllowance) * shorterBackMatter));
+}
+
+function chapterContextPlans(headings: string[], pageTexts: string[], audience = "Ages 10–12"): ChapterContextPlan[] {
+  const cleanedPages = pageTexts.map(cleanSourceText);
+  const contentsPage = cleanedPages.findIndex((page, index) => index < Math.min(20, cleanedPages.length) && /\bcontents\b/i.test(page));
+  const firstBodyPage = Math.max(0, contentsPage + 1);
+  const anchors: number[] = [];
+
+  for (let index = 0; index < headings.length; index += 1) {
+    const title = headings[index];
+    const words = contentWords(title).filter((word) => word.length > 3 && !stopWords.has(word)).slice(0, 9);
+    const normalized = contentWords(title).join(" ");
+    const minimumPage = index === 0 ? firstBodyPage : Math.min(cleanedPages.length - 1, anchors[index - 1] + 1);
+    const candidates = cleanedPages.map((page, pageIndex) => {
+      if (pageIndex < minimumPage || !page) return null;
+      const pageWords = contentWords(page).join(" ");
+      const hits = words.filter((word) => pageWords.includes(word)).length;
+      const exact = normalized.length > 8 && pageWords.includes(normalized);
+      return { pageIndex, exact, hits, score: (exact ? 100 : 0) + hits * 10 - Math.max(0, pageIndex - minimumPage) * .03 };
+    }).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+      .filter((entry) => entry.exact || (words.length > 0 && entry.hits >= Math.max(1, Math.ceil(words.length * .6))))
+      .sort((a, b) => b.score - a.score || a.pageIndex - b.pageIndex);
+    const distributed = Math.min(cleanedPages.length - 1, Math.floor(index * Math.max(1, cleanedPages.length) / Math.max(1, headings.length)));
+    anchors.push(candidates[0]?.pageIndex ?? Math.max(minimumPage, distributed));
+  }
+
+  return headings.map((title, index) => {
+    const start = Math.max(0, anchors[index] ?? 0);
+    const nextStart = anchors[index + 1] ?? cleanedPages.length;
+    const end = Math.max(start, Math.min(cleanedPages.length - 1, nextStart - 1));
+    const segmentPages = cleanedPages.slice(start, end + 1);
+    const segment = segmentPages.join(" ");
+    const words = contentWords(segment);
+    const sentences = usefulSentences(segment);
+    const sentenceLengths = sentences.map((sentence) => contentWords(sentence).length).filter(Boolean);
+    const averageSentenceWords = sentenceLengths.length ? sentenceLengths.reduce((sum, value) => sum + value, 0) / sentenceLengths.length : 18;
+    const averageWordLength = words.length ? words.reduce((sum, word) => sum + word.length, 0) / words.length : 5;
+    const keyTerms = chapterSpecificTerms(segment, title);
+    const complexityScore = Math.max(0, Math.min(1,
+      Math.max(0, averageSentenceWords - 16) / 28 * .5
+      + Math.max(0, averageWordLength - 5) / 3 * .25
+      + Math.min(1, keyTerms.length / 5) * .25,
+    ));
+    const complexity: ChapterContextPlan["complexity"] = complexityScore >= .76 ? "Dense" : complexityScore >= .54 ? "Concept-rich" : complexityScore >= .3 ? "Layered" : "Accessible";
+    const sourcePageCount = Math.max(1, end - start + 1);
+    const sourceWordCount = words.length;
+    const contextTerms = keyTerms.slice(0, 3);
+    const context = contextTerms.length
+      ? `Centres on ${contextTerms.join(", ")} across ${sourcePageCount} source page${sourcePageCount === 1 ? "" : "s"}.`
+      : `Develops the central ideas of ${title} across ${sourcePageCount} source page${sourcePageCount === 1 ? "" : "s"}.`;
+    const base = { title, sourceStartPage: start + 1, sourceEndPage: end + 1, sourcePageCount, sourceWordCount, complexityScore, complexity, keyTerms, context };
+    const recommendedPages = recommendedAdaptationPages(base, audience);
+    const pageReason = `${complexity} chapter · ${sourceWordCount.toLocaleString()} source words · room for clear explanations, examples, a unique visual and an activity.`;
+    return { ...base, recommendedPages, pageReason };
+  });
+}
+
 function selectChapterPages(pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, terms: string[]) {
   const keywords = chapterKeywords(chapter.title, terms);
   const cleanedPages = pageTexts.map(cleanSourceText);
+  const sourceStart = chapter.sourceStartPage ? Math.max(0, chapter.sourceStartPage - 1) : 0;
+  const sourceEnd = chapter.sourceEndPage ? Math.min(cleanedPages.length - 1, chapter.sourceEndPage - 1) : cleanedPages.length - 1;
   const exactWords = contentWords(chapter.title).filter((word) => word.length > 3).slice(0, 6);
   const exactMatches = cleanedPages
     .map((page, pageIndex) => ({ pageIndex, hits: exactWords.filter((word) => page.toLowerCase().includes(word)).length }))
+    .filter((entry) => entry.pageIndex >= sourceStart && entry.pageIndex <= sourceEnd)
     .filter((entry) => exactWords.length > 0 && entry.hits >= Math.max(1, Math.ceil(exactWords.length * .6)));
-  const distributedAnchor = Math.min(cleanedPages.length - 1, Math.floor((index + .5) * cleanedPages.length / Math.max(1, total)));
+  const distributedAnchor = chapter.sourceStartPage
+    ? Math.floor((sourceStart + sourceEnd) / 2)
+    : Math.min(cleanedPages.length - 1, Math.floor((index + .5) * cleanedPages.length / Math.max(1, total)));
   const anchor = exactMatches.length ? exactMatches[exactMatches.length - 1].pageIndex : distributedAnchor;
-  const wantedPages = Math.max(4, Math.min(10, Math.ceil(chapter.pages * .75)));
+  const availableSourcePages = Math.max(1, sourceEnd - sourceStart + 1);
+  const wantedPages = Math.max(1, Math.min(availableSourcePages, Math.ceil(chapter.pages * .9)));
   const candidates = cleanedPages.map((page, pageIndex) => {
+    if (pageIndex < sourceStart || pageIndex > sourceEnd) return { pageIndex, page, score: -Infinity };
     const keywordHits = keywords.reduce((sum, word) => sum + Math.min(5, page.toLowerCase().split(word).length - 1), 0);
     const distance = Math.abs(pageIndex - anchor);
     const proximity = Math.max(0, wantedPages * 1.5 - distance);
@@ -264,7 +374,7 @@ function buildSourceDraft(pageTexts: string[], chapter: DraftChapterInput, index
   const { selected, keywords } = selectChapterPages(pageTexts, chapter, index, total, project.sourceTerms ?? []);
   const writing = childWritingProfile(project.tone);
   const reading = childReadingDensity(project.audience);
-  const targetWords = Math.max(520, Math.min(1900, chapter.pages * reading.wordsPerPage));
+  const targetWords = Math.max(520, Math.round(chapter.pages * reading.wordsPerPage * .9));
   const seen = new Set<string>();
   const evidence: Array<{ page: number; sentence: string }> = [];
   for (const entry of selected) {
@@ -354,13 +464,14 @@ function analyseText(text: string) {
   return { words: words.length, headings, terms, preview: compact.slice(0, 12000) };
 }
 
-function makeSections(headings: string[], pageTexts: string[], fallbackText: string) {
+function makeSections(headings: string[], pageTexts: string[], fallbackText: string, chapterPlans: ChapterContextPlan[]) {
   const compactPages = pageTexts.map((page) => page.replace(/\s+/g, " ").trim());
   const fallbackSentences = fallbackText.replace(/\s+/g, " ").split(/(?<=[.!?])\s+/).filter((sentence) => sentence.length > 55 && sentence.length < 500);
   return headings.map((title, index) => {
     const words = title.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word.length > 3);
     const matchedPage = compactPages.findIndex((page) => words.length > 0 && words.filter((word) => page.toLowerCase().includes(word)).length >= Math.min(2, words.length));
-    const pageIndex = matchedPage >= 0 ? matchedPage : Math.min(compactPages.length - 1, Math.floor(index * Math.max(1, compactPages.length) / Math.max(1, headings.length)));
+    const plannedStart = chapterPlans[index]?.sourceStartPage ? chapterPlans[index].sourceStartPage - 1 : -1;
+    const pageIndex = plannedStart >= 0 ? plannedStart : matchedPage >= 0 ? matchedPage : Math.min(compactPages.length - 1, Math.floor(index * Math.max(1, compactPages.length) / Math.max(1, headings.length)));
     const pageText = compactPages[pageIndex] || fallbackText;
     const sentences = pageText.split(/(?<=[.!?])\s+/).filter((sentence) => sentence.length > 55 && sentence.length < 500);
     return {
@@ -578,6 +689,7 @@ async function sourceApi(request: Request, env: Env) {
   const form = await request.formData();
   const file = form.get("file");
   const projectId = String(form.get("projectId") || crypto.randomUUID());
+  const audience = String(form.get("audience") || "Ages 10–12");
   if (!(file instanceof File)) return json({ error: "Choose a source file" }, 400);
   const extension = sourceExtension(file.name);
   if (!allowedExtensions.has(extension)) return json({ error: "Use a PDF, DOCX, TXT or MD file" }, 415);
@@ -590,13 +702,14 @@ async function sourceApi(request: Request, env: Env) {
   await env.BUCKET.put(objectKey, bytes.slice(0), { httpMetadata: { contentType: file.type || "application/octet-stream" }, customMetadata: { originalName: file.name } });
   const { text, pageTexts, pages } = await extractSourcePages(bytes, extension);
   const analysis = analyseText(text);
-  const sections = makeSections(analysis.headings, pageTexts, text);
-  return json({ source: { name: file.name, size: file.size, objectKey, pages, ...analysis, sections, quality: analysis.words > 200 ? "Good" : "Needs review — OCR may be required" } });
+  const chapterPlans = chapterContextPlans(analysis.headings, pageTexts, audience);
+  const sections = makeSections(analysis.headings, pageTexts, text, chapterPlans);
+  return json({ source: { name: file.name, size: file.size, objectKey, pages, ...analysis, sections, chapterPlans, quality: analysis.words > 200 ? "Good" : "Needs review — OCR may be required" } });
 }
 
 async function reanalyseSourceApi(request: Request, env: Env) {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  const payload = await request.json() as { source?: string; sourceObjectKey?: string };
+  const payload = await request.json() as { source?: string; sourceObjectKey?: string; audience?: string };
   if (!payload.source || !payload.sourceObjectKey) return json({ error: "The stored source is missing" }, 400);
   const ownerPrefix = `sources/${ownerKey(request)}/`;
   if (!payload.sourceObjectKey.startsWith(ownerPrefix)) return json({ error: "The source does not belong to this project" }, 403);
@@ -606,8 +719,9 @@ async function reanalyseSourceApi(request: Request, env: Env) {
   if (!allowedExtensions.has(extension)) return json({ error: "This source format cannot be analysed" }, 415);
   const extracted = await extractSourcePages(await source.arrayBuffer(), extension);
   const analysis = analyseText(extracted.text);
-  const sections = makeSections(analysis.headings, extracted.pageTexts, extracted.text);
-  return json({ source: { pages: extracted.pages, ...analysis, sections, quality: analysis.words > 200 ? "Good" : "Needs review — OCR may be required" } });
+  const chapterPlans = chapterContextPlans(analysis.headings, extracted.pageTexts, payload.audience);
+  const sections = makeSections(analysis.headings, extracted.pageTexts, extracted.text, chapterPlans);
+  return json({ source: { pages: extracted.pages, ...analysis, sections, chapterPlans, quality: analysis.words > 200 ? "Good" : "Needs review — OCR may be required" } });
 }
 
 async function draftApi(request: Request, env: Env) {

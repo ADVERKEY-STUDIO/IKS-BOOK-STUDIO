@@ -38,7 +38,7 @@ test("writing choices change generated chapter structure", () => {
   assert.match(worker, /generationProfileKey/);
 });
 
-test("writing modes and age bands produce genuinely different summary prose", () => {
+test("writing modes and age bands produce genuinely different adaptation prose", () => {
   const sentence = "The council consequently constitutes the main body, and its members consider how duties should be shared between the different offices.";
   const common = { sentence, audience: "Ages 10–12", focus: "council", related: "duties", chapterTitle: "The Council", paragraphIndex: 0 };
   const friendly = summary.modeParagraphParts({ ...common, tone: "Friendly guide" });

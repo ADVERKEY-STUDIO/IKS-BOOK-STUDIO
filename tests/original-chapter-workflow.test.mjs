@@ -12,10 +12,12 @@ test("contents-page chapter names take priority and every top-level entry is ret
   assert.match(worker, /\/api\/source\/reanalyse/);
 });
 
-test("chapter summary length is requested in pages after detection", () => {
-  assert.match(page, /How long should each chapter summary be\?/);
-  assert.match(page, /Summary pages for all chapters/);
-  assert.match(page, /summaryLengthConfirmed/);
+test("chapter adaptation pages are planned automatically after context detection", () => {
+  assert.match(page, /Your adaptation page plan is ready/);
+  assert.match(page, /AUTOMATIC ADAPTATION PLAN/);
+  assert.match(page, /Adaptation pages for \$\{heading\}/);
+  assert.match(page, /adaptationPlanConfirmed/);
+  assert.doesNotMatch(page, /How long should each chapter summary be\?/);
   assert.match(page, /ORIGINAL TITLE/);
 });
 
