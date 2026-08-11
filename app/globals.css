@@ -36,10 +36,6 @@
 .choice i{font:8px/1.45 Georgia,serif;color:#5f6d67}
 .writing-choices .choice{grid-template-columns:40px minmax(0,1fr)}
 .choice-icon{grid-row:1/4!important;display:grid!important;place-items:center;width:34px;height:34px;border-radius:50%;background:#f5e9d8;color:var(--terra)!important;font:18px Georgia,serif!important}
-.page-limit{display:grid;grid-template-columns:1fr auto;gap:8px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line);font-size:9px;color:var(--muted)}
-.page-limit b{font:15px Georgia,serif;color:var(--terra)}
-.page-limit input,.page-limit small{grid-column:1/-1}
-.page-limit small{font-size:7px;line-height:1.4}
 .language-choice{display:grid;grid-template-columns:1fr repeat(3,auto);gap:7px;align-items:center;margin-top:16px;padding-top:15px;border-top:1px solid var(--line)}
 .language-choice>span{font-size:8px;font-weight:900;letter-spacing:.12em;color:var(--muted)}
 .language-choice button{border:1px solid var(--line);background:#fff;padding:8px 10px;font-size:8px}

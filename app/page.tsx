@@ -42,7 +42,6 @@ type Project = {
   tone: string;
   language: string;
   bookType: string;
-  maxPages: number;
   aesthetic: string;
   illustrationStyle: string;
   fontTheme: string;
@@ -213,7 +212,6 @@ let seedProject: Project = {
   tone: "Curious explorer",
   language: "English",
   bookType: "Illustrated children’s adaptation",
-  maxPages: 72,
   aesthetic: "Bright Explorer",
   illustrationStyle: "Colourful educational illustration",
   fontTheme: "Friendly rounded",
@@ -323,7 +321,6 @@ const emptyProject: Project = {
   adaptation: "Faithful children’s adaptation",
   citationStyle: "Source notes for grown-ups",
   learningFeatures: ["Big question", "Word helper", "Mini challenge"],
-  maxPages: 60,
   chapters: [
     { id: 1, title: "Opening chapter", pages: 10, status: "planned", locked: false, sourceRefs: [], body: `<p class="chapter-kicker">CHAPTER ONE</p><h1>Opening chapter</h1><p class="chapter-deck">Your generated chapter will appear here after the book brief is approved.</p>` },
   ],
@@ -502,7 +499,7 @@ function removeGeneratedChapterMetadata(body: string) {
 
 function reconcileOriginalChapters(project: Project, titles: string[], sections: SourceSection[]) {
   const used = new Set<number>();
-  const defaultPages = Math.max(1, Math.floor((project.maxPages - 8) / Math.max(1, titles.length)));
+  const defaultPages = 6;
   return titles.map((title, index) => {
     let matchIndex = project.chapters.findIndex((chapter, chapterIndex) => !used.has(chapterIndex) && normalizedTitle(chapter.title) === normalizedTitle(title));
     if (matchIndex < 0 && project.chapters[index] && !used.has(index)) matchIndex = index;
@@ -556,12 +553,15 @@ function repairChapterHierarchy(chapters: Chapter[]) {
 }
 
 function normalizeProject(saved: Project): Project {
-  const reader = childAudienceProfile(saved.audience ?? "");
-  const writing = childWritingProfile(saved.tone ?? "");
-  const design = childDesignWorld(saved.aesthetic ?? "");
+  const { maxPages: _removedLegacyPageLimit, ...savedWithoutPageLimit } = saved as Project & { maxPages?: number };
+  void _removedLegacyPageLimit;
+  const cleanSaved = savedWithoutPageLimit as Project;
+  const reader = childAudienceProfile(cleanSaved.audience ?? "");
+  const writing = childWritingProfile(cleanSaved.tone ?? "");
+  const design = childDesignWorld(cleanSaved.aesthetic ?? "");
   const childFirstSaved: Project = {
     ...emptyProject,
-    ...saved,
+    ...cleanSaved,
     audience: reader.value,
     readingLevel: reader.readingLevel,
     tone: writing.value,
@@ -574,7 +574,7 @@ function normalizeProject(saved: Project): Project {
     fontTheme: design.fontTheme,
     imageFrequency: reader.imageFrequency,
   };
-  const normalizedChapters = (saved.chapters ?? []).map((chapter, index) => {
+  const normalizedChapters = (cleanSaved.chapters ?? []).map((chapter, index) => {
     const title = chapter.title || `Chapter ${index + 1}`;
     return {
       id: chapter.id ?? index + 1,
@@ -602,15 +602,15 @@ function normalizeProject(saved: Project): Project {
   return {
     ...emptyProject,
     ...childFirstSaved,
-    sourcePreview: saved.sourcePreview ?? "",
-    sourceSections: saved.sourceSections ?? [],
-    illustrationStyle: saved.illustrationStyle ?? "Editorial watercolour",
-    fontTheme: saved.fontTheme ?? "Literary serif",
-    citationStyle: saved.citationStyle ?? "Source page notes",
-    learningFeatures: saved.learningFeatures ?? ["Key takeaways"],
-    briefApproved: saved.briefApproved ?? false,
-    summaryLengthConfirmed: saved.summaryLengthConfirmed ?? false,
-    sourceHeadings: hierarchy.repaired ? illustratedChapters.map((chapter) => chapter.title) : (saved.sourceHeadings ?? []),
+    sourcePreview: cleanSaved.sourcePreview ?? "",
+    sourceSections: cleanSaved.sourceSections ?? [],
+    illustrationStyle: cleanSaved.illustrationStyle ?? "Editorial watercolour",
+    fontTheme: cleanSaved.fontTheme ?? "Literary serif",
+    citationStyle: cleanSaved.citationStyle ?? "Source page notes",
+    learningFeatures: cleanSaved.learningFeatures ?? ["Key takeaways"],
+    briefApproved: cleanSaved.briefApproved ?? false,
+    summaryLengthConfirmed: cleanSaved.summaryLengthConfirmed ?? false,
+    sourceHeadings: hierarchy.repaired ? illustratedChapters.map((chapter) => chapter.title) : (cleanSaved.sourceHeadings ?? []),
     chapters: illustratedChapters,
   };
 }
@@ -777,8 +777,7 @@ export default function Home() {
       if (!response.ok || !data.source) throw new Error(data.error || "Upload failed");
       const source = data.source;
       const headings = source.headings.length ? source.headings : ["Opening chapter", "Core ideas", "Applications and examples", "Closing reflections"];
-      const chapterBudget = Math.max(1, Math.floor((project.maxPages - 8) / headings.length));
-      const sourceChapters: Chapter[] = headings.map((title, index) => ({ id: index + 1, title, pages: chapterBudget, status: "planned", locked: false, sourceRefs: source.sections[index] ? [source.sections[index]] : [], body: `<p class="chapter-kicker">CHAPTER ${index + 1}</p><h1>${title}</h1><p class="chapter-deck">This chapter is ready for adaptation from the uploaded source.</p>` }));
+      const sourceChapters: Chapter[] = headings.map((title, index) => ({ id: index + 1, title, pages: 6, status: "planned", locked: false, sourceRefs: source.sections[index] ? [source.sections[index]] : [], body: `<p class="chapter-kicker">CHAPTER ${index + 1}</p><h1>${title}</h1><p class="chapter-deck">This chapter is ready for adaptation from the uploaded source.</p>` }));
       const chapters = attachChapterVisuals({ ...project, sourceTerms: source.terms }, sourceChapters);
       patchProject({
         source: source.name,
@@ -1112,7 +1111,7 @@ export default function Home() {
       {view === "editor" && <Editor project={project} active={active} activeId={activeChapter} allocated={allocatedPages} draftBusy={draftBusy} onSelect={setActiveChapter} onSaveBody={saveChapterBody} editorRef={editorRef} onAi={aiAction} onRemember={rememberPreference} onDraft={() => prepareDraft("active")} onToggleLock={() => patchProject({ chapters: project.chapters.map((chapter) => chapter.id === active?.id ? { ...chapter, locked: !chapter.locked } : chapter) })} onAddChapter={addChapter} onUploadImage={uploadChapterImage} onPatchProject={patchProject} onUpdateChapter={updateChapter} />}
 
       {showPreview && <Preview project={project} draftBusy={draftBusy} onFill={() => prepareDraft("thin")} onRefresh={() => prepareDraft("all")} onClose={() => setShowPreview(false)} onPrint={() => window.print()} />}
-      {showVersions && <Versions versions={versions} onCreate={createVersion} onRestore={(snapshot) => { setProject(snapshot); setShowVersions(false); notify("Version restored"); }} onClose={() => setShowVersions(false)} />}
+      {showVersions && <Versions versions={versions} onCreate={createVersion} onRestore={(snapshot) => { setProject(normalizeProject(snapshot)); setShowVersions(false); notify("Version restored"); }} onClose={() => setShowVersions(false)} />}
       {aiRequest && <AiRoundTrip request={aiRequest} onChange={(result) => setAiRequest({ ...aiRequest, result })} onClose={() => setAiRequest(null)} onApply={applyAiResult} />}
       {toast && <div className="toast">✓ {toast}</div>}
     </div>
@@ -1123,7 +1122,7 @@ function Dashboard({ projects, onNew, onOpen, onDuplicate, onDelete }: { project
   return <main className="dashboard">
     <header><div className="brand"><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></div><button className="primary" onClick={onNew}>＋ New book</button></header>
     <section className="hero">
-      <div><p className="eyebrow">CHILDREN’S ADAPTATION STUDIO</p><h1>Turn any source into a book<br/><em>children want to read.</em></h1><p className="hero-copy">Preserve every original chapter, then reshape the writing, activities and visual world for children aged 7–15.</p><button className="hero-cta" onClick={onNew}>Start a children’s adaptation <span>→</span></button><small>AGES 7–15 · PDF · DOCX · TXT · UP TO 100 PAGES</small></div>
+      <div><p className="eyebrow">CHILDREN’S ADAPTATION STUDIO</p><h1>Turn any source into a book<br/><em>children want to read.</em></h1><p className="hero-copy">Preserve every original chapter, then reshape the writing, activities and visual world for children aged 7–15.</p><button className="hero-cta" onClick={onNew}>Start a children’s adaptation <span>→</span></button><small>AGES 7–15 · PDF · DOCX · TXT · NO FIXED PAGE LIMIT</small></div>
       <div className="hero-books" aria-hidden="true"><div className="book back"><span>THE SOURCE</span></div><div className="book front"><span>A BOOK FOR</span><strong>CURIOUS<br/>YOUNG MINDS</strong><i>READ · DISCOVER · CREATE</i><b>✦</b></div></div>
     </section>
     <section className="library-section">
@@ -1171,10 +1170,10 @@ function Wizard({ step, project, sourceBusy, onPatch, onFile, onBack, onNext }: 
     <main className="wizard-main">
       <p className="eyebrow">STEP {step + 1} OF 5 · AGES 7–15</p><h1>{["Choose the source.", "Choose the child reader.", "Choose how it should sound.", "Choose the book world.", "Review your children’s book."][step]}</h1><p className="lead">{["Upload the book you are authorised to adapt.", "Pick one age band. Reading difficulty, text size and visual rhythm adjust together.", "Each writing mode changes the chapter opening, headings, paragraph rhythm and activities.", "Choose a complete visual system and see the page before building the adaptation.", "These child-first choices guide every generated chapter and illustration."][step]}</p>
       {step === 0 && <section className="form-card"><label className={`upload ${sourceBusy ? "busy" : ""}`}><input type="file" accept=".pdf,.docx,.txt,.md" onChange={onFile} disabled={sourceBusy}/><span>{sourceBusy ? "…" : "↑"}</span><strong>{sourceBusy ? "Reading and analysing your book…" : project.source}</strong><small>{sourceBusy ? "Large PDFs can take a short while" : "Click to choose a PDF, DOCX or TXT book (maximum 30 MB)"}</small></label><div className="fields two"><label>New book title<input value={project.title} onChange={(e) => onPatch({ title: e.target.value })}/></label><label>Source book<input value={project.source} readOnly/></label></div></section>}
-      {step === 1 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">READER AGE</p><div className="choice-cards">{childAudienceProfiles.map((profile) => <button className={project.audience === profile.value ? "choice selected" : "choice"} onClick={() => onPatch(audiencePatch(profile.value))} key={profile.value}><span>{profile.value}</span><strong>{profile.label}</strong><small>{profile.description}</small><i>“{profile.sample}”</i></button>)}</div><label className="page-limit">Maximum book length <b>{project.maxPages} pages</b><input type="range" min="10" max="100" value={project.maxPages} onChange={(event) => onPatch({ maxPages: Number(event.target.value) })}/><small>The source-analysis step will still ask how many summary pages each original chapter needs.</small></label></div><BookGlimpse project={project} focus="reader"/></section>}
+      {step === 1 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">READER AGE</p><div className="choice-cards">{childAudienceProfiles.map((profile) => <button className={project.audience === profile.value ? "choice selected" : "choice"} onClick={() => onPatch(audiencePatch(profile.value))} key={profile.value}><span>{profile.value}</span><strong>{profile.label}</strong><small>{profile.description}</small><i>“{profile.sample}”</i></button>)}</div></div><BookGlimpse project={project} focus="reader"/></section>}
       {step === 2 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">WRITING MODE</p><div className="choice-cards writing-choices">{childWritingProfiles.map((profile) => <button className={project.tone === profile.value ? "choice selected" : "choice"} onClick={() => onPatch(writingPatch(profile.value))} key={profile.value}><span className="choice-icon">{profile.icon}</span><strong>{profile.label}</strong><small>{profile.description}</small><i>{profile.hookLabel} · {profile.activityLabel}</i></button>)}</div><div className="language-choice"><span>BOOK LANGUAGE</span>{["English", "Hindi", "English + Hindi"].map((language) => <button className={project.language === language ? "selected" : ""} onClick={() => onPatch({ language })} key={language}>{language}</button>)}</div><div className="auto-settings"><b>Automatically included</b><span>{project.learningFeatures.join(" · ")}</span><small>Facts remain tied to the uploaded source. Source notes are kept for the adult editor and do not clutter the child’s page.</small></div></div><BookGlimpse project={project} focus="writing"/></section>}
       {step === 3 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">VISUAL WORLD</p><div className="design-world-cards">{childDesignWorlds.map((world) => <button className={`${project.aesthetic === world.value ? "selected " : ""}design-world world-${normalizedTitle(world.value).replace(/[^a-z]+/g, "-")}`} onClick={() => onPatch(designWorldPatch(world.value))} key={world.value}><span className="world-thumbnail"><i/><b>Ab</b><i/></span><strong>{world.label}</strong><small>{world.description}</small><em>{world.illustrationStyle} · {world.fontTheme}</em></button>)}</div><div className="auto-settings"><b>Visual guarantee</b><span>At least one different context-based visual in every chapter</span><small>If a literal scene is unsuitable, the app creates a relevant map, timeline, tree, cycle or relationship diagram in the same book world.</small></div></div><BookGlimpse project={project} focus="design"/></section>}
-      {step === 4 && <><section className="brief-review child-review"><div><span>SOURCE</span><strong>{project.source}</strong></div><div><span>CHILD READER</span><strong>{project.audience} · {project.readingLevel}</strong></div><div><span>BOOK</span><strong>{project.bookType}</strong></div><div><span>WRITING</span><strong>{project.tone} · {project.language}</strong></div><div><span>BOOK WORLD</span><strong>{project.aesthetic} · {project.illustrationStyle}</strong></div><div><span>LIMIT</span><strong>{project.maxPages} pages</strong></div></section><BookGlimpse project={project} focus="design"/></>}
+      {step === 4 && <><section className="brief-review child-review"><div><span>SOURCE</span><strong>{project.source}</strong></div><div><span>CHILD READER</span><strong>{project.audience} · {project.readingLevel}</strong></div><div><span>BOOK</span><strong>{project.bookType}</strong></div><div><span>WRITING</span><strong>{project.tone} · {project.language}</strong></div><div><span>BOOK WORLD</span><strong>{project.aesthetic} · {project.illustrationStyle}</strong></div><div><span>LENGTH</span><strong>Set per original chapter</strong></div></section><BookGlimpse project={project} focus="design"/></>}
       <footer className="wizard-footer"><button className="secondary" onClick={onBack}>← Back</button><button className="primary" onClick={onNext} disabled={sourceBusy || (step === 0 && project.source === "No source selected")}>{step === 4 ? "Detect original chapters" : "Continue"} →</button></footer>
     </main>
   </div>;
@@ -1185,23 +1184,23 @@ function Analysis({ project, sourceBusy, onPatch, onBack, onContinue }: { projec
   const pages = project.chapters.map((chapter) => chapter.pages);
   const sharedLength = pages.length && pages.every((value) => value === pages[0]) ? pages[0] : "";
   const setChapterPages = (index: number, value: number) => onPatch({
-    chapters: project.chapters.map((chapter, chapterIndex) => chapterIndex === index ? { ...chapter, pages: Math.max(1, Math.min(30, value || 1)) } : chapter),
+    chapters: project.chapters.map((chapter, chapterIndex) => chapterIndex === index ? { ...chapter, pages: Math.max(1, value || 1) } : chapter),
   });
-  const setAllPages = (value: number) => onPatch({ chapters: project.chapters.map((chapter) => ({ ...chapter, pages: Math.max(1, Math.min(30, value || 1)) })) });
-  return <main className="analysis-page"><button className="text-button" onClick={onBack}>← Change setup</button><p className="eyebrow">SOURCE ANALYSIS</p><h1>{sourceBusy ? "Checking the original chapters…" : "All original chapters detected."}</h1><p className="lead">The adaptation preserves every top-level chapter name and its original order. Now choose how many summary pages each chapter should receive.</p><section className="stats"><div><span>PAGES</span><strong>{project.sourcePages || "—"}</strong></div><div><span>WORDS</span><strong>{project.sourceWords ? project.sourceWords.toLocaleString() : "Pending"}</strong></div><div><span>ORIGINAL CHAPTERS</span><strong>{headings.length}</strong></div><div><span>OUTPUT LIMIT</span><strong>{project.maxPages}</strong></div></section><div className="analysis-grid"><section className="analysis-card chapter-detection"><header><div><p className="eyebrow">ORIGINAL BOOK STRUCTURE</p><h2>{headings.length} chapters will be preserved</h2></div><span className="good">✓ Exact names</span></header><div className="summary-length-question"><div><b>How long should each chapter summary be?</b><span>Set one length for all chapters, then adjust any chapter below.</span></div><label><input aria-label="Summary pages for all chapters" type="number" min="1" max="30" value={sharedLength} placeholder="Mixed" onChange={(event) => setAllPages(Number(event.target.value))}/><span>pages each</span></label></div>{headings.map((heading, index) => <div className="heading-row" key={`${index}-${heading}`}><span>{String(index + 1).padStart(2, "0")}</span><strong>{heading}</strong><label><input aria-label={`Summary pages for ${heading}`} type="number" min="1" max="30" value={project.chapters[index]?.pages ?? 1} onChange={(event) => setChapterPages(index, Number(event.target.value))}/><span>pages</span></label></div>)}</section><aside><div className="analysis-card"><p className="eyebrow">KEY TERMS</p><div className="tags">{(project.sourceTerms.length ? project.sourceTerms : ["analysis pending"]).map((term) => <span key={term}>{term}</span>)}</div></div><div className="analysis-card note"><p className="eyebrow">ORIGINAL NAMES PRESERVED</p><p>Chapter names come from <strong>{project.source}</strong>. The app will not replace them with invented adaptation titles.</p></div></aside></div><footer className="analysis-footer"><span>Summary length can be changed later without renaming the original chapters.</span><button className="primary" disabled={sourceBusy || !headings.length} onClick={onContinue}>Confirm summary pages →</button></footer></main>;
+  const setAllPages = (value: number) => onPatch({ chapters: project.chapters.map((chapter) => ({ ...chapter, pages: Math.max(1, value || 1) })) });
+  const plannedPages = project.chapters.reduce((total, chapter) => total + chapter.pages, 8);
+  return <main className="analysis-page"><button className="text-button" onClick={onBack}>← Change setup</button><p className="eyebrow">SOURCE ANALYSIS</p><h1>{sourceBusy ? "Checking the original chapters…" : "All original chapters detected."}</h1><p className="lead">The adaptation preserves every top-level chapter name and its original order. Now choose how many summary pages each chapter should receive.</p><section className="stats"><div><span>SOURCE PAGES</span><strong>{project.sourcePages || "—"}</strong></div><div><span>WORDS</span><strong>{project.sourceWords ? project.sourceWords.toLocaleString() : "Pending"}</strong></div><div><span>ORIGINAL CHAPTERS</span><strong>{headings.length}</strong></div><div><span>PLANNED PAGES</span><strong>{plannedPages}</strong></div></section><div className="analysis-grid"><section className="analysis-card chapter-detection"><header><div><p className="eyebrow">ORIGINAL BOOK STRUCTURE</p><h2>{headings.length} chapters will be preserved</h2></div><span className="good">✓ Exact names</span></header><div className="summary-length-question"><div><b>How long should each chapter summary be?</b><span>Set one length for all chapters, then adjust any chapter below. There is no maximum page limit.</span></div><label><input aria-label="Summary pages for all chapters" type="number" min="1" value={sharedLength} placeholder="Mixed" onChange={(event) => setAllPages(Number(event.target.value))}/><span>pages each</span></label></div>{headings.map((heading, index) => <div className="heading-row" key={`${index}-${heading}`}><span>{String(index + 1).padStart(2, "0")}</span><strong>{heading}</strong><label><input aria-label={`Summary pages for ${heading}`} type="number" min="1" value={project.chapters[index]?.pages ?? 1} onChange={(event) => setChapterPages(index, Number(event.target.value))}/><span>pages</span></label></div>)}</section><aside><div className="analysis-card"><p className="eyebrow">KEY TERMS</p><div className="tags">{(project.sourceTerms.length ? project.sourceTerms : ["analysis pending"]).map((term) => <span key={term}>{term}</span>)}</div></div><div className="analysis-card note"><p className="eyebrow">ORIGINAL NAMES PRESERVED</p><p>Chapter names come from <strong>{project.source}</strong>. The app will not replace them with invented adaptation titles.</p></div></aside></div><footer className="analysis-footer"><span>Summary length can be changed later without renaming the original chapters.</span><button className="primary" disabled={sourceBusy || !headings.length} onClick={onContinue}>Confirm summary pages →</button></footer></main>;
 }
 
 function BookBrief({ project, allocated, draftBusy, onBack, onUpdateChapter, onPrepare, onContinue }: { project: Project; allocated: number; draftBusy: boolean; onBack: () => void; onUpdateChapter: (id: number, patch: Partial<Chapter>) => void; onPrepare: (scope: "sample" | "all" | "active") => void; onContinue: () => void }) {
   const drafted = project.chapters.filter((chapter) => chapter.status !== "planned").length;
   const first = project.chapters[0];
-  const overBudget = allocated > project.maxPages;
   return <main className="brief-page">
     <button className="text-button" onClick={onBack}>← Back to source analysis</button>
     <header className="brief-hero"><div><p className="eyebrow">CHILDREN’S BOOK BRIEF & PAGE PLAN</p><h1>{project.title}</h1><p className="lead">An illustrated adaptation for {project.audience.toLowerCase()}, written as a {project.tone.toLowerCase()} in the {project.aesthetic.toLowerCase()} book world.</p><div className="brief-chips"><span>{project.language}</span><span>{project.readingLevel}</span><span>{project.imageFrequency}</span></div></div><aside><span>PROMISE TO THE CHILD READER</span><p>Keep the source truthful, make every new word understandable, and give each chapter a question, a visual and something worth thinking about.</p></aside></header>
-    <div className="brief-layout"><section className="plan-card"><header><div><p className="eyebrow">STRUCTURE</p><h2>Chapter and summary-page plan</h2></div><div className={overBudget ? "budget-pill warning" : "budget-pill"}>{allocated} / {project.maxPages} pages</div></header><div className="plan-head"><span>CHAPTER</span><span>ORIGINAL TITLE</span><span>PAGES</span><span>STATE</span></div>{project.chapters.map((chapter, index) => <div className="plan-row" key={chapter.id}><span>{String(index + 1).padStart(2, "0")}</span><strong className="preserved-title">{chapter.title}</strong><input aria-label={`Summary pages for ${chapter.title}`} type="number" min="1" max="30" value={chapter.pages} onChange={(event) => onUpdateChapter(chapter.id, { pages: Math.max(1, Number(event.target.value) || 1) })}/><b className={`draft-state ${chapter.status}`}>{chapter.status}</b></div>)}<footer><span>Includes 8 reserved pages for cover, contents, preface and references.</span>{overBudget && <strong>Reduce {allocated - project.maxPages} pages before approval.</strong>}</footer></section>
+    <div className="brief-layout"><section className="plan-card"><header><div><p className="eyebrow">STRUCTURE</p><h2>Chapter and summary-page plan</h2></div><div className="budget-pill">{allocated} planned pages</div></header><div className="plan-head"><span>CHAPTER</span><span>ORIGINAL TITLE</span><span>PAGES</span><span>STATE</span></div>{project.chapters.map((chapter, index) => <div className="plan-row" key={chapter.id}><span>{String(index + 1).padStart(2, "0")}</span><strong className="preserved-title">{chapter.title}</strong><input aria-label={`Summary pages for ${chapter.title}`} type="number" min="1" value={chapter.pages} onChange={(event) => onUpdateChapter(chapter.id, { pages: Math.max(1, Number(event.target.value) || 1) })}/><b className={`draft-state ${chapter.status}`}>{chapter.status}</b></div>)}<footer><span>Includes 8 planned pages for cover, contents, preface and references. There is no fixed maximum.</span></footer></section>
       <aside className="generation-card"><p className="eyebrow">FULL CHAPTER BUILDER</p><h2>Prepare the manuscript</h2><p>Build substantial editable chapters from multiple relevant passages in the uploaded source. Page markers and source evidence are added automatically. Locked chapters are never overwritten.</p><div className="draft-progress"><span><b>{drafted}</b> of {project.chapters.length} drafted</span><i><b style={{ width: `${project.chapters.length ? drafted / project.chapters.length * 100 : 0}%` }}/></i></div><button className="secondary full" disabled={draftBusy} onClick={() => onPrepare("sample")}>{draftBusy ? "Reading the source…" : "Build full sample chapter"}</button><button className="primary full" disabled={draftBusy} onClick={() => onPrepare("all")}>{draftBusy ? "Building full chapters…" : "Build all full chapters"}</button><small>This source-grounded builder works without an AI key. Use the editorial assistant afterward when you want stylistic rewriting.</small></aside></div>
     {first && <section className="sample-spread"><div className="sample-copy"><p className="eyebrow">SAMPLE SPREAD</p><span>CHAPTER 01</span><h2>{first.title}</h2><p>{first.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 420)}</p><button className="text-button" onClick={() => onPrepare("sample")}>{first.status === "planned" ? "Create this sample" : "Refresh sample draft"} →</button></div>{first.imageUrl ? <figure className="sample-art sample-art-image"><img src={first.imageUrl} alt={first.imageAlt || first.imageCaption || first.title}/><figcaption>{first.imageCaption || first.title}</figcaption></figure> : <div className="sample-art"><span>ILLUSTRATION DIRECTION</span><strong>{project.aesthetic}</strong><p>{first.title} · {project.imageFrequency}</p><b>✦</b></div>}</section>}
-    <footer className="brief-actions"><div><b>{overBudget ? "Page plan needs attention" : "Ready for editorial review"}</b><span>{drafted ? `${drafted} chapter draft${drafted === 1 ? "" : "s"} prepared` : "Prepare at least one chapter now, or begin with a blank structure."}</span></div><button className="primary" disabled={overBudget} onClick={onContinue}>Approve brief & open studio →</button></footer>
+    <footer className="brief-actions"><div><b>Ready for editorial review</b><span>{drafted ? `${drafted} chapter draft${drafted === 1 ? "" : "s"} prepared` : "Prepare at least one chapter now, or begin with a blank structure."}</span></div><button className="primary" onClick={onContinue}>Approve brief & open studio →</button></footer>
   </main>;
 }
 
@@ -1210,7 +1209,7 @@ function Editor({ project, active, activeId, allocated, draftBusy, onSelect, edi
   if (!active) return null;
   const fontClass = project.fontTheme.toLowerCase().replace(/[^a-z]+/g, "-");
   return <main className="editor-layout">
-    <aside className="chapters"><header><p className="eyebrow">BOOK STRUCTURE</p><button onClick={onAddChapter} aria-label="Add chapter">＋</button></header><div className="front-matter"><span>FM</span><div><b>Front matter</b><small>Cover · Contents · Preface</small></div></div>{project.chapters.map((chapter) => <button className={chapter.id === activeId ? "chapter active" : "chapter"} onClick={() => onSelect(chapter.id)} key={chapter.id}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small>{chapter.pages} pages · {chapter.status}</small></div><i>{chapter.locked ? "◆" : ""}</i></button>)}<div className="page-budget"><span><b>{allocated}</b> / {project.maxPages} pages</span><i><b style={{ width: `${Math.min(100, allocated / project.maxPages * 100)}%` }}/></i><small>{Math.max(0, project.maxPages - allocated)} pages available</small></div></aside>
+    <aside className="chapters"><header><p className="eyebrow">BOOK STRUCTURE</p><button onClick={onAddChapter} aria-label="Add chapter">＋</button></header><div className="front-matter"><span>FM</span><div><b>Front matter</b><small>Cover · Contents · Preface</small></div></div>{project.chapters.map((chapter) => <button className={chapter.id === activeId ? "chapter active" : "chapter"} onClick={() => onSelect(chapter.id)} key={chapter.id}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small>{chapter.pages} pages · {chapter.status}</small></div><i>{chapter.locked ? "◆" : ""}</i></button>)}<div className="page-budget"><span><b>{allocated}</b> planned pages</span><small>No fixed maximum page limit</small></div></aside>
     <section className="canvas"><nav className="editor-tools"><div><button onClick={() => document.execCommand("bold")}><b>B</b></button><button onClick={() => document.execCommand("italic")}><i>I</i></button><button onClick={() => document.execCommand("formatBlock", false, "h2")}>H2</button><button onClick={() => document.execCommand("insertUnorderedList")}>• List</button></div><div className="chapter-meter"><span>{active.pages} target pages</span><i><b style={{ width: active.status === "planned" ? "18%" : "67%" }}/></i><button onClick={onToggleLock}>{active.locked ? "◆ Locked" : "◇ Lock"}</button></div></nav><div className="page-stage"><article className={`paper font-${fontClass} world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")} age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}${active.imageUrl ? " has-chapter-image" : ""}`}><header><span>{project.title}</span><span>{project.audience}</span></header><div className="ornament">✦</div><div key={active.id} ref={editorRef} className="book-copy" contentEditable={!active.locked} suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: active.body }}/>{active.imageUrl && <figure className="chapter-image"><img src={active.imageUrl} alt={active.imageAlt || active.imageCaption || active.title}/><figcaption>{active.imageCaption || active.title}</figcaption></figure>}<footer><span>{project.source}</span><span>{active.id}</span></footer></article></div><button className="save-float" onClick={onSaveBody}>✓ Save chapter</button></section>
     <aside className="assistant"><nav><button className={tab === "ai" ? "active" : ""} onClick={() => setTab("ai")}>✦<span>AI EDIT</span></button><button className={tab === "design" ? "active" : ""} onClick={() => setTab("design")}>◈<span>DESIGN</span></button><button className={tab === "sources" ? "active" : ""} onClick={() => setTab("sources")}>⌕<span>SOURCES</span></button></nav><div className="assistant-body">
       {tab === "ai" && <><div className="assistant-title"><span>✦</span><div><b>Editorial assistant</b><small>Select text, then choose an action.</small></div></div>{!active.locked && <button className="draft-chapter-button" disabled={draftBusy} onClick={onDraft}>{draftBusy ? "Reading the source…" : chapterWordCount(active) < 350 ? "✦ Build this full chapter" : "↻ Rebuild full chapter from source"}</button>}<p className="selection-tip">This chapter has <b>{chapterWordCount(active).toLocaleString()} words</b>. The full chapter builder uses the uploaded source; the guided edit actions can then refine the writing in ChatGPT.</p><div className="ai-list">{["Simplify language", "Shorten selection", "Expand with examples", "Make age-appropriate", "Improve storytelling", "Check against source", "Suggest an illustration"].map((action) => <button onClick={() => onAi(action)} key={action}><span>✦</span>{action}<i>→</i></button>)}</div><div className="memory-box"><p className="eyebrow">EDITORIAL MEMORY</p><p>{project.editorialPreferences.length ? project.editorialPreferences.join(" · ") : "No saved preferences yet"}</p><button onClick={() => onRemember("book")}>＋ Remember for this book</button><button onClick={() => onRemember("designer")}>＋ Remember for future books</button></div></>}
