@@ -32,6 +32,9 @@ type DraftProjectInput = {
   audience?: string;
   readingLevel?: string;
   tone?: string;
+  language?: string;
+  adaptation?: string;
+  learningFeatures?: string[];
   aesthetic?: string;
   illustrationStyle?: string;
   imageFrequency?: string;
@@ -219,9 +222,48 @@ function selectChapterPages(pageTexts: string[], chapter: DraftChapterInput, ind
   return { selected, keywords };
 }
 
+function childWritingProfile(tone = "") {
+  const key = tone.toLowerCase();
+  if (key.includes("story")) return {
+    id: "story-journey",
+    hookLabel: "STEP INTO THE STORY",
+    hook: "Imagine entering the world of this chapter. Each discovery will reveal another part of the source.",
+    sectionTitles: ["Where our journey begins", "A discovery", "The turning point", "What the journey teaches us", "Carry the story forward"],
+    bridges: ["Picture this: ", "As the journey continues: ", "Here is the next discovery: "],
+    activityLabel: "STORY PAUSE",
+    activity: "What would you notice, ask or do if you were part of this chapter’s world?",
+  };
+  if (key.includes("friendly") || key.includes("warm") || key.includes("clear")) return {
+    id: "friendly-guide",
+    hookLabel: "LET’S BEGIN",
+    hook: "We will unpack this idea together, using clear steps and a helpful word guide.",
+    sectionTitles: ["Let’s look closely", "One important idea", "Why it matters", "Connect it together", "Remember this"],
+    bridges: ["Start with this: ", "The helpful idea is: ", "Now connect it: "],
+    activityLabel: "QUICK CHECK",
+    activity: "Can you explain the chapter’s main idea in your own words?",
+  };
+  return {
+    id: "curious-explorer",
+    hookLabel: "BIG QUESTION",
+    hook: "What can we discover here? Let’s collect clues, connect ideas and test what we learn.",
+    sectionTitles: ["The big question", "Clue one", "Connect the clues", "Look from another angle", "Try thinking like an explorer"],
+    bridges: ["Clue: ", "Look closely: ", "Connect this idea: "],
+    activityLabel: "MINI CHALLENGE",
+    activity: "Draw a three-part map that connects the chapter’s most important ideas.",
+  };
+}
+
+function childReadingDensity(audience = "") {
+  if (/7\s*[–-]\s*9|7\s*[-–]\s*10/i.test(audience)) return { wordsPerPage: 115, evidencePerParagraph: 1 };
+  if (/13\s*[–-]\s*15|15\s*[–-]\s*18/i.test(audience)) return { wordsPerPage: 180, evidencePerParagraph: 2 };
+  return { wordsPerPage: 145, evidencePerParagraph: 1 };
+}
+
 function buildSourceDraft(pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput, usedEvidence: Set<string>) {
   const { selected, keywords } = selectChapterPages(pageTexts, chapter, index, total, project.sourceTerms ?? []);
-  const targetWords = Math.max(700, Math.min(2000, chapter.pages * 190));
+  const writing = childWritingProfile(project.tone);
+  const reading = childReadingDensity(project.audience);
+  const targetWords = Math.max(520, Math.min(1900, chapter.pages * reading.wordsPerPage));
   const seen = new Set<string>();
   const evidence: Array<{ page: number; sentence: string }> = [];
   for (const entry of selected) {
@@ -251,28 +293,27 @@ function buildSourceDraft(pageTexts: string[], chapter: DraftChapterInput, index
   }
   const safeTitle = escapeHtml(chapter.title);
   const focusTerms = keywords.slice(0, 3).map((term) => escapeHtml(term));
-  const sectionTitles = [
-    `Opening the idea`,
-    focusTerms[0] ? `Understanding ${focusTerms[0]}` : `Ideas in context`,
-    focusTerms[1] ? `${focusTerms[1][0].toUpperCase()}${focusTerms[1].slice(1)} and its wider setting` : `Evidence and interpretation`,
-    `Connections and consequences`,
-    `Questions to carry forward`,
-  ];
+  const sectionTitles = writing.sectionTitles.map((heading, sectionIndex) => sectionIndex === 1 && focusTerms[0]
+    ? `${heading}: ${focusTerms[0][0].toUpperCase()}${focusTerms[0].slice(1)}`
+    : sectionIndex === 2 && focusTerms[1]
+      ? `${heading}: ${focusTerms[1][0].toUpperCase()}${focusTerms[1].slice(1)}`
+      : heading);
   const groupSize = Math.max(2, Math.ceil(chosen.length / sectionTitles.length));
   const sections = sectionTitles.map((heading, sectionIndex) => {
     const slice = chosen.slice(sectionIndex * groupSize, (sectionIndex + 1) * groupSize);
     if (!slice.length) return "";
     const paragraphs: string[] = [];
-    for (let cursor = 0; cursor < slice.length; cursor += 2) {
-      const pair = slice.slice(cursor, cursor + 2);
-      paragraphs.push(`<p>${pair.map((item) => escapeHtml(item.sentence)).join(" ")} <sup>${[...new Set(pair.map((item) => item.page).filter(Boolean))].map((page) => `p. ${page}`).join(", ")}</sup></p>`);
+    for (let cursor = 0; cursor < slice.length; cursor += reading.evidencePerParagraph) {
+      const pair = slice.slice(cursor, cursor + reading.evidencePerParagraph);
+      const bridge = writing.bridges[(sectionIndex + cursor) % writing.bridges.length];
+      paragraphs.push(`<p><span class="reading-bridge">${escapeHtml(bridge)}</span>${pair.map((item) => escapeHtml(item.sentence)).join(" ")} <sup>${[...new Set(pair.map((item) => item.page).filter(Boolean))].map((page) => `p. ${page}`).join(", ")}</sup></p>`);
     }
     return `<h2>${heading}</h2>${paragraphs.join("")}`;
   }).join("");
   const refs = [...new Map(chosen.filter((item) => item.page > 0).map((item) => [item.page, item])).values()].slice(0, 8)
     .map((item) => ({ title: chapter.title, page: item.page, excerpt: item.sentence.slice(0, 520) }));
   const visual = escapeHtml(`${project.illustrationStyle || "Editorial illustration"} in a ${(project.aesthetic || "coherent editorial").toLowerCase()} direction, grounded in the source evidence for ${chapter.title}.`);
-  const body = `<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${safeTitle}</h1><div class="source-draft-notice"><b>SOURCE-GROUNDED MANUSCRIPT</b><span>This is a substantial editable draft assembled from the uploaded book. Page markers show where its evidence came from.</span></div>${sections}<div class="illustration"><span>ILLUSTRATION DIRECTION</span><strong>${safeTitle}</strong><small>${visual}</small></div><div class="takeaway"><b>READER REFLECTION</b><p>Which idea in this chapter most changes how you understand the subject? Return to the linked source pages before approving important claims or quotations.</p></div>`;
+  const body = `<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${safeTitle}</h1><div class="child-opening child-opening-${writing.id}"><b>${writing.hookLabel}</b><p>${writing.hook}</p></div><div class="source-draft-notice"><b>EDITOR’S SOURCE CHECK</b><span>Page markers connect the child-friendly chapter back to the uploaded book. Verify important names, dates and quotations before approval.</span></div>${sections}<div class="illustration"><span>ILLUSTRATION DIRECTION</span><strong>${safeTitle}</strong><small>${visual}</small></div><div class="takeaway child-activity"><b>${writing.activityLabel}</b><p>${writing.activity}</p></div>`;
   return { ...chapter, status: "draft" as const, body, sourceRefs: refs, wordCount: words };
 }
 
@@ -414,6 +455,9 @@ function titleLines(value: string, limit = 34) {
 
 function visualPalette(aesthetic: string) {
   const key = aesthetic.toLowerCase();
+  if (key.includes("storybook")) return { background: "#FFF0D2", paper: "#FFF9EC", ink: "#284338", accent: "#C7523C", gold: "#E5A93F", muted: "#64776E" };
+  if (key.includes("bright explorer")) return { background: "#EAF7F1", paper: "#FFFFFF", ink: "#173F4C", accent: "#F06449", gold: "#F2BB3D", muted: "#5E7980" };
+  if (key.includes("young scholar")) return { background: "#EEF1E8", paper: "#FCFBF5", ink: "#263D38", accent: "#8C5947", gold: "#BE9848", muted: "#68766F" };
   if (key.includes("modern") || key.includes("minimal")) return { background: "#F2F5F3", paper: "#FFFFFF", ink: "#173A33", accent: "#C96845", gold: "#D4A84F", muted: "#6A7C75" };
   if (key.includes("children") || key.includes("playful")) return { background: "#FFF3DE", paper: "#FFFCF5", ink: "#24463D", accent: "#E66B50", gold: "#F1B94B", muted: "#697A72" };
   return { background: "#EEE4D2", paper: "#FAF6EC", ink: "#173A33", accent: "#A64E35", gold: "#D8A94F", muted: "#66766F" };

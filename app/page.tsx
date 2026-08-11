@@ -206,19 +206,19 @@ let seedProject: Project = {
     { title: "Strategy and Diplomacy", page: 101, excerpt: "Diplomacy and strategy require realistic assessment, preparation and awareness of changing relationships." },
   ],
   sourcePreview: "The Arthashastra presents knowledge, discipline, public welfare, economic organisation and statecraft as connected responsibilities. It asks how institutions can be designed, how leaders should be educated, and how prosperity can be protected through careful administration.",
-  audience: "Young adults (15–18)",
-  readingLevel: "Accessible academic",
-  tone: "Clear and engaging",
+  audience: "Ages 10–12",
+  readingLevel: "Confident independent reader",
+  tone: "Curious explorer",
   language: "English",
-  bookType: "Illustrated learning book",
+  bookType: "Illustrated children’s adaptation",
   maxPages: 72,
-  aesthetic: "Classical Indian",
-  illustrationStyle: "Editorial watercolour",
-  fontTheme: "Literary serif",
-  imageFrequency: "Medium — 1 per 3 pages",
-  adaptation: "Faithful, reader-friendly adaptation",
-  citationStyle: "Source page notes",
-  learningFeatures: ["Key takeaways", "Glossary"],
+  aesthetic: "Bright Explorer",
+  illustrationStyle: "Colourful educational illustration",
+  fontTheme: "Friendly rounded",
+  imageFrequency: "Picture-rich — at least 1 per chapter",
+  adaptation: "Faithful children’s adaptation",
+  citationStyle: "Source notes for grown-ups",
+  learningFeatures: ["Big question", "Word helper", "Mini challenge"],
   editorialPreferences: ["Clear sentences", "Preserve specialist terms", "Explain Sanskrit words on first use"],
   briefApproved: true,
   summaryLengthConfirmed: true,
@@ -309,8 +309,18 @@ const emptyProject: Project = {
   sourceTerms: [],
   sourceSections: [],
   sourcePreview: "",
-  audience: "General readers (18+)",
-  readingLevel: "Clear and accessible",
+  audience: "Ages 10–12",
+  readingLevel: "Confident independent reader",
+  tone: "Curious explorer",
+  language: "English",
+  bookType: "Illustrated children’s adaptation",
+  aesthetic: "Bright Explorer",
+  illustrationStyle: "Colourful educational illustration",
+  fontTheme: "Friendly rounded",
+  imageFrequency: "Picture-rich — at least 1 per chapter",
+  adaptation: "Faithful children’s adaptation",
+  citationStyle: "Source notes for grown-ups",
+  learningFeatures: ["Big question", "Word helper", "Mini challenge"],
   maxPages: 60,
   chapters: [
     { id: 1, title: "Opening chapter", pages: 10, status: "planned", locked: false, sourceRefs: [], body: `<p class="chapter-kicker">CHAPTER ONE</p><h1>Opening chapter</h1><p class="chapter-deck">Your generated chapter will appear here after the book brief is approved.</p>` },
@@ -321,6 +331,149 @@ const emptyProject: Project = {
 };
 
 const wizardSteps = ["Source", "Reader", "Writing", "Design", "Review"];
+
+const childAudienceProfiles = [
+  {
+    value: "Ages 7–9",
+    label: "Early explorers",
+    readingLevel: "Early independent reader",
+    description: "Short sentences, familiar words and frequent visual pauses.",
+    sample: "A big idea can begin with a small question. Let’s look closely and discover what it means.",
+    imageFrequency: "Highly illustrated — 1 per page",
+  },
+  {
+    value: "Ages 10–12",
+    label: "Curious readers",
+    readingLevel: "Confident independent reader",
+    description: "Clear explanations, new vocabulary and hands-on challenges.",
+    sample: "Every chapter begins with a question, gathers clues from the source, and connects them to the world you know.",
+    imageFrequency: "Picture-rich — at least 1 per chapter",
+  },
+  {
+    value: "Ages 13–15",
+    label: "Young thinkers",
+    readingLevel: "Teen reader",
+    description: "Richer ideas, precise terms and room for reflection and debate.",
+    sample: "This chapter explores how one central idea developed, why it mattered, and how its different parts connect.",
+    imageFrequency: "Balanced visuals — at least 1 per chapter",
+  },
+] as const;
+
+const childWritingProfiles = [
+  {
+    value: "Friendly guide",
+    label: "Friendly guide",
+    icon: "☀",
+    description: "A calm teacher explains one idea at a time.",
+    hookLabel: "LET’S BEGIN",
+    hook: "We will unpack this idea together, using clear steps and a helpful word guide.",
+    sections: ["Let’s look closely", "One important idea", "Why it matters", "Remember this"],
+    activityLabel: "QUICK CHECK",
+    activity: "Can you explain the main idea in your own words?",
+    learningFeatures: ["Key idea", "Word helper", "Quick check"],
+  },
+  {
+    value: "Story journey",
+    label: "Story journey",
+    icon: "✦",
+    description: "Facts unfold through a scene, a journey and moments of discovery.",
+    hookLabel: "STEP INTO THE STORY",
+    hook: "Imagine entering the world of this chapter. Each discovery will reveal another part of the source.",
+    sections: ["Where our journey begins", "A discovery", "The turning point", "What the journey teaches us"],
+    activityLabel: "STORY PAUSE",
+    activity: "What would you notice, ask or do if you were there?",
+    learningFeatures: ["Scene opener", "Story pause", "Word helper"],
+  },
+  {
+    value: "Curious explorer",
+    label: "Curious explorer",
+    icon: "⌕",
+    description: "Questions, clues, diagrams and mini challenges drive the chapter.",
+    hookLabel: "BIG QUESTION",
+    hook: "What can we discover here? Let’s collect clues, connect ideas and test what we learn.",
+    sections: ["The big question", "Clue one", "Connect the clues", "Try thinking like an explorer"],
+    activityLabel: "MINI CHALLENGE",
+    activity: "Draw a three-part map that connects the chapter’s most important ideas.",
+    learningFeatures: ["Big question", "Word helper", "Mini challenge"],
+  },
+] as const;
+
+const childDesignWorlds = [
+  {
+    value: "Storybook India",
+    label: "Storybook India",
+    description: "Warm paper, rich jewel colours and hand-painted storytelling.",
+    illustrationStyle: "Warm storybook painting",
+    fontTheme: "Friendly rounded",
+  },
+  {
+    value: "Bright Explorer",
+    label: "Bright Explorer",
+    description: "Fresh colour, bold diagrams and energetic learning pages.",
+    illustrationStyle: "Colourful educational illustration",
+    fontTheme: "Friendly rounded",
+  },
+  {
+    value: "Young Scholar",
+    label: "Young Scholar",
+    description: "Calm colours, detailed art and a more grown-up reading rhythm.",
+    illustrationStyle: "Detailed editorial illustration",
+    fontTheme: "Readable serif",
+  },
+] as const;
+
+function childAudienceProfile(value: string) {
+  const direct = childAudienceProfiles.find((profile) => profile.value === value);
+  if (direct) return direct;
+  if (/7\s*[–-]|children\s*\(7/i.test(value)) return childAudienceProfiles[0];
+  if (/13|14|15/i.test(value)) return childAudienceProfiles[2];
+  return childAudienceProfiles[1];
+}
+
+function childWritingProfile(value: string) {
+  const direct = childWritingProfiles.find((profile) => profile.value === value);
+  if (direct) return direct;
+  if (/story/i.test(value)) return childWritingProfiles[1];
+  if (/warm|friendly|clear/i.test(value)) return childWritingProfiles[0];
+  return childWritingProfiles[2];
+}
+
+function childDesignWorld(value: string) {
+  const direct = childDesignWorlds.find((world) => world.value === value);
+  if (direct) return direct;
+  if (/classical|warm|children|storybook/i.test(value)) return childDesignWorlds[0];
+  if (/academic|scholar|minimal/i.test(value)) return childDesignWorlds[2];
+  return childDesignWorlds[1];
+}
+
+function audiencePatch(value: string): Partial<Project> {
+  const profile = childAudienceProfile(value);
+  return {
+    audience: profile.value,
+    readingLevel: profile.readingLevel,
+    bookType: "Illustrated children’s adaptation",
+    imageFrequency: profile.imageFrequency,
+  };
+}
+
+function writingPatch(value: string): Partial<Project> {
+  const profile = childWritingProfile(value);
+  return {
+    tone: profile.value,
+    adaptation: "Faithful children’s adaptation",
+    citationStyle: "Source notes for grown-ups",
+    learningFeatures: [...profile.learningFeatures],
+  };
+}
+
+function designWorldPatch(value: string): Partial<Project> {
+  const world = childDesignWorld(value);
+  return {
+    aesthetic: world.value,
+    illustrationStyle: world.illustrationStyle,
+    fontTheme: world.fontTheme,
+  };
+}
 
 function isChapterLabel(value: string) {
   return /^chapter\s+(?:\d{1,3}|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*[:.\-–—]?$/i.test(value.trim());
@@ -400,6 +553,24 @@ function repairChapterHierarchy(chapters: Chapter[]) {
 }
 
 function normalizeProject(saved: Project): Project {
+  const reader = childAudienceProfile(saved.audience ?? "");
+  const writing = childWritingProfile(saved.tone ?? "");
+  const design = childDesignWorld(saved.aesthetic ?? "");
+  const childFirstSaved: Project = {
+    ...emptyProject,
+    ...saved,
+    audience: reader.value,
+    readingLevel: reader.readingLevel,
+    tone: writing.value,
+    bookType: "Illustrated children’s adaptation",
+    adaptation: "Faithful children’s adaptation",
+    citationStyle: "Source notes for grown-ups",
+    learningFeatures: [...writing.learningFeatures],
+    aesthetic: design.value,
+    illustrationStyle: design.illustrationStyle,
+    fontTheme: design.fontTheme,
+    imageFrequency: reader.imageFrequency,
+  };
   const normalizedChapters = (saved.chapters ?? []).map((chapter, index) => {
     const title = chapter.title || `Chapter ${index + 1}`;
     return {
@@ -422,11 +593,11 @@ function normalizeProject(saved: Project): Project {
   // Chapter labels and their following titles are merged above. Attach curated
   // art only after that repair so every final chapter title receives its own
   // matching illustration, including already-saved projects.
-  const visualProject = { ...emptyProject, ...saved };
+  const visualProject = childFirstSaved;
   const illustratedChapters = attachChapterVisuals(visualProject, hierarchy.chapters);
   return {
     ...emptyProject,
-    ...saved,
+    ...childFirstSaved,
     sourcePreview: saved.sourcePreview ?? "",
     sourceSections: saved.sourceSections ?? [],
     illustrationStyle: saved.illustrationStyle ?? "Editorial watercolour",
@@ -496,12 +667,13 @@ function createChapterDraft(project: Project, chapter: Chapter, index: number): 
   const term = escapeHtml(project.sourceTerms[index % Math.max(1, project.sourceTerms.length)] || "key idea");
   const nextTerm = escapeHtml(project.sourceTerms[(index + 1) % Math.max(1, project.sourceTerms.length)] || "context");
   const title = escapeHtml(chapter.title);
+  const writing = childWritingProfile(project.tone);
   const visual = escapeHtml(`${project.illustrationStyle} in a ${project.aesthetic.toLowerCase()} direction, connecting ${chapter.title} with ${term}; ${project.imageFrequency.toLowerCase()}`);
   return {
     ...chapter,
     status: "draft",
     sourceRefs: sourceRef ? [sourceRef] : chapter.sourceRefs,
-    body: `<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${title}</h1><h2>The central idea</h2><p>${first}</p><p>${second}</p><blockquote>This draft remains anchored to the uploaded source and is ready for an editor to refine.</blockquote><h2>${term.charAt(0).toUpperCase() + term.slice(1)} in context</h2><p>This section connects <strong>${term}</strong> with <strong>${nextTerm}</strong>. Use the source-reference view during editing to verify names, dates, quotations and specialist terminology before approval.</p><div class="illustration"><span>ILLUSTRATION DIRECTION</span><strong>${title}</strong><small>${visual}</small></div><div class="takeaway"><b>KEY TAKEAWAYS</b><p>Review the source evidence, explain specialist language for the selected reader, and preserve the meaning while improving clarity.</p></div>${sourceRef ? `<p class="source-note">Source note: ${escapeHtml(sourceRef.title)}, p. ${sourceRef.page}</p>` : ""}`,
+    body: `<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${title}</h1><div class="child-opening child-opening-${normalizedTitle(writing.value).replace(/[^a-z]+/g, "-")}"><b>${writing.hookLabel}</b><p>${writing.hook}</p></div><h2>${writing.sections[0]}</h2><p>${first}</p><h2>${writing.sections[1]}</h2><p>${second}</p><h2>${writing.sections[2]}</h2><p>This section connects <strong>${term}</strong> with <strong>${nextTerm}</strong> so the chapter’s big idea is easier to see.</p><div class="illustration"><span>ILLUSTRATION DIRECTION</span><strong>${title}</strong><small>${visual}</small></div><div class="takeaway child-activity"><b>${writing.activityLabel}</b><p>${writing.activity}</p></div>${sourceRef ? `<p class="source-note">Source note: ${escapeHtml(sourceRef.title)}, p. ${sourceRef.page}</p>` : ""}`,
   };
 }
 
@@ -881,6 +1053,9 @@ export default function Home() {
           audience: project.audience,
           readingLevel: project.readingLevel,
           tone: project.tone,
+          language: project.language,
+          adaptation: project.adaptation,
+          learningFeatures: project.learningFeatures,
           aesthetic: project.aesthetic,
           illustrationStyle: project.illustrationStyle,
           imageFrequency: project.imageFrequency,
@@ -938,8 +1113,8 @@ function Dashboard({ projects, onNew, onOpen, onDuplicate, onDelete }: { project
   return <main className="dashboard">
     <header><div className="brand"><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></div><button className="primary" onClick={onNew}>＋ New book</button></header>
     <section className="hero">
-      <div><p className="eyebrow">YOUR AI-GUIDED EDITORIAL WORKSPACE</p><h1>Turn any source into a book<br/><em>made for its reader.</em></h1><p className="hero-copy">Upload a source, choose the audience and aesthetic, then shape every chapter in one beautiful workspace.</p><button className="hero-cta" onClick={onNew}>Start a new adaptation <span>→</span></button><small>PDF · DOCX · TXT · UP TO 100 PAGES</small></div>
-      <div className="hero-books" aria-hidden="true"><div className="book back"><span>THE SOURCE</span></div><div className="book front"><span>THE ART OF</span><strong>WISE<br/>GOVERNANCE</strong><i>AN ILLUSTRATED GUIDE</i><b>✦</b></div></div>
+      <div><p className="eyebrow">CHILDREN’S ADAPTATION STUDIO</p><h1>Turn any source into a book<br/><em>children want to read.</em></h1><p className="hero-copy">Preserve every original chapter, then reshape the writing, activities and visual world for children aged 7–15.</p><button className="hero-cta" onClick={onNew}>Start a children’s adaptation <span>→</span></button><small>AGES 7–15 · PDF · DOCX · TXT · UP TO 100 PAGES</small></div>
+      <div className="hero-books" aria-hidden="true"><div className="book back"><span>THE SOURCE</span></div><div className="book front"><span>A BOOK FOR</span><strong>CURIOUS<br/>YOUNG MINDS</strong><i>READ · DISCOVER · CREATE</i><b>✦</b></div></div>
     </section>
     <section className="library-section">
       <div className="section-title"><div><p className="eyebrow">YOUR LIBRARY</p><h2>Continue where you left off</h2></div><span>{projects.length} {projects.length === 1 ? "project" : "projects"}</span></div>
@@ -948,21 +1123,49 @@ function Dashboard({ projects, onNew, onOpen, onDuplicate, onDelete }: { project
         {projects.map((project) => <article className="project-card" key={project.id}><button className="project-open" onClick={() => onOpen(project)}><div className="mini-cover"><span>{project.chapters.length}</span><small>CHAPTERS</small></div><div><span className="status">IN EDITING</span><h3>{project.title}</h3><p>{project.source}</p><footer><span>{project.updatedAt}</span><strong>Open project →</strong></footer></div></button><div className="project-menu"><button onClick={() => onDuplicate(project)}>Duplicate</button>{project.id !== "arthashastra-sample" && <button onClick={() => onDelete(project)}>Delete</button>}</div></article>)}
       </div>
     </section>
-    <section className="workflow"><div><span>01</span><b>Upload</b><small>Any source book</small></div><i>→</i><div><span>02</span><b>Shape</b><small>Audience and style</small></div><i>→</i><div><span>03</span><b>Edit</b><small>Text and visuals</small></div><i>→</i><div><span>04</span><b>Publish</b><small>PDF or editable file</small></div></section>
+    <section className="workflow"><div><span>01</span><b>Upload</b><small>Any source book</small></div><i>→</i><div><span>02</span><b>Choose</b><small>Age, voice and book world</small></div><i>→</i><div><span>03</span><b>Adapt</b><small>Child-friendly text and visuals</small></div><i>→</i><div><span>04</span><b>Publish</b><small>PDF or editable file</small></div></section>
   </main>;
+}
+
+function glimpseSample(project: Project) {
+  const writing = childWritingProfile(project.tone);
+  if (project.language === "Hindi") {
+    if (writing.value === "Story journey") return "कल्पना कीजिए कि आप इस अध्याय की दुनिया में प्रवेश कर रहे हैं। हर खोज हमें स्रोत के एक नए विचार तक ले जाएगी।";
+    if (writing.value === "Friendly guide") return "आइए इस विचार को छोटे और साफ़ चरणों में समझें। नए शब्दों के लिए एक आसान शब्द-सहायक भी मिलेगा।";
+    return "हम यहाँ क्या खोज सकते हैं? आइए संकेत जुटाएँ, विचारों को जोड़ें और अपनी समझ को जाँचें।";
+  }
+  if (project.language === "English + Hindi") return `${writing.hook} / आइए इस अध्याय के मुख्य विचारों को खोजें और समझें।`;
+  return writing.hook;
+}
+
+function BookGlimpse({ project, focus }: { project: Project; focus: "reader" | "writing" | "design" }) {
+  const reader = childAudienceProfile(project.audience);
+  const writing = childWritingProfile(project.tone);
+  const design = childDesignWorld(project.aesthetic);
+  const chapterTitle = project.sourceHeadings[0] || "A Big Idea to Explore";
+  const worldClass = normalizedTitle(design.value).replace(/[^a-z]+/g, "-");
+  const ageClass = reader.value.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "");
+  return <aside className={`book-glimpse world-${worldClass} age-${ageClass}`} aria-live="polite">
+    <header><div><p className="eyebrow">LIVE BOOK GLIMPSE</p><h2>This is how the choice feels</h2></div><span>{focus === "reader" ? reader.value : focus === "writing" ? writing.label : design.label}</span></header>
+    <div className="glimpse-spread">
+      <div className="glimpse-cover"><small>AN ILLUSTRATED BOOK FOR</small><strong>{reader.value.replace("Ages ", "AGES ")}</strong><div className="cover-symbol"><i/><i/><i/></div><h3>{project.title === "Untitled adaptation" ? "YOUR NEW BOOK" : project.title}</h3><span>{design.label}</span></div>
+      <div className="glimpse-page"><span>CHAPTER 01</span><h3>{chapterTitle}</h3><div className="glimpse-illustration" aria-hidden="true"><i/><b>✦</b><i/></div><b className="glimpse-hook">{writing.hookLabel}</b><p>{glimpseSample(project)}</p><div className="glimpse-callout"><strong>{writing.activityLabel}</strong><span>{writing.activity}</span></div></div>
+    </div>
+    <footer><span><b>Aa</b>{reader.readingLevel}</span><span><b>✎</b>{writing.label}</span><span><b>◈</b>{project.imageFrequency}</span></footer>
+  </aside>;
 }
 
 function Wizard({ step, project, sourceBusy, onPatch, onFile, onBack, onNext }: { step: number; project: Project; sourceBusy: boolean; onPatch: (patch: Partial<Project>) => void; onFile: (e: ChangeEvent<HTMLInputElement>) => void; onBack: () => void; onNext: () => void }) {
   return <div className="wizard-layout">
-    <aside className="step-rail"><p>NEW BOOK</p>{wizardSteps.map((label, index) => <div className={index <= step ? "active" : ""} key={label}><span>{index < step ? "✓" : index + 1}</span><b>{label}</b></div>)}<blockquote>Every uploaded book starts a fresh project. Nothing is tied to Arthashastra.</blockquote></aside>
+    <aside className="step-rail"><p>CHILDREN’S EDITION</p>{wizardSteps.map((label, index) => <div className={index <= step ? "active" : ""} key={label}><span>{index < step ? "✓" : index + 1}</span><b>{label}</b></div>)}<blockquote>Built first for children aged 7–15. Adult publishing choices will return in a later edition.</blockquote></aside>
     <main className="wizard-main">
-      <p className="eyebrow">STEP {step + 1} OF 5</p><h1>{["Choose the source.", "Who is the reader?", "Shape the writing.", "Choose the visual world.", "Review your brief."][step]}</h1><p className="lead">{["Upload the book you are authorised to adapt.", "The same source becomes a different book for a different reader.", "Set the voice, language and level of transformation.", "Every detected chapter receives at least one context-based visual in this consistent style.", "These choices guide every generated chapter and illustration."][step]}</p>
+      <p className="eyebrow">STEP {step + 1} OF 5 · AGES 7–15</p><h1>{["Choose the source.", "Choose the child reader.", "Choose how it should sound.", "Choose the book world.", "Review your children’s book."][step]}</h1><p className="lead">{["Upload the book you are authorised to adapt.", "Pick one age band. Reading difficulty, text size and visual rhythm adjust together.", "Each writing mode changes the chapter opening, headings, paragraph rhythm and activities.", "Choose a complete visual system and see the page before building the adaptation.", "These child-first choices guide every generated chapter and illustration."][step]}</p>
       {step === 0 && <section className="form-card"><label className={`upload ${sourceBusy ? "busy" : ""}`}><input type="file" accept=".pdf,.docx,.txt,.md" onChange={onFile} disabled={sourceBusy}/><span>{sourceBusy ? "…" : "↑"}</span><strong>{sourceBusy ? "Reading and analysing your book…" : project.source}</strong><small>{sourceBusy ? "Large PDFs can take a short while" : "Click to choose a PDF, DOCX or TXT book (maximum 30 MB)"}</small></label><div className="fields two"><label>New book title<input value={project.title} onChange={(e) => onPatch({ title: e.target.value })}/></label><label>Source book<input value={project.source} readOnly/></label></div></section>}
-      {step === 1 && <section className="form-card"><div className="fields two"><label>Reader age<select value={project.audience} onChange={(e) => onPatch({ audience: e.target.value })}><option>Children (7–10)</option><option>Young readers (11–14)</option><option>Young adults (15–18)</option><option>General readers (18+)</option><option>University students</option></select></label><label>Reading level<select value={project.readingLevel} onChange={(e) => onPatch({ readingLevel: e.target.value })}><option>Very simple</option><option>Clear and accessible</option><option>Accessible academic</option><option>Advanced academic</option></select></label><label>Book type<select value={project.bookType} onChange={(e) => onPatch({ bookType: e.target.value })}><option>Illustrated learning book</option><option>Children’s story</option><option>Popular non-fiction</option><option>Academic guide</option><option>Training manual</option></select></label><label>Maximum pages <b>{project.maxPages}</b><input type="range" min="10" max="100" value={project.maxPages} onChange={(e) => onPatch({ maxPages: Number(e.target.value) })}/></label></div></section>}
-      {step === 2 && <section className="form-card"><div className="fields two"><label>Writing tone<select value={project.tone} onChange={(e) => onPatch({ tone: e.target.value })}><option>Clear and engaging</option><option>Warm and conversational</option><option>Story-led</option><option>Formal and academic</option></select></label><label>Language<select value={project.language} onChange={(e) => onPatch({ language: e.target.value })}><option>English</option><option>Hindi</option><option>English + Hindi</option></select></label><label>Source notes<select value={project.citationStyle} onChange={(e) => onPatch({ citationStyle: e.target.value })}><option>Source page notes</option><option>Numbered endnotes</option><option>APA references</option><option>No visible citations</option></select></label><label>Learning features<select value={project.learningFeatures.join(", ")} onChange={(e) => onPatch({ learningFeatures: e.target.value.split(",").map((item) => item.trim()).filter(Boolean) })}><option>Key takeaways, Glossary</option><option>Learning objectives, Exercises, Key takeaways</option><option>Case studies, Discussion questions</option><option>None</option></select></label><label className="wide">Adaptation style<select value={project.adaptation} onChange={(e) => onPatch({ adaptation: e.target.value })}><option>Faithful, reader-friendly adaptation</option><option>Concise illustrated summary</option><option>Creative reinterpretation</option><option>Teaching-focused adaptation</option></select></label></div></section>}
-      {step === 3 && <section className="form-card"><div className="theme-grid">{["Classical Indian", "Modern academic", "Minimal editorial", "Warm children’s"].map((theme) => <button className={project.aesthetic === theme ? "selected" : ""} onClick={() => onPatch({ aesthetic: theme })} key={theme}><i/><i/><i/><strong>{theme}</strong></button>)}</div><div className="fields two"><label>Illustration style<select value={project.illustrationStyle} onChange={(e) => onPatch({ illustrationStyle: e.target.value })}><option>Editorial watercolour</option><option>Historical ink drawing</option><option>Modern flat illustration</option><option>Playful children’s art</option><option>Documentary photography</option></select></label><label>Typography<select value={project.fontTheme} onChange={(e) => onPatch({ fontTheme: e.target.value })}><option>Literary serif</option><option>Modern sans-serif</option><option>Academic classic</option><option>Friendly rounded</option></select></label><label className="wide">Illustration frequency<select value={project.imageFrequency} onChange={(e) => onPatch({ imageFrequency: e.target.value })}><option>Low — 1 per chapter</option><option>Medium — 1 per 3 pages</option><option>High — 1 per page</option></select></label></div></section>}
-      {step === 4 && <section className="brief-review"><div><span>SOURCE</span><strong>{project.source}</strong></div><div><span>READER</span><strong>{project.audience}</strong></div><div><span>BOOK</span><strong>{project.bookType}</strong></div><div><span>VOICE</span><strong>{project.tone}</strong></div><div><span>DESIGN</span><strong>{project.aesthetic} · {project.illustrationStyle}</strong></div><div><span>LIMIT</span><strong>{project.maxPages} pages</strong></div></section>}
-      <footer className="wizard-footer"><button className="secondary" onClick={onBack}>← Back</button><button className="primary" onClick={onNext} disabled={sourceBusy || (step === 0 && project.source === "No source selected")}>{step === 4 ? "Review source analysis" : "Continue"} →</button></footer>
+      {step === 1 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">READER AGE</p><div className="choice-cards">{childAudienceProfiles.map((profile) => <button className={project.audience === profile.value ? "choice selected" : "choice"} onClick={() => onPatch(audiencePatch(profile.value))} key={profile.value}><span>{profile.value}</span><strong>{profile.label}</strong><small>{profile.description}</small><i>“{profile.sample}”</i></button>)}</div><label className="page-limit">Maximum book length <b>{project.maxPages} pages</b><input type="range" min="10" max="100" value={project.maxPages} onChange={(event) => onPatch({ maxPages: Number(event.target.value) })}/><small>The source-analysis step will still ask how many summary pages each original chapter needs.</small></label></div><BookGlimpse project={project} focus="reader"/></section>}
+      {step === 2 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">WRITING MODE</p><div className="choice-cards writing-choices">{childWritingProfiles.map((profile) => <button className={project.tone === profile.value ? "choice selected" : "choice"} onClick={() => onPatch(writingPatch(profile.value))} key={profile.value}><span className="choice-icon">{profile.icon}</span><strong>{profile.label}</strong><small>{profile.description}</small><i>{profile.hookLabel} · {profile.activityLabel}</i></button>)}</div><div className="language-choice"><span>BOOK LANGUAGE</span>{["English", "Hindi", "English + Hindi"].map((language) => <button className={project.language === language ? "selected" : ""} onClick={() => onPatch({ language })} key={language}>{language}</button>)}</div><div className="auto-settings"><b>Automatically included</b><span>{project.learningFeatures.join(" · ")}</span><small>Facts remain tied to the uploaded source. Source notes are kept for the adult editor and do not clutter the child’s page.</small></div></div><BookGlimpse project={project} focus="writing"/></section>}
+      {step === 3 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">VISUAL WORLD</p><div className="design-world-cards">{childDesignWorlds.map((world) => <button className={`${project.aesthetic === world.value ? "selected " : ""}design-world world-${normalizedTitle(world.value).replace(/[^a-z]+/g, "-")}`} onClick={() => onPatch(designWorldPatch(world.value))} key={world.value}><span className="world-thumbnail"><i/><b>Ab</b><i/></span><strong>{world.label}</strong><small>{world.description}</small><em>{world.illustrationStyle} · {world.fontTheme}</em></button>)}</div><div className="auto-settings"><b>Visual guarantee</b><span>At least one different context-based visual in every chapter</span><small>If a literal scene is unsuitable, the app creates a relevant map, timeline, tree, cycle or relationship diagram in the same book world.</small></div></div><BookGlimpse project={project} focus="design"/></section>}
+      {step === 4 && <><section className="brief-review child-review"><div><span>SOURCE</span><strong>{project.source}</strong></div><div><span>CHILD READER</span><strong>{project.audience} · {project.readingLevel}</strong></div><div><span>BOOK</span><strong>{project.bookType}</strong></div><div><span>WRITING</span><strong>{project.tone} · {project.language}</strong></div><div><span>BOOK WORLD</span><strong>{project.aesthetic} · {project.illustrationStyle}</strong></div><div><span>LIMIT</span><strong>{project.maxPages} pages</strong></div></section><BookGlimpse project={project} focus="design"/></>}
+      <footer className="wizard-footer"><button className="secondary" onClick={onBack}>← Back</button><button className="primary" onClick={onNext} disabled={sourceBusy || (step === 0 && project.source === "No source selected")}>{step === 4 ? "Detect original chapters" : "Continue"} →</button></footer>
     </main>
   </div>;
 }
@@ -984,7 +1187,7 @@ function BookBrief({ project, allocated, draftBusy, onBack, onUpdateChapter, onP
   const overBudget = allocated > project.maxPages;
   return <main className="brief-page">
     <button className="text-button" onClick={onBack}>← Back to source analysis</button>
-    <header className="brief-hero"><div><p className="eyebrow">BOOK BRIEF & PAGE PLAN</p><h1>{project.title}</h1><p className="lead">A {project.bookType.toLowerCase()} for {project.audience.toLowerCase()}, adapted in a {project.tone.toLowerCase()} voice with a {project.aesthetic.toLowerCase()} visual direction.</p><div className="brief-chips"><span>{project.language}</span><span>{project.adaptation}</span><span>{project.imageFrequency}</span></div></div><aside><span>READER PROMISE</span><p>Make the source understandable, visually inviting and faithful enough for an editor to verify every important idea.</p></aside></header>
+    <header className="brief-hero"><div><p className="eyebrow">CHILDREN’S BOOK BRIEF & PAGE PLAN</p><h1>{project.title}</h1><p className="lead">An illustrated adaptation for {project.audience.toLowerCase()}, written as a {project.tone.toLowerCase()} in the {project.aesthetic.toLowerCase()} book world.</p><div className="brief-chips"><span>{project.language}</span><span>{project.readingLevel}</span><span>{project.imageFrequency}</span></div></div><aside><span>PROMISE TO THE CHILD READER</span><p>Keep the source truthful, make every new word understandable, and give each chapter a question, a visual and something worth thinking about.</p></aside></header>
     <div className="brief-layout"><section className="plan-card"><header><div><p className="eyebrow">STRUCTURE</p><h2>Chapter and summary-page plan</h2></div><div className={overBudget ? "budget-pill warning" : "budget-pill"}>{allocated} / {project.maxPages} pages</div></header><div className="plan-head"><span>CHAPTER</span><span>ORIGINAL TITLE</span><span>PAGES</span><span>STATE</span></div>{project.chapters.map((chapter, index) => <div className="plan-row" key={chapter.id}><span>{String(index + 1).padStart(2, "0")}</span><strong className="preserved-title">{chapter.title}</strong><input aria-label={`Summary pages for ${chapter.title}`} type="number" min="1" max="30" value={chapter.pages} onChange={(event) => onUpdateChapter(chapter.id, { pages: Math.max(1, Number(event.target.value) || 1) })}/><b className={`draft-state ${chapter.status}`}>{chapter.status}</b></div>)}<footer><span>Includes 8 reserved pages for cover, contents, preface and references.</span>{overBudget && <strong>Reduce {allocated - project.maxPages} pages before approval.</strong>}</footer></section>
       <aside className="generation-card"><p className="eyebrow">FULL CHAPTER BUILDER</p><h2>Prepare the manuscript</h2><p>Build substantial editable chapters from multiple relevant passages in the uploaded source. Page markers and source evidence are added automatically. Locked chapters are never overwritten.</p><div className="draft-progress"><span><b>{drafted}</b> of {project.chapters.length} drafted</span><i><b style={{ width: `${project.chapters.length ? drafted / project.chapters.length * 100 : 0}%` }}/></i></div><button className="secondary full" disabled={draftBusy} onClick={() => onPrepare("sample")}>{draftBusy ? "Reading the source…" : "Build full sample chapter"}</button><button className="primary full" disabled={draftBusy} onClick={() => onPrepare("all")}>{draftBusy ? "Building full chapters…" : "Build all full chapters"}</button><small>This source-grounded builder works without an AI key. Use the editorial assistant afterward when you want stylistic rewriting.</small></aside></div>
     {first && <section className="sample-spread"><div className="sample-copy"><p className="eyebrow">SAMPLE SPREAD</p><span>CHAPTER 01</span><h2>{first.title}</h2><p>{first.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 420)}</p><button className="text-button" onClick={() => onPrepare("sample")}>{first.status === "planned" ? "Create this sample" : "Refresh sample draft"} →</button></div>{first.imageUrl ? <figure className="sample-art sample-art-image"><img src={first.imageUrl} alt={first.imageAlt || first.imageCaption || first.title}/><figcaption>{first.imageCaption || first.title}</figcaption></figure> : <div className="sample-art"><span>ILLUSTRATION DIRECTION</span><strong>{project.aesthetic}</strong><p>{first.title} · {project.imageFrequency}</p><b>✦</b></div>}</section>}
@@ -998,10 +1201,10 @@ function Editor({ project, active, activeId, allocated, draftBusy, onSelect, edi
   const fontClass = project.fontTheme.toLowerCase().replace(/[^a-z]+/g, "-");
   return <main className="editor-layout">
     <aside className="chapters"><header><p className="eyebrow">BOOK STRUCTURE</p><button onClick={onAddChapter} aria-label="Add chapter">＋</button></header><div className="front-matter"><span>FM</span><div><b>Front matter</b><small>Cover · Contents · Preface</small></div></div>{project.chapters.map((chapter) => <button className={chapter.id === activeId ? "chapter active" : "chapter"} onClick={() => onSelect(chapter.id)} key={chapter.id}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small>{chapter.pages} pages · {chapter.status}</small></div><i>{chapter.locked ? "◆" : ""}</i></button>)}<div className="page-budget"><span><b>{allocated}</b> / {project.maxPages} pages</span><i><b style={{ width: `${Math.min(100, allocated / project.maxPages * 100)}%` }}/></i><small>{Math.max(0, project.maxPages - allocated)} pages available</small></div></aside>
-    <section className="canvas"><nav className="editor-tools"><div><button onClick={() => document.execCommand("bold")}><b>B</b></button><button onClick={() => document.execCommand("italic")}><i>I</i></button><button onClick={() => document.execCommand("formatBlock", false, "h2")}>H2</button><button onClick={() => document.execCommand("insertUnorderedList")}>• List</button></div><div className="chapter-meter"><span>{active.pages} target pages</span><i><b style={{ width: active.status === "planned" ? "18%" : "67%" }}/></i><button onClick={onToggleLock}>{active.locked ? "◆ Locked" : "◇ Lock"}</button></div></nav><div className="page-stage"><article className={`paper font-${fontClass}${active.imageUrl ? " has-chapter-image" : ""}`}><header><span>{project.title}</span><span>{project.aesthetic}</span></header><div className="ornament">✦</div><div key={active.id} ref={editorRef} className="book-copy" contentEditable={!active.locked} suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: active.body }}/>{active.imageUrl && <figure className="chapter-image"><img src={active.imageUrl} alt={active.imageAlt || active.imageCaption || active.title}/><figcaption>{active.imageCaption || active.title}</figcaption></figure>}<footer><span>{project.source}</span><span>{active.id}</span></footer></article></div><button className="save-float" onClick={onSaveBody}>✓ Save chapter</button></section>
+    <section className="canvas"><nav className="editor-tools"><div><button onClick={() => document.execCommand("bold")}><b>B</b></button><button onClick={() => document.execCommand("italic")}><i>I</i></button><button onClick={() => document.execCommand("formatBlock", false, "h2")}>H2</button><button onClick={() => document.execCommand("insertUnorderedList")}>• List</button></div><div className="chapter-meter"><span>{active.pages} target pages</span><i><b style={{ width: active.status === "planned" ? "18%" : "67%" }}/></i><button onClick={onToggleLock}>{active.locked ? "◆ Locked" : "◇ Lock"}</button></div></nav><div className="page-stage"><article className={`paper font-${fontClass} world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")} age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}${active.imageUrl ? " has-chapter-image" : ""}`}><header><span>{project.title}</span><span>{project.audience}</span></header><div className="ornament">✦</div><div key={active.id} ref={editorRef} className="book-copy" contentEditable={!active.locked} suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: active.body }}/>{active.imageUrl && <figure className="chapter-image"><img src={active.imageUrl} alt={active.imageAlt || active.imageCaption || active.title}/><figcaption>{active.imageCaption || active.title}</figcaption></figure>}<footer><span>{project.source}</span><span>{active.id}</span></footer></article></div><button className="save-float" onClick={onSaveBody}>✓ Save chapter</button></section>
     <aside className="assistant"><nav><button className={tab === "ai" ? "active" : ""} onClick={() => setTab("ai")}>✦<span>AI EDIT</span></button><button className={tab === "design" ? "active" : ""} onClick={() => setTab("design")}>◈<span>DESIGN</span></button><button className={tab === "sources" ? "active" : ""} onClick={() => setTab("sources")}>⌕<span>SOURCES</span></button></nav><div className="assistant-body">
       {tab === "ai" && <><div className="assistant-title"><span>✦</span><div><b>Editorial assistant</b><small>Select text, then choose an action.</small></div></div>{!active.locked && <button className="draft-chapter-button" disabled={draftBusy} onClick={onDraft}>{draftBusy ? "Reading the source…" : chapterWordCount(active) < 350 ? "✦ Build this full chapter" : "↻ Rebuild full chapter from source"}</button>}<p className="selection-tip">This chapter has <b>{chapterWordCount(active).toLocaleString()} words</b>. The full chapter builder uses the uploaded source; the guided edit actions can then refine the writing in ChatGPT.</p><div className="ai-list">{["Simplify language", "Shorten selection", "Expand with examples", "Make age-appropriate", "Improve storytelling", "Check against source", "Suggest an illustration"].map((action) => <button onClick={() => onAi(action)} key={action}><span>✦</span>{action}<i>→</i></button>)}</div><div className="memory-box"><p className="eyebrow">EDITORIAL MEMORY</p><p>{project.editorialPreferences.length ? project.editorialPreferences.join(" · ") : "No saved preferences yet"}</p><button onClick={() => onRemember("book")}>＋ Remember for this book</button><button onClick={() => onRemember("designer")}>＋ Remember for future books</button></div></>}
-      {tab === "design" && <><div className="assistant-title"><span>◈</span><div><b>Book design</b><small>Changes update the current project.</small></div></div><div className="design-controls"><div className="visual-status"><b>✓ Chapter visual ready</b><span>{active.visualType === "uploaded" ? "Your uploaded image" : `${active.visualType || "context"} visual generated from this chapter`}</span></div><label>Aesthetic<select value={project.aesthetic} onChange={(e) => onPatchProject({ aesthetic: e.target.value })}><option>Classical Indian</option><option>Modern academic</option><option>Minimal editorial</option><option>Warm children’s</option></select></label><label>Typography<select value={project.fontTheme} onChange={(e) => onPatchProject({ fontTheme: e.target.value })}><option>Literary serif</option><option>Modern sans-serif</option><option>Academic classic</option><option>Friendly rounded</option></select></label><label>Illustration style<select value={project.illustrationStyle} onChange={(e) => onPatchProject({ illustrationStyle: e.target.value })}><option>Editorial watercolour</option><option>Historical ink drawing</option><option>Modern flat illustration</option><option>Playful children’s art</option><option>Documentary photography</option></select></label><label className="image-upload">Replace chapter image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && onUploadImage(e.target.files[0])}/></label>{active.imageUrl && <label>Image caption<input value={active.imageCaption || ""} onChange={(e) => onUpdateChapter(active.id, { imageCaption: e.target.value })}/></label>}</div></>}
+      {tab === "design" && <><div className="assistant-title"><span>◈</span><div><b>Book design</b><small>One child-friendly world controls colour, type and illustration style.</small></div></div><div className="design-controls"><div className="visual-status"><b>✓ Chapter visual ready</b><span>{active.visualType === "uploaded" ? "Your uploaded image" : `${active.visualType || "context"} visual generated from this chapter`}</span></div><label>Book world<select value={project.aesthetic} onChange={(e) => onPatchProject(designWorldPatch(e.target.value))}>{childDesignWorlds.map((world) => <option key={world.value}>{world.value}</option>)}</select></label><div className="design-summary"><b>{project.illustrationStyle}</b><span>{project.fontTheme} · {project.imageFrequency}</span></div><label className="image-upload">Replace chapter image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && onUploadImage(e.target.files[0])}/></label>{active.imageUrl && <label>Image caption<input value={active.imageCaption || ""} onChange={(e) => onUpdateChapter(active.id, { imageCaption: e.target.value })}/></label>}</div></>}
       {tab === "sources" && <><div className="assistant-title"><span>⌕</span><div><b>Source evidence</b><small>{active.sourceRefs.length} reference{active.sourceRefs.length === 1 ? "" : "s"} linked to this chapter.</small></div></div><div className="source-list">{active.sourceRefs.length ? active.sourceRefs.map((ref, index) => <article key={`${ref.title}-${index}`}><span>PAGE {ref.page || "—"}</span><b>{ref.title}</b><p>{ref.excerpt}</p></article>) : <p className="empty">No source reference is linked yet. Prepare this chapter to attach the closest extracted section.</p>}</div><div className="source-policy"><b>{project.citationStyle}</b><p>Verify important names, dates and quotations before marking the chapter approved.</p></div></>}
     </div></aside>
   </main>;
@@ -1018,7 +1221,9 @@ function AiRoundTrip({ request, onChange, onClose, onApply }: { request: { actio
 function Preview({ project, draftBusy, onFill, onClose, onPrint }: { project: Project; draftBusy: boolean; onFill: () => void; onClose: () => void; onPrint: () => void }) {
   const thinChapters = project.chapters.filter((chapter) => chapterWordCount(chapter) < 350 && !chapter.locked);
   const printable = useMemo(() => printableChapters(project.chapters), [project.chapters]);
-  return <div className="modal-backdrop"><section className="preview-modal"><header><div><p className="eyebrow">FINAL BOOK PREVIEW</p><h2>{project.title}</h2></div><div>{thinChapters.length > 0 && <button className="fill-chapters" disabled={draftBusy} onClick={onFill}>{draftBusy ? "Building chapters…" : `Fill ${thinChapters.length} short chapter${thinChapters.length === 1 ? "" : "s"}`}</button>}<button onClick={onPrint}>Print / Save PDF</button><button onClick={onClose}>×</button></div></header>{(thinChapters.length > 0 || printable.duplicatesRemoved > 0) && <div className="preview-warning"><b>{thinChapters.length > 0 ? `${thinChapters.length} chapter${thinChapters.length === 1 ? " is" : "s are"} still too short.` : "Repeated content repaired."}</b><span>{printable.duplicatesRemoved > 0 ? `${printable.duplicatesRemoved} repeated paragraph${printable.duplicatesRemoved === 1 ? " was" : "s were"} omitted from this preview and PDF.` : "Fill the short chapters from the uploaded source before exporting."}</span></div>}<div className="preview-scroll"><article className="preview-cover"><p>{project.bookType}</p><h1>{project.title}</h1><span>Adapted from {project.source}</span><b>✦</b></article><article className="preview-page contents-page"><span>CONTENTS</span><h2>Inside this book</h2><ol>{printable.chapters.map((chapter, index) => <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{chapter.pages} pages</i></li>)}</ol></article>{printable.chapters.map((chapter) => <article className={`preview-page chapter-preview${chapter.imageUrl ? " has-chapter-image" : ""}`} key={chapter.id}><header className="print-chapter-header"><span>CHAPTER {chapter.id}</span><span>{chapterWordCount(chapter).toLocaleString()} WORDS</span></header><h2>{chapter.title}</h2><div className="preview-body" dangerouslySetInnerHTML={{ __html: chapter.body }}/>{chapter.imageUrl && <figure className="chapter-image"><img src={chapter.imageUrl} alt={chapter.imageAlt || chapter.imageCaption || chapter.title}/><figcaption>{chapter.imageCaption || chapter.title}</figcaption></figure>}{chapter.sourceRefs.length > 0 && <div className="preview-sources"><b>SOURCE NOTES</b>{chapter.sourceRefs.map((ref, index) => <p key={`${ref.title}-${index}`}>{ref.title}, p. {ref.page || "—"}</p>)}</div>}</article>)}<article className="preview-page backmatter"><span>EDITORIAL NOTES</span><h2>References and production brief</h2><p>Adapted from <b>{project.source}</b>. Citation approach: {project.citationStyle}.</p><p>Designed in the {project.aesthetic.toLowerCase()} aesthetic with {project.illustrationStyle.toLowerCase()} visuals.</p><h3>Remembered editorial decisions</h3><ul>{project.editorialPreferences.map((preference) => <li key={preference}>{preference}</li>)}</ul></article></div></section></div>;
+  const worldClass = `world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")}`;
+  const ageClass = `age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+  return <div className="modal-backdrop"><section className="preview-modal"><header><div><p className="eyebrow">FINAL CHILDREN’S BOOK PREVIEW</p><h2>{project.title}</h2></div><div>{thinChapters.length > 0 && <button className="fill-chapters" disabled={draftBusy} onClick={onFill}>{draftBusy ? "Building chapters…" : `Fill ${thinChapters.length} short chapter${thinChapters.length === 1 ? "" : "s"}`}</button>}<button onClick={onPrint}>Print / Save PDF</button><button onClick={onClose}>×</button></div></header>{(thinChapters.length > 0 || printable.duplicatesRemoved > 0) && <div className="preview-warning"><b>{thinChapters.length > 0 ? `${thinChapters.length} chapter${thinChapters.length === 1 ? " is" : "s are"} still too short.` : "Repeated content repaired."}</b><span>{printable.duplicatesRemoved > 0 ? `${printable.duplicatesRemoved} repeated paragraph${printable.duplicatesRemoved === 1 ? " was" : "s were"} omitted from this preview and PDF.` : "Fill the short chapters from the uploaded source before exporting."}</span></div>}<div className="preview-scroll"><article className={`preview-cover ${worldClass}`}><p>{project.bookType} · {project.audience}</p><h1>{project.title}</h1><span>Adapted from {project.source}</span><b>✦</b></article><article className={`preview-page contents-page ${worldClass}`}><span>CONTENTS</span><h2>Inside this book</h2><ol>{printable.chapters.map((chapter, index) => <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{chapter.pages} pages</i></li>)}</ol></article>{printable.chapters.map((chapter) => <article className={`preview-page chapter-preview ${worldClass} ${ageClass}${chapter.imageUrl ? " has-chapter-image" : ""}`} key={chapter.id}><header className="print-chapter-header"><span>CHAPTER {chapter.id}</span><span>{project.tone.toUpperCase()}</span></header><h2>{chapter.title}</h2><div className="preview-body" dangerouslySetInnerHTML={{ __html: chapter.body }}/>{chapter.imageUrl && <figure className="chapter-image"><img src={chapter.imageUrl} alt={chapter.imageAlt || chapter.imageCaption || chapter.title}/><figcaption>{chapter.imageCaption || chapter.title}</figcaption></figure>}{chapter.sourceRefs.length > 0 && <div className="preview-sources"><b>EDITOR’S SOURCE NOTES</b>{chapter.sourceRefs.map((ref, index) => <p key={`${ref.title}-${index}`}>{ref.title}, p. {ref.page || "—"}</p>)}</div>}</article>)}<article className={`preview-page backmatter ${worldClass}`}><span>EDITORIAL NOTES</span><h2>References and production brief</h2><p>Adapted from <b>{project.source}</b>. Citation approach: {project.citationStyle}.</p><p>Designed in the {project.aesthetic.toLowerCase()} book world with {project.illustrationStyle.toLowerCase()} visuals for {project.audience.toLowerCase()}.</p><h3>Remembered editorial decisions</h3><ul>{project.editorialPreferences.map((preference) => <li key={preference}>{preference}</li>)}</ul></article></div></section></div>;
 }
 
 function Versions({ versions, onCreate, onRestore, onClose }: { versions: { label: string; date: string; snapshot: Project }[]; onCreate: () => void; onRestore: (project: Project) => void; onClose: () => void }) {

@@ -1,6 +1,8 @@
 # IKS Book Studio
 
-IKS Book Studio turns an uploaded PDF, DOCX, TXT or Markdown source into a structured, editable adaptation. It preserves the source's original chapter names, asks for a summary length in pages, builds source-linked chapter drafts, and prepares PDF/DOCX output.
+IKS Book Studio turns an uploaded PDF, DOCX, TXT or Markdown source into a structured, editable adaptation for children aged 7–15. It preserves the source's original chapter names, asks for a summary length in pages, builds source-linked chapter drafts, and prepares PDF/DOCX output.
+
+The children-first setup uses three age bands (7–9, 10–12 and 13–15), three distinct writing modes, and three complete visual worlds. Reader, writing and design choices each include a live book glimpse. Writing modes are functional generation rules: they change chapter hooks, headings, paragraph rhythm, transitions and learning activities rather than simply changing a saved label. Adult-reader options are intentionally deferred to a later version.
 
 Every detected chapter receives at least one visual in every new adaptation. Known themes use curated editorial art; all other chapters receive a deterministic context visual generated from the chapter title, chapter text and detected source terms. The fallback engine chooses between maps, timelines, relationship diagrams, hierarchy trees, cycles and concept maps while keeping one coherent book palette. Uploaded chapter images always take priority and are never overwritten.
 
