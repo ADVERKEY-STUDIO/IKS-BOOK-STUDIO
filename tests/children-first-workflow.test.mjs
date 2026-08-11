@@ -26,8 +26,8 @@ test("the writing-style step is removed and the wizard has four steps", () => {
 
 test("reader and design choices show a live book glimpse", () => {
   assert.match(page, /function BookGlimpse/);
-  assert.match(page, /LIVE BOOK GLIMPSE/);
-  assert.match(page, /This is how the choice feels/);
+  assert.match(page, /LIVE BOOK & PAGE GLIMPSE/);
+  assert.match(page, /See every important page before you build/);
   assert.match(page, /focus="reader"/);
   assert.match(page, /focus="design"/);
   assert.match(css, /\.glimpse-spread/);
