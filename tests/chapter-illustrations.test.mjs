@@ -32,7 +32,7 @@ test("illustrations are assigned after chapter hierarchy repair", () => {
   const assignmentPosition = page.indexOf("const illustratedChapters = attachChapterVisuals");
   assert.ok(repairPosition >= 0, "chapter hierarchy repair is present");
   assert.ok(assignmentPosition > repairPosition, "all final chapters receive art after their titles are repaired");
-  assert.match(page, /contextualIllustration\(project, chapter, index\)/);
+  assert.match(page, /contextualIllustration\(project, chapter, index, usedImages\)/);
   assert.match(page, /chapters: illustratedChapters/);
 });
 
@@ -40,7 +40,14 @@ test("every newly uploaded adaptation receives one contextual visual per chapter
   assert.match(page, /const chapters = attachChapterVisuals\(\{ \.\.\.project, sourceTerms: source\.terms \}, sourceChapters\)/);
   assert.match(page, /chapters: attachChapterVisuals\(\{ \.\.\.project, sourceTerms: source\.terms \}, reconcileOriginalChapters/);
   assert.match(page, /const next = \{ \.\.\.project, chapters: attachChapterVisuals\(project, merged\) \}/);
-  assert.match(page, /if \(chapter\.imageKey && chapter\.imageUrl\) return chapter/);
+  assert.match(page, /const usedImages = new Set<string>\(\)/);
+  assert.match(page, /usedImages\.add\(visualIdentity\(undefined, visual\.url\)\)/);
+});
+
+test("the same image cannot be assigned to two chapters", () => {
+  assert.match(page, /usedImages\.has\(visualIdentity\(undefined, curated\.url\)\)/);
+  assert.match(page, /isUploadedImage && existingIdentity && !usedImages\.has\(existingIdentity\)/);
+  assert.match(page, /variant: String\(index \+ 1\)/);
 });
 
 test("generic books use chapter-aware visual fallbacks instead of Arthashastra art", () => {

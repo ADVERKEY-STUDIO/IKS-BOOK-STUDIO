@@ -115,39 +115,75 @@ function chooseVisualType(title: string, body: string, index: number) {
   return ["concept", "tree", "venn", "timeline"][Math.abs(index) % 4];
 }
 
-function contextualIllustration(project: Pick<Project, "aesthetic" | "illustrationStyle" | "sourceTerms">, chapter: Pick<Chapter, "title" | "body">, index: number) {
+const visualTypeOrder = ["concept", "map", "venn", "tree", "timeline", "cycle"];
+
+function visualIdentity(imageKey?: string, imageUrl?: string) {
+  if (imageKey) return `asset:${imageKey}`;
+  if (imageUrl) return `url:${imageUrl}`;
+  return "";
+}
+
+function contextualIllustration(
+  project: Pick<Project, "aesthetic" | "illustrationStyle" | "sourceTerms">,
+  chapter: Pick<Chapter, "title" | "body">,
+  index: number,
+  usedImages: Set<string>,
+) {
   const curated = curatedIllustration(chapter.title, chapter.body);
-  if (curated) return { ...curated, type: "illustration" };
+  if (curated && !usedImages.has(visualIdentity(undefined, curated.url))) return { ...curated, type: "illustration" };
   const terms = visualKeywords(chapter.title, chapter.body, project.sourceTerms);
-  const type = chooseVisualType(chapter.title, chapter.body, index);
-  const params = new URLSearchParams({
-    title: chapter.title.slice(0, 180),
-    terms: terms.join("|"),
-    type,
-    style: project.illustrationStyle.slice(0, 80),
-    aesthetic: project.aesthetic.slice(0, 80),
-    chapter: String(index + 1),
-  });
-  const readableType = type === "venn" ? "relationship diagram" : type === "tree" ? "concept tree" : `${type} visual`;
-  return {
-    url: `/api/visual?${params.toString()}`,
-    caption: `${chapter.title}: a ${readableType} built from ${terms.slice(0, 3).join(", ") || "the chapter’s central ideas"}.`,
-    alt: `${readableType} for ${chapter.title}, showing ${terms.slice(0, 4).join(", ") || "the main chapter concepts"}.`,
-    type,
-  };
+  const preferredType = chooseVisualType(chapter.title, chapter.body, index);
+  const preferredIndex = Math.max(0, visualTypeOrder.indexOf(preferredType));
+
+  for (let offset = 0; offset < visualTypeOrder.length; offset += 1) {
+    const type = visualTypeOrder[(preferredIndex + offset) % visualTypeOrder.length];
+    const params = new URLSearchParams({
+      title: chapter.title.slice(0, 180),
+      terms: terms.join("|"),
+      type,
+      style: project.illustrationStyle.slice(0, 80),
+      aesthetic: project.aesthetic.slice(0, 80),
+      chapter: String(index + 1),
+      variant: String(index + 1),
+    });
+    const url = `/api/visual?${params.toString()}`;
+    if (usedImages.has(visualIdentity(undefined, url))) continue;
+    const readableType = type === "venn" ? "relationship diagram" : type === "tree" ? "concept tree" : `${type} visual`;
+    return {
+      url,
+      caption: `${chapter.title}: a ${readableType} built from ${terms.slice(0, 3).join(", ") || "the chapter’s central ideas"}.`,
+      alt: `${readableType} for ${chapter.title}, showing ${terms.slice(0, 4).join(", ") || "the main chapter concepts"}.`,
+      type,
+    };
+  }
+
+  // The chapter index and title make this final URL unique even when a very
+  // long book exhausts every diagram family above.
+  const params = new URLSearchParams({ title: chapter.title, terms: terms.join("|"), type: "concept", chapter: String(index + 1), variant: `chapter-${index + 1}` });
+  return { url: `/api/visual?${params.toString()}`, caption: `${chapter.title}: a concept visual built from the chapter’s central ideas.`, alt: `Unique concept visual for ${chapter.title}.`, type: "concept" };
 }
 
 function attachChapterVisuals(project: Pick<Project, "aesthetic" | "illustrationStyle" | "sourceTerms">, chapters: Chapter[]) {
+  const usedImages = new Set<string>();
   return chapters.map((chapter, index) => {
-    if (chapter.imageKey && chapter.imageUrl) return chapter;
-    const visual = contextualIllustration(project, chapter, index);
-    return {
+    const existingIdentity = visualIdentity(chapter.imageKey, chapter.imageUrl);
+    const isUploadedImage = Boolean(chapter.imageUrl && (chapter.imageKey || chapter.visualType === "uploaded"));
+    if (isUploadedImage && existingIdentity && !usedImages.has(existingIdentity)) {
+      usedImages.add(existingIdentity);
+      return chapter;
+    }
+
+    const visual = contextualIllustration(project, chapter, index, usedImages);
+    usedImages.add(visualIdentity(undefined, visual.url));
+    const illustratedChapter = {
       ...chapter,
+      imageKey: undefined,
       imageUrl: visual.url,
       imageCaption: visual.caption,
       imageAlt: visual.alt,
       visualType: visual.type,
     };
+    return illustratedChapter;
   });
 }
 
