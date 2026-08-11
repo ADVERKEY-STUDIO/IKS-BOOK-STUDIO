@@ -3,17 +3,19 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+const planner = await readFile(new URL("../lib/adaptation-pages.ts", import.meta.url), "utf8");
 
-test("complete adaptations stay within 100 pages", () => {
+test("complete adaptations use 100 pages as a ceiling, not a target", () => {
   assert.doesNotMatch(page, /Maximum book length/);
   assert.doesNotMatch(page, /OUTPUT LIMIT/);
   assert.doesNotMatch(page, /project\.maxPages/);
-  assert.match(page, /TOTAL_BOOK_PAGE_LIMIT = 100/);
-  assert.match(page, /FIXED_MATTER_PAGES = 8/);
-  assert.match(page, /CHAPTER_PAGE_BUDGET = TOTAL_BOOK_PAGE_LIMIT - FIXED_MATTER_PAGES/);
-  assert.match(page, /UP TO 100 PAGES/);
+  assert.match(planner, /TOTAL_BOOK_PAGE_LIMIT = 100/);
+  assert.match(planner, /FIXED_MATTER_PAGES = 8/);
+  assert.match(planner, /CHAPTER_PAGE_BUDGET = TOTAL_BOOK_PAGE_LIMIT - FIXED_MATTER_PAGES/);
+  assert.match(page, /NATURAL LENGTH · 100-PAGE CEILING/);
   assert.match(page, /fitChaptersToBookLimit/);
-  assert.match(page, /100-PAGE BOOK LIMIT/);
+  assert.match(page, /LENGTH GUARDRAIL/);
+  assert.match(page, /never treats 100 as a target/);
 });
 
 test("chapter edits cannot push the total above the book limit", () => {

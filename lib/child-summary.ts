@@ -15,7 +15,7 @@ export function childAgeBand(audience = ""): ChildAgeBand {
 }
 
 export function generationProfileKey(audience = "", tone = "", language = "English") {
-  return `child-adaptation-v3:${childAgeBand(audience)}:${childWritingMode(tone)}:${language.toLowerCase()}`;
+  return `child-adaptation-v4:${childAgeBand(audience)}:${childWritingMode(tone)}:${language.toLowerCase()}`;
 }
 
 function cleanEvidence(value: string) {

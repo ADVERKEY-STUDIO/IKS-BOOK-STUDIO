@@ -2,12 +2,9 @@
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { generationProfileKey, modeParagraphParts } from "../lib/child-summary";
+import { ADAPTATION_PLAN_VERSION, allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET, FIXED_MATTER_PAGES, recommendedAdaptationPages, TOTAL_BOOK_PAGE_LIMIT } from "../lib/adaptation-pages";
 
 type View = "dashboard" | "wizard" | "analysis" | "brief" | "editor";
-
-const TOTAL_BOOK_PAGE_LIMIT = 100;
-const FIXED_MATTER_PAGES = 8;
-const CHAPTER_PAGE_BUDGET = TOTAL_BOOK_PAGE_LIMIT - FIXED_MATTER_PAGES;
 
 type SourceSection = { title: string; page: number; excerpt: string };
 
@@ -84,6 +81,7 @@ type Project = {
   editorialPreferences: string[];
   briefApproved: boolean;
   adaptationPlanConfirmed: boolean;
+  adaptationPlanVersion?: number;
   updatedAt: string;
 };
 
@@ -253,6 +251,7 @@ let seedProject: Project = {
   editorialPreferences: ["Clear sentences", "Preserve specialist terms", "Explain Sanskrit words on first use"],
   briefApproved: true,
   adaptationPlanConfirmed: true,
+  adaptationPlanVersion: ADAPTATION_PLAN_VERSION,
   updatedAt: "Today",
   chapters: [
     {
@@ -358,6 +357,7 @@ const emptyProject: Project = {
   editorialPreferences: [],
   briefApproved: false,
   adaptationPlanConfirmed: false,
+  adaptationPlanVersion: ADAPTATION_PLAN_VERSION,
 };
 
 const wizardSteps = ["Source", "Reader", "Writing", "Design", "Review"];
@@ -505,49 +505,14 @@ function designWorldPatch(value: string): Partial<Project> {
   };
 }
 
-function recommendedAdaptationPages(chapter: Pick<Chapter, "title" | "sourcePageCount" | "sourceWordCount" | "complexityScore" | "keyTerms" | "recommendedPages">, audience: string) {
-  if (!chapter.sourceWordCount || !chapter.sourcePageCount) return chapter.recommendedPages || 6;
-  const age = /7\s*[–-]\s*9/i.test(audience)
-    ? { wordsPerPage: 105, transformationRatio: .42, visualInterval: 3 }
-    : /13\s*[–-]\s*15/i.test(audience)
-      ? { wordsPerPage: 175, transformationRatio: .66, visualInterval: 6 }
-      : { wordsPerPage: 140, transformationRatio: .54, visualInterval: 4 };
-  const transformedWords = chapter.sourceWordCount * age.transformationRatio;
-  const complexityAllowance = .88 + (chapter.complexityScore ?? .4) * .34;
-  const visualAndActivityPages = Math.max(1, Math.ceil(chapter.sourcePageCount / age.visualInterval));
-  const conceptAllowance = Math.max(1, Math.ceil((chapter.keyTerms?.length ?? 3) / 3));
-  const shorterBackMatter = /^(appendix|conclusion|epilogue|references?)\b/i.test(chapter.title) ? .78 : 1;
-  return Math.max(3, Math.round(((transformedWords / age.wordsPerPage) * complexityAllowance + visualAndActivityPages + conceptAllowance) * shorterBackMatter));
-}
-
-function allocatePagesWithinBudget(weights: number[], budget = CHAPTER_PAGE_BUDGET) {
-  const requested = weights.map((weight) => Math.max(1, Math.round(Number.isFinite(weight) ? weight : 1)));
-  const requestedTotal = requested.reduce((sum, value) => sum + value, 0);
-  if (!requested.length || requestedTotal <= budget) return requested;
-
-  const minimumPages = requested.length;
-  const distributable = Math.max(0, budget - minimumPages);
-  const weightTotal = requested.reduce((sum, value) => sum + value, 0) || requested.length;
-  const exactExtras = requested.map((weight) => distributable * weight / weightTotal);
-  const allocated = exactExtras.map((extra) => 1 + Math.floor(extra));
-  let remaining = budget - allocated.reduce((sum, value) => sum + value, 0);
-  const remainderOrder = exactExtras
-    .map((extra, index) => ({ index, remainder: extra - Math.floor(extra) }))
-    .sort((a, b) => b.remainder - a.remainder || a.index - b.index);
-  for (let cursor = 0; remaining > 0 && remainderOrder.length; cursor += 1, remaining -= 1) {
-    allocated[remainderOrder[cursor % remainderOrder.length].index] += 1;
-  }
-  return allocated;
-}
-
 function fitChaptersToBookLimit(chapters: Chapter[]) {
   const requestedTotal = chapters.reduce((sum, chapter) => sum + Math.max(1, chapter.pages || 1), 0);
   const allocations = allocatePagesWithinBudget(chapters.map((chapter) => chapter.pages || 1));
   const wasLimited = requestedTotal > CHAPTER_PAGE_BUDGET;
   return chapters.map((chapter, index) => {
-    const baseReason = (chapter.pageReason || "").replace(/\s*Rebalanced proportionally so the complete book stays within 100 pages\.?$/i, "").trim();
+    const baseReason = (chapter.pageReason || "").replace(/\s*Reduced only because the combined plan exceeded the 100-page safety ceiling\.?$/i, "").trim();
     const pageReason = wasLimited
-      ? `${baseReason}${baseReason ? " " : ""}Rebalanced proportionally so the complete book stays within 100 pages.`
+      ? `${baseReason}${baseReason ? " " : ""}Reduced only because the combined plan exceeded the 100-page safety ceiling.`
       : baseReason || chapter.pageReason;
     return {
       ...chapter,
@@ -574,14 +539,14 @@ function setChapterPagesWithinLimit(chapters: Chapter[], chapterIndex: number, v
     ...patch,
     pages,
     pagePlanCustom: true,
-    pageReason: "Custom allocation. The complete book remains within the 100-page limit.",
+    pageReason: "Custom length chosen by the designer; the 100-page safety ceiling still applies.",
   } : chapter);
 }
 
 function adaptationPageReason(chapter: Chapter, audience: string) {
   const sourceWords = chapter.sourceWordCount?.toLocaleString() ?? "analysed";
   const reader = childAudienceProfile(audience).label.toLowerCase();
-  return `${chapter.complexity || "Layered"} chapter · ${sourceWords} source words · space for ${reader} to understand the ideas through explanations, examples, a unique visual and an activity.`;
+  return `${chapter.complexity || "Layered"} chapter · ${sourceWords} source words reviewed · shortest clear treatment for ${reader}, including the essential ideas, an example, one unique visual and an activity.`;
 }
 
 function applyAutomaticAdaptationPlan(chapters: Chapter[], audience: string, includeCustom = false) {
@@ -719,6 +684,7 @@ function normalizeProject(saved: Project): Project {
   const childFirstSaved: Project = {
     ...emptyProject,
     ...cleanSaved,
+    adaptationPlanVersion: cleanSaved.adaptationPlanVersion ?? 1,
     audience: reader.value,
     readingLevel: reader.readingLevel,
     tone: writing.value,
@@ -962,6 +928,7 @@ export default function Home() {
         sourcePreview: source.preview,
         briefApproved: false,
         adaptationPlanConfirmed: false,
+        adaptationPlanVersion: ADAPTATION_PLAN_VERSION,
         chapters,
       });
       notify(`${file.name} analysed successfully`);
@@ -997,6 +964,7 @@ export default function Home() {
         sourceSections: source.sections,
         sourcePreview: source.preview,
         adaptationPlanConfirmed: false,
+        adaptationPlanVersion: ADAPTATION_PLAN_VERSION,
         briefApproved: false,
         chapters: attachChapterVisuals({ ...project, sourceTerms: source.terms }, reconcileOriginalChapters(project, titles, source.sections, source.chapterPlans)),
       };
@@ -1033,7 +1001,7 @@ export default function Home() {
     let next = normalizeProject(selected);
     setProject(next);
     setActiveChapter(next.chapters[0]?.id ?? 1);
-    const needsContextPlan = Boolean(next.sourceObjectKey) && next.chapters.some((chapter) => !chapter.sourceWordCount || !chapter.sourcePageCount || !chapter.recommendedPages);
+    const needsContextPlan = Boolean(next.sourceObjectKey) && (next.adaptationPlanVersion !== ADAPTATION_PLAN_VERSION || next.chapters.some((chapter) => !chapter.sourceWordCount || !chapter.sourcePageCount || !chapter.recommendedPages));
     if (next.adaptationPlanConfirmed && !needsContextPlan) {
       setView("editor");
       return;
@@ -1059,13 +1027,14 @@ export default function Home() {
         sourceTerms: data.source.terms,
         sourceSections: data.source.sections,
         sourcePreview: data.source.preview,
+        adaptationPlanVersion: ADAPTATION_PLAN_VERSION,
         adaptationPlanConfirmed: needsContextPlan ? false : next.adaptationPlanConfirmed,
         briefApproved: needsContextPlan ? false : next.briefApproved,
         chapters: attachChapterVisuals({ ...next, sourceTerms: data.source.terms }, reconcileOriginalChapters(next, titles, data.source.sections, data.source.chapterPlans)),
       };
       setProject(next);
       await persistProject(next);
-      notify(needsContextPlan ? `${titles.length} chapters upgraded with context-aware page recommendations` : `${titles.length} original chapters detected`);
+      notify(needsContextPlan ? `${titles.length} chapters replanned at their shortest clear length` : `${titles.length} original chapters detected`);
     } catch (error) {
       notify(error instanceof Error ? error.message : "Could not re-check the original chapters");
     } finally {
@@ -1074,7 +1043,7 @@ export default function Home() {
   }
 
   async function confirmAdaptationPlan() {
-    const next = { ...project, chapters: fitChaptersToBookLimit(project.chapters), adaptationPlanConfirmed: true, briefApproved: false };
+    const next = { ...project, chapters: fitChaptersToBookLimit(project.chapters), adaptationPlanConfirmed: true, adaptationPlanVersion: ADAPTATION_PLAN_VERSION, briefApproved: false };
     setProject(next);
     setView("brief");
     try { await persistProject(next); } catch { notify("Page choices are kept here; save again when connected"); }
@@ -1163,7 +1132,7 @@ export default function Home() {
   }
 
   function addChapter() {
-    if (project.chapters.length >= CHAPTER_PAGE_BUDGET) { notify("A 100-page book cannot contain more chapter starts"); return; }
+    if (project.chapters.length >= CHAPTER_PAGE_BUDGET) { notify("The 100-page safety ceiling cannot fit another chapter start"); return; }
     const id = Math.max(0, ...project.chapters.map((chapter) => chapter.id)) + 1;
     const nextChapter: Chapter = { id, title: `New chapter ${id}`, pages: 6, status: "planned", locked: false, sourceRefs: [], body: `<p class="chapter-kicker">CHAPTER ${id}</p><h1>New chapter ${id}</h1><p class="chapter-deck">Add or prepare this chapter from the reviewed source.</p>` };
     patchProject({ chapters: fitChaptersToBookLimit(attachChapterVisuals(project, [...project.chapters, nextChapter])) });
@@ -1302,7 +1271,7 @@ function Dashboard({ projects, onNew, onOpen, onDuplicate, onDelete }: { project
   return <main className="dashboard">
     <header><div className="brand"><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></div><button className="primary" onClick={onNew}>＋ New book</button></header>
     <section className="hero">
-      <div><p className="eyebrow">CHILDREN’S ADAPTATION STUDIO</p><h1>Turn any source into a book<br/><em>children want to read.</em></h1><p className="hero-copy">Preserve every original chapter, then reshape the writing, activities and visual world for children aged 7–15.</p><button className="hero-cta" onClick={onNew}>Start a children’s adaptation <span>→</span></button><small>AGES 7–15 · PDF · DOCX · TXT · UP TO 100 PAGES</small></div>
+      <div><p className="eyebrow">CHILDREN’S ADAPTATION STUDIO</p><h1>Turn any source into a book<br/><em>children want to read.</em></h1><p className="hero-copy">Preserve every original chapter, then reshape the writing, activities and visual world for children aged 7–15.</p><button className="hero-cta" onClick={onNew}>Start a children’s adaptation <span>→</span></button><small>AGES 7–15 · PDF · DOCX · TXT · NATURAL LENGTH · 100-PAGE CEILING</small></div>
       <div className="hero-books" aria-hidden="true"><div className="book back"><span>THE SOURCE</span></div><div className="book front"><span>A BOOK FOR</span><strong>CURIOUS<br/>YOUNG MINDS</strong><i>READ · DISCOVER · CREATE</i><b>✦</b></div></div>
     </section>
     <section className="library-section">
@@ -1353,7 +1322,7 @@ function Wizard({ step, project, sourceBusy, onPatch, onFile, onBack, onNext }: 
       {step === 1 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">READER AGE</p><div className="choice-cards">{childAudienceProfiles.map((profile) => <button className={project.audience === profile.value ? "choice selected" : "choice"} onClick={() => onPatch(audiencePatch(profile.value))} key={profile.value}><span>{profile.value}</span><strong>{profile.label}</strong><small>{profile.description}</small><i>“{profile.sample}”</i></button>)}</div></div><BookGlimpse project={project} focus="reader"/></section>}
       {step === 2 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">WRITING MODE</p><div className="choice-cards writing-choices">{childWritingProfiles.map((profile) => <button className={project.tone === profile.value ? "choice selected" : "choice"} onClick={() => onPatch(writingPatch(profile.value))} key={profile.value}><span className="choice-icon">{profile.icon}</span><strong>{profile.label}</strong><small>{profile.description}</small><i>{profile.hookLabel} · {profile.activityLabel}</i></button>)}</div><div className="language-choice"><span>BOOK LANGUAGE</span>{["English", "Hindi", "English + Hindi"].map((language) => <button className={project.language === language ? "selected" : ""} onClick={() => onPatch({ language })} key={language}>{language}</button>)}</div><div className="auto-settings"><b>Automatically included</b><span>{project.learningFeatures.join(" · ")}</span><small>Facts remain tied to the uploaded source. Source notes are kept for the adult editor and do not clutter the child’s page.</small></div></div><BookGlimpse project={project} focus="writing"/></section>}
       {step === 3 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">VISUAL WORLD</p><div className="design-world-cards">{childDesignWorlds.map((world) => <button className={`${project.aesthetic === world.value ? "selected " : ""}design-world world-${normalizedTitle(world.value).replace(/[^a-z]+/g, "-")}`} onClick={() => onPatch(designWorldPatch(world.value))} key={world.value}><span className="world-thumbnail"><i/><b>Ab</b><i/></span><strong>{world.label}</strong><small>{world.description}</small><em>{world.illustrationStyle} · {world.fontTheme}</em></button>)}</div><div className="auto-settings"><b>Visual guarantee</b><span>At least one different context-based visual in every chapter</span><small>If a literal scene is unsuitable, the app creates a relevant map, timeline, tree, cycle or relationship diagram in the same book world.</small></div></div><BookGlimpse project={project} focus="design"/></section>}
-      {step === 4 && <><section className="brief-review child-review"><div><span>SOURCE</span><strong>{project.source}</strong></div><div><span>CHILD READER</span><strong>{project.audience} · {project.readingLevel}</strong></div><div><span>BOOK</span><strong>{project.bookType}</strong></div><div><span>WRITING</span><strong>{project.tone} · {project.language}</strong></div><div><span>BOOK WORLD</span><strong>{project.aesthetic} · {project.illustrationStyle}</strong></div><div><span>LENGTH</span><strong>Context-planned · 100 pages maximum</strong></div></section><BookGlimpse project={project} focus="design"/></>}
+      {step === 4 && <><section className="brief-review child-review"><div><span>SOURCE</span><strong>{project.source}</strong></div><div><span>CHILD READER</span><strong>{project.audience} · {project.readingLevel}</strong></div><div><span>BOOK</span><strong>{project.bookType}</strong></div><div><span>WRITING</span><strong>{project.tone} · {project.language}</strong></div><div><span>BOOK WORLD</span><strong>{project.aesthetic} · {project.illustrationStyle}</strong></div><div><span>LENGTH</span><strong>Shortest clear length · never padded · under 100 pages</strong></div></section><BookGlimpse project={project} focus="design"/></>}
       <footer className="wizard-footer"><button className="secondary" onClick={onBack}>← Back</button><button className="primary" onClick={onNext} disabled={sourceBusy || (step === 0 && project.source === "No source selected")}>{step === 4 ? "Detect original chapters" : "Continue"} →</button></footer>
     </main>
   </div>;
@@ -1366,7 +1335,7 @@ function Analysis({ project, sourceBusy, onPatch, onBack, onContinue }: { projec
   });
   const recalculate = () => onPatch({ chapters: applyAutomaticAdaptationPlan(project.chapters, project.audience, true) });
   const plannedPages = totalBookPages(project.chapters);
-  return <main className="analysis-page"><button className="text-button" onClick={onBack}>← Change setup</button><p className="eyebrow">CHAPTER CONTEXT ANALYSIS</p><h1>{sourceBusy ? "Understanding every original chapter…" : "Your adaptation page plan is ready."}</h1><p className="lead">This is not a summary plan. The studio reads each chapter’s length, concepts and difficulty, then shapes a complete, age-appropriate adaptation within 100 pages.</p><section className="stats"><div><span>SOURCE PAGES</span><strong>{project.sourcePages || "—"}</strong></div><div><span>SOURCE WORDS</span><strong>{project.sourceWords ? project.sourceWords.toLocaleString() : "Pending"}</strong></div><div><span>ORIGINAL CHAPTERS</span><strong>{headings.length}</strong></div><div><span>ADAPTATION PAGES</span><strong>{plannedPages} / {TOTAL_BOOK_PAGE_LIMIT}</strong></div></section><div className="analysis-grid"><section className="analysis-card chapter-detection"><header><div><p className="eyebrow">AUTOMATIC ADAPTATION PLAN</p><h2>{headings.length} original chapters, each planned from its own context</h2></div><button className="recalculate-plan" onClick={recalculate}>↻ Recalculate</button></header><div className="adaptation-plan-note"><b>How the recommendation works</b><span>Source length + idea density + reading age + examples + one unique visual + one activity. The 92 chapter pages are shared proportionally; 8 pages stay reserved for front and back matter.</span></div>{headings.map((heading, index) => { const chapter = project.chapters[index]; return <div className="heading-row context-row" key={`${index}-${heading}`}><span>{String(index + 1).padStart(2, "0")}</span><div className="chapter-context"><strong>{heading}</strong><p>{chapter?.context || "Chapter context is being matched to the uploaded source."}</p><div><em>{chapter?.sourceStartPage ? `Source pp. ${chapter.sourceStartPage}–${chapter.sourceEndPage}` : "Source range pending"}</em><em>{chapter?.sourceWordCount ? `${chapter.sourceWordCount.toLocaleString()} words` : "Word count pending"}</em><em>{chapter?.complexity || "Analysing"}</em></div><small>{chapter?.pageReason || "The page recommendation will appear after source analysis."}</small></div><label><b>{chapter?.pagePlanCustom ? "CUSTOM" : "RECOMMENDED"}</b><input aria-label={`Adaptation pages for ${heading}`} type="number" min="1" max={maximumChapterPages(project.chapters, index)} value={chapter?.pages ?? 1} onChange={(event) => setChapterPages(index, Number(event.target.value))}/><span>pages</span></label></div>; })}</section><aside><div className="analysis-card"><p className="eyebrow">BOOK-WIDE THEMES</p><div className="tags">{(project.sourceTerms.length ? project.sourceTerms : ["analysis pending"]).map((term) => <span key={term}>{term}</span>)}</div></div><div className="analysis-card note"><p className="eyebrow">ADAPTATION, NOT SUMMARY</p><p>Every original chapter keeps its exact name and order. The page count expands or contracts according to what children need to understand—not one repeated number for the whole book.</p></div><div className="analysis-card note"><p className="eyebrow">100-PAGE BOOK LIMIT</p><p>The complete book can use up to 100 pages: 92 for chapters and 8 for the cover, contents and back matter.</p></div></aside></div><footer className="analysis-footer"><span>Edit any chapter allocation; the total will remain within 100 pages without renaming or removing an original chapter.</span><button className="primary" disabled={sourceBusy || !headings.length || plannedPages > TOTAL_BOOK_PAGE_LIMIT} onClick={onContinue}>Confirm adaptation plan →</button></footer></main>;
+  return <main className="analysis-page"><button className="text-button" onClick={onBack}>← Change setup</button><p className="eyebrow">CHAPTER CONTEXT ANALYSIS</p><h1>{sourceBusy ? "Understanding every original chapter…" : "Your adaptation page plan is ready."}</h1><p className="lead">The studio selects the essential ideas in each chapter and recommends the shortest clear, age-appropriate adaptation. It may need 2 pages or 5 pages; it never adds text just to fill a book.</p><section className="stats"><div><span>SOURCE PAGES</span><strong>{project.sourcePages || "—"}</strong></div><div><span>SOURCE WORDS REVIEWED</span><strong>{project.sourceWords ? project.sourceWords.toLocaleString() : "Pending"}</strong></div><div><span>ORIGINAL CHAPTERS</span><strong>{headings.length}</strong></div><div><span>ESTIMATED BOOK LENGTH</span><strong>{plannedPages} pages</strong></div></section><div className="analysis-grid"><section className="analysis-card chapter-detection"><header><div><p className="eyebrow">AUTOMATIC ADAPTATION PLAN</p><h2>{headings.length} original chapters, each given only the space it needs</h2></div><button className="recalculate-plan" onClick={recalculate}>↻ Recalculate</button></header><div className="adaptation-plan-note"><b>How the recommendation works</b><span>The planner weighs essential ideas, difficulty, source breadth and the selected age. It allows room for a clear explanation, an example, one unique visual and an activity—then stops. Pages are not distributed to fill 100.</span></div>{headings.map((heading, index) => { const chapter = project.chapters[index]; return <div className="heading-row context-row" key={`${index}-${heading}`}><span>{String(index + 1).padStart(2, "0")}</span><div className="chapter-context"><strong>{heading}</strong><p>{chapter?.context || "Chapter context is being matched to the uploaded source."}</p><div><em>{chapter?.sourceStartPage ? `Source pp. ${chapter.sourceStartPage}–${chapter.sourceEndPage}` : "Source range pending"}</em><em>{chapter?.sourceWordCount ? `${chapter.sourceWordCount.toLocaleString()} words reviewed` : "Word count pending"}</em><em>{chapter?.complexity || "Analysing"}</em></div><small>{chapter?.pageReason || "The page recommendation will appear after source analysis."}</small></div><label><b>{chapter?.pagePlanCustom ? "CUSTOM" : "RECOMMENDED"}</b><input aria-label={`Adaptation pages for ${heading}`} type="number" min="1" max={maximumChapterPages(project.chapters, index)} value={chapter?.pages ?? 1} onChange={(event) => setChapterPages(index, Number(event.target.value))}/><span>pages</span></label></div>; })}</section><aside><div className="analysis-card"><p className="eyebrow">BOOK-WIDE THEMES</p><div className="tags">{(project.sourceTerms.length ? project.sourceTerms : ["analysis pending"]).map((term) => <span key={term}>{term}</span>)}</div></div><div className="analysis-card note"><p className="eyebrow">ADAPTATION, NOT SUMMARY</p><p>Every original chapter keeps its exact name and order. The writing explains the source for the selected child reader instead of merely shortening paragraphs.</p></div><div className="analysis-card note"><p className="eyebrow">LENGTH GUARDRAIL</p><p>100 pages is only the safety ceiling. A clear 30-page or 45-page adaptation stays that length; the studio never stretches it to 100.</p></div></aside></div><footer className="analysis-footer"><span>Edit a recommendation if needed. The studio keeps the complete book under 100 pages but never treats 100 as a target.</span><button className="primary" disabled={sourceBusy || !headings.length || plannedPages > TOTAL_BOOK_PAGE_LIMIT} onClick={onContinue}>Confirm adaptation plan →</button></footer></main>;
 }
 
 function BookBrief({ project, allocated, draftBusy, onBack, onUpdateChapter, onPrepare, onContinue }: { project: Project; allocated: number; draftBusy: boolean; onBack: () => void; onUpdateChapter: (id: number, patch: Partial<Chapter>) => void; onPrepare: (scope: "sample" | "all" | "active") => void; onContinue: () => void }) {
@@ -1375,7 +1344,7 @@ function BookBrief({ project, allocated, draftBusy, onBack, onUpdateChapter, onP
   return <main className="brief-page">
     <button className="text-button" onClick={onBack}>← Back to source analysis</button>
     <header className="brief-hero"><div><p className="eyebrow">CHILDREN’S BOOK BRIEF & PAGE PLAN</p><h1>{project.title}</h1><p className="lead">An illustrated adaptation for {project.audience.toLowerCase()}, written as a {project.tone.toLowerCase()} in the {project.aesthetic.toLowerCase()} book world.</p><div className="brief-chips"><span>{project.language}</span><span>{project.readingLevel}</span><span>{project.imageFrequency}</span></div></div><aside><span>PROMISE TO THE CHILD READER</span><p>Keep the source truthful, make every new word understandable, and give each chapter a question, a visual and something worth thinking about.</p></aside></header>
-    <div className="brief-layout"><section className="plan-card"><header><div><p className="eyebrow">STRUCTURE</p><h2>Chapter adaptation-page plan</h2></div><div className="budget-pill">{allocated} of {TOTAL_BOOK_PAGE_LIMIT} pages</div></header><div className="plan-head"><span>CHAPTER</span><span>ORIGINAL TITLE</span><span>PAGES</span><span>STATE</span></div>{project.chapters.map((chapter, index) => <div className="plan-row" key={chapter.id}><span>{String(index + 1).padStart(2, "0")}</span><strong className="preserved-title">{chapter.title}</strong><input aria-label={`Adaptation pages for ${chapter.title}`} type="number" min="1" max={maximumChapterPages(project.chapters, index)} value={chapter.pages} onChange={(event) => onUpdateChapter(chapter.id, { pages: Number(event.target.value), pagePlanCustom: true })}/><b className={`draft-state ${chapter.status}`}>{chapter.status}</b></div>)}<footer><span>Recommendations come from each chapter’s context. The complete book stays within 100 pages, including 8 pages reserved for front and back matter.</span></footer></section>
+    <div className="brief-layout"><section className="plan-card"><header><div><p className="eyebrow">STRUCTURE</p><h2>Chapter adaptation-page plan</h2></div><div className="budget-pill">{allocated} pages planned</div></header><div className="plan-head"><span>CHAPTER</span><span>ORIGINAL TITLE</span><span>PAGES</span><span>STATE</span></div>{project.chapters.map((chapter, index) => <div className="plan-row" key={chapter.id}><span>{String(index + 1).padStart(2, "0")}</span><strong className="preserved-title">{chapter.title}</strong><input aria-label={`Adaptation pages for ${chapter.title}`} type="number" min="1" max={maximumChapterPages(project.chapters, index)} value={chapter.pages} onChange={(event) => onUpdateChapter(chapter.id, { pages: Number(event.target.value), pagePlanCustom: true })}/><b className={`draft-state ${chapter.status}`}>{chapter.status}</b></div>)}<footer><span>Each recommendation is the shortest comfortable treatment for the selected age. Eight pages are included for front and back matter; 100 pages remains a ceiling only.</span></footer></section>
       <aside className="generation-card"><p className="eyebrow">FULL CHAPTER BUILDER</p><h2>Prepare the manuscript</h2><p>Build substantial editable chapters from multiple relevant passages in the uploaded source. Page markers and source evidence are added automatically. Locked chapters are never overwritten.</p><div className="draft-progress"><span><b>{drafted}</b> of {project.chapters.length} drafted</span><i><b style={{ width: `${project.chapters.length ? drafted / project.chapters.length * 100 : 0}%` }}/></i></div><button className="secondary full" disabled={draftBusy} onClick={() => onPrepare("sample")}>{draftBusy ? "Reading the source…" : "Build full sample chapter"}</button><button className="primary full" disabled={draftBusy} onClick={() => onPrepare("all")}>{draftBusy ? "Building full chapters…" : "Build all full chapters"}</button><small>This source-grounded builder works without an AI key. Use the editorial assistant afterward when you want stylistic rewriting.</small></aside></div>
     {first && <section className="sample-spread"><div className="sample-copy"><p className="eyebrow">SAMPLE SPREAD</p><span>CHAPTER 01</span><h2>{first.title}</h2><p>{first.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 420)}</p><button className="text-button" onClick={() => onPrepare("sample")}>{first.status === "planned" ? "Create this sample" : "Refresh sample draft"} →</button></div>{first.imageUrl ? <figure className="sample-art sample-art-image"><img src={first.imageUrl} alt={first.imageAlt || first.imageCaption || first.title}/><figcaption>{first.imageCaption || first.title}</figcaption></figure> : <div className="sample-art"><span>ILLUSTRATION DIRECTION</span><strong>{project.aesthetic}</strong><p>{first.title} · {project.imageFrequency}</p><b>✦</b></div>}</section>}
     <footer className="brief-actions"><div><b>Ready for editorial review</b><span>{drafted ? `${drafted} chapter draft${drafted === 1 ? "" : "s"} prepared` : "Prepare at least one chapter now, or begin with a blank structure."}</span></div><button className="primary" onClick={onContinue}>Approve brief & open studio →</button></footer>
@@ -1387,7 +1356,7 @@ function Editor({ project, active, activeId, allocated, draftBusy, onSelect, edi
   if (!active) return null;
   const fontClass = project.fontTheme.toLowerCase().replace(/[^a-z]+/g, "-");
   return <main className="editor-layout">
-    <aside className="chapters"><header><p className="eyebrow">BOOK STRUCTURE</p><button onClick={onAddChapter} aria-label="Add chapter">＋</button></header><div className="front-matter"><span>FM</span><div><b>Front matter</b><small>Cover · Contents · Preface</small></div></div>{project.chapters.map((chapter) => <button className={chapter.id === activeId ? "chapter active" : "chapter"} onClick={() => onSelect(chapter.id)} key={chapter.id}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small>{chapter.pages} pages · {chapter.status}</small></div><i>{chapter.locked ? "◆" : ""}</i></button>)}<div className="page-budget"><span><b>{allocated}</b> / {TOTAL_BOOK_PAGE_LIMIT} planned pages</span><small>Includes 8 pages for front and back matter</small></div></aside>
+    <aside className="chapters"><header><p className="eyebrow">BOOK STRUCTURE</p><button onClick={onAddChapter} aria-label="Add chapter">＋</button></header><div className="front-matter"><span>FM</span><div><b>Front matter</b><small>Cover · Contents · Preface</small></div></div>{project.chapters.map((chapter) => <button className={chapter.id === activeId ? "chapter active" : "chapter"} onClick={() => onSelect(chapter.id)} key={chapter.id}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small>{chapter.pages} pages · {chapter.status}</small></div><i>{chapter.locked ? "◆" : ""}</i></button>)}<div className="page-budget"><span><b>{allocated}</b> planned pages</span><small>Natural length · 100-page safety ceiling</small></div></aside>
     <section className="canvas"><nav className="editor-tools"><div><button onClick={() => document.execCommand("bold")}><b>B</b></button><button onClick={() => document.execCommand("italic")}><i>I</i></button><button onClick={() => document.execCommand("formatBlock", false, "h2")}>H2</button><button onClick={() => document.execCommand("insertUnorderedList")}>• List</button></div><div className="chapter-meter"><span>{active.pages} target pages</span><i><b style={{ width: active.status === "planned" ? "18%" : "67%" }}/></i><button onClick={onToggleLock}>{active.locked ? "◆ Locked" : "◇ Lock"}</button></div></nav><div className="page-stage"><article className={`paper font-${fontClass} world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")} age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}${active.imageUrl ? " has-chapter-image" : ""}`}><header><span>{project.title}</span><span>{project.audience}</span></header><div className="ornament">✦</div><div key={active.id} ref={editorRef} className="book-copy" contentEditable={!active.locked} suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: active.body }}/>{active.imageUrl && <figure className="chapter-image"><img src={active.imageUrl} alt={active.imageAlt || active.imageCaption || active.title}/><figcaption>{active.imageCaption || active.title}</figcaption></figure>}<footer><span>{project.source}</span><span>{active.id}</span></footer></article></div><button className="save-float" onClick={onSaveBody}>✓ Save chapter</button></section>
     <aside className="assistant"><nav><button className={tab === "ai" ? "active" : ""} onClick={() => setTab("ai")}>✦<span>AI EDIT</span></button><button className={tab === "design" ? "active" : ""} onClick={() => setTab("design")}>◈<span>DESIGN</span></button><button className={tab === "sources" ? "active" : ""} onClick={() => setTab("sources")}>⌕<span>SOURCES</span></button></nav><div className="assistant-body">
       {tab === "ai" && <><div className="assistant-title"><span>✦</span><div><b>Editorial assistant</b><small>Select text, then choose an action.</small></div></div>{!active.locked && <button className="draft-chapter-button" disabled={draftBusy} onClick={onDraft}>{draftBusy ? "Reading the source…" : chapterWordCount(active) < 350 ? "✦ Build this full chapter" : "↻ Rebuild full chapter from source"}</button>}<p className="selection-tip">This chapter has <b>{chapterWordCount(active).toLocaleString()} words</b>. The full chapter builder uses the uploaded source; the guided edit actions can then refine the writing in ChatGPT.</p><div className="ai-list">{["Simplify language", "Shorten selection", "Expand with examples", "Make age-appropriate", "Improve storytelling", "Check against source", "Suggest an illustration"].map((action) => <button onClick={() => onAi(action)} key={action}><span>✦</span>{action}<i>→</i></button>)}</div><div className="memory-box"><p className="eyebrow">EDITORIAL MEMORY</p><p>{project.editorialPreferences.length ? project.editorialPreferences.join(" · ") : "No saved preferences yet"}</p><button onClick={() => onRemember("book")}>＋ Remember for this book</button><button onClick={() => onRemember("designer")}>＋ Remember for future books</button></div></>}
