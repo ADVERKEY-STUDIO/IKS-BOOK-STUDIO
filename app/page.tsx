@@ -968,7 +968,8 @@ export default function Home() {
     let next = normalizeProject(selected);
     setProject(next);
     setActiveChapter(next.chapters[0]?.id ?? 1);
-    if (next.adaptationPlanConfirmed) {
+    const needsContextPlan = Boolean(next.sourceObjectKey) && next.chapters.some((chapter) => !chapter.sourceWordCount || !chapter.sourcePageCount || !chapter.recommendedPages);
+    if (next.adaptationPlanConfirmed && !needsContextPlan) {
       setView("editor");
       return;
     }
@@ -993,11 +994,13 @@ export default function Home() {
         sourceTerms: data.source.terms,
         sourceSections: data.source.sections,
         sourcePreview: data.source.preview,
+        adaptationPlanConfirmed: needsContextPlan ? false : next.adaptationPlanConfirmed,
+        briefApproved: needsContextPlan ? false : next.briefApproved,
         chapters: attachChapterVisuals({ ...next, sourceTerms: data.source.terms }, reconcileOriginalChapters(next, titles, data.source.sections, data.source.chapterPlans)),
       };
       setProject(next);
       await persistProject(next);
-      notify(`${titles.length} original chapters detected`);
+      notify(needsContextPlan ? `${titles.length} chapters upgraded with context-aware page recommendations` : `${titles.length} original chapters detected`);
     } catch (error) {
       notify(error instanceof Error ? error.message : "Could not re-check the original chapters");
     } finally {

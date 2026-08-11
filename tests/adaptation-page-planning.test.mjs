@@ -14,6 +14,8 @@ test("source upload analyses every chapter before assigning adaptation pages", (
   assert.match(worker, /keyTerms/);
   assert.match(worker, /chapterPlans/);
   assert.match(page, /chapterFromContextPlan/);
+  assert.match(page, /const needsContextPlan = Boolean\(next\.sourceObjectKey\)/);
+  assert.match(page, /chapters upgraded with context-aware page recommendations/);
   assert.doesNotMatch(page, /headings\.map\(\(title, index\) => \(\{ id: index \+ 1, title, pages: 6/);
 });
 
