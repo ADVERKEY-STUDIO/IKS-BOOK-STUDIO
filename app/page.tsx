@@ -49,6 +49,7 @@ type Project = {
   chapters: Chapter[];
   editorialPreferences: string[];
   briefApproved: boolean;
+  summaryLengthConfirmed: boolean;
   updatedAt: string;
 };
 
@@ -90,7 +91,7 @@ function curatedIllustration(title: string, body = "", id = 1) {
   return fallback[Math.abs(id - 1) % fallback.length];
 }
 
-const seedProject: Project = {
+let seedProject: Project = {
   id: "arthashastra-sample",
   title: "The Art of Wise Governance",
   source: "Arthashastra_textbook.pdf",
@@ -124,6 +125,7 @@ const seedProject: Project = {
   learningFeatures: ["Key takeaways", "Glossary"],
   editorialPreferences: ["Clear sentences", "Preserve specialist terms", "Explain Sanskrit words on first use"],
   briefApproved: true,
+  summaryLengthConfirmed: true,
   updatedAt: "Today",
   chapters: [
     {
@@ -174,6 +176,29 @@ const seedProject: Project = {
   ],
 };
 
+const arthashastraOriginalTitles = [
+  "Kauṭilya’s Arthaśāstra: An Introduction",
+  "Tantrādhikāra: Internal Affairs of the Rājya",
+  "Prakṛti Sampat: The Constituent Elements",
+  "Avāpādhikāra: Foreign Affairs and Strategy",
+  "Upasaṃhāra: Conclusion",
+  "Appendix",
+];
+
+seedProject = {
+  ...seedProject,
+  sourceHeadings: arthashastraOriginalTitles,
+  chapters: arthashastraOriginalTitles.map((title, index) => ({
+    id: index + 1,
+    title,
+    pages: index === 5 ? 6 : 9,
+    status: "planned" as const,
+    locked: false,
+    sourceRefs: seedProject.sourceSections[index] ? [seedProject.sourceSections[index]] : [],
+    body: `<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${title}</h1>`,
+  })),
+};
+
 const emptyProject: Project = {
   ...seedProject,
   id: "",
@@ -196,6 +221,7 @@ const emptyProject: Project = {
   ],
   editorialPreferences: [],
   briefApproved: false,
+  summaryLengthConfirmed: false,
 };
 
 const wizardSteps = ["Source", "Reader", "Writing", "Design", "Review"];
@@ -214,6 +240,40 @@ function retitleChapterBody(body: string, title: string, chapterNumber: number) 
   }
   if (/<h1\b[^>]*>[\s\S]*?<\/h1>/i.test(next)) return next.replace(/<h1\b[^>]*>[\s\S]*?<\/h1>/i, `<h1>${safeTitle}</h1>`);
   return `${next}<h1>${safeTitle}</h1>`;
+}
+
+function removeGeneratedChapterMetadata(body: string) {
+  return (body || "").replace(/<p\b([^>]*)>([\s\S]*?)<\/p>/gi, (paragraph, _attributes: string, content: string) => {
+    const text = content.replace(/<[^>]+>/g, " ").replace(/&\w+;|&#\d+;/g, " ").replace(/\s+/g, " ").trim();
+    return /\bsource-grounded chapter\b[\s\S]*\breferenced source locations?\b/i.test(text) ? "" : paragraph;
+  });
+}
+
+function reconcileOriginalChapters(project: Project, titles: string[], sections: SourceSection[]) {
+  const used = new Set<number>();
+  const defaultPages = Math.max(1, Math.floor((project.maxPages - 8) / Math.max(1, titles.length)));
+  return titles.map((title, index) => {
+    let matchIndex = project.chapters.findIndex((chapter, chapterIndex) => !used.has(chapterIndex) && normalizedTitle(chapter.title) === normalizedTitle(title));
+    if (matchIndex < 0 && project.chapters[index] && !used.has(index)) matchIndex = index;
+    if (matchIndex >= 0) used.add(matchIndex);
+    const existing = matchIndex >= 0 ? project.chapters[matchIndex] : undefined;
+    const body = existing?.body
+      ? retitleChapterBody(removeGeneratedChapterMetadata(existing.body), title, index + 1)
+      : `<p class="chapter-kicker">CHAPTER ${index + 1}</p><h1>${escapeHtml(title)}</h1>`;
+    return {
+      id: index + 1,
+      title,
+      pages: existing?.pages || defaultPages,
+      status: existing?.status || "planned" as const,
+      locked: Boolean(existing?.locked),
+      sourceRefs: sections[index] ? [sections[index]] : (existing?.sourceRefs ?? []),
+      body,
+      imageKey: existing?.imageKey,
+      imageUrl: existing?.imageUrl,
+      imageCaption: existing?.imageCaption,
+      wordCount: existing?.wordCount,
+    };
+  });
 }
 
 function repairChapterHierarchy(chapters: Chapter[]) {
@@ -251,7 +311,7 @@ function normalizeProject(saved: Project): Project {
       status: chapter.status || "planned",
       locked: Boolean(chapter.locked),
       sourceRefs: chapter.sourceRefs ?? [],
-      body: chapter.body || `<p class="chapter-kicker">CHAPTER ${index + 1}</p><h1>${title}</h1>`,
+      body: removeGeneratedChapterMetadata(chapter.body || `<p class="chapter-kicker">CHAPTER ${index + 1}</p><h1>${title}</h1>`),
       imageKey: chapter.imageKey,
       imageUrl: chapter.imageUrl,
       imageCaption: chapter.imageCaption,
@@ -280,6 +340,7 @@ function normalizeProject(saved: Project): Project {
     citationStyle: saved.citationStyle ?? "Source page notes",
     learningFeatures: saved.learningFeatures ?? ["Key takeaways"],
     briefApproved: saved.briefApproved ?? false,
+    summaryLengthConfirmed: saved.summaryLengthConfirmed ?? false,
     sourceHeadings: hierarchy.repaired ? illustratedChapters.map((chapter) => chapter.title) : (saved.sourceHeadings ?? []),
     chapters: illustratedChapters,
   };
@@ -341,13 +402,12 @@ function createChapterDraft(project: Project, chapter: Chapter, index: number): 
   const term = escapeHtml(project.sourceTerms[index % Math.max(1, project.sourceTerms.length)] || "key idea");
   const nextTerm = escapeHtml(project.sourceTerms[(index + 1) % Math.max(1, project.sourceTerms.length)] || "context");
   const title = escapeHtml(chapter.title);
-  const audience = escapeHtml(project.audience.toLowerCase());
   const visual = escapeHtml(`${project.illustrationStyle} in a ${project.aesthetic.toLowerCase()} direction, connecting ${chapter.title} with ${term}; ${project.imageFrequency.toLowerCase()}`);
   return {
     ...chapter,
     status: "draft",
     sourceRefs: sourceRef ? [sourceRef] : chapter.sourceRefs,
-    body: `<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${title}</h1><p class="chapter-deck">A ${escapeHtml(project.tone.toLowerCase())} exploration of this part of the source, shaped for ${audience}.</p><h2>The central idea</h2><p>${first}</p><p>${second}</p><blockquote>This draft remains anchored to the uploaded source and is ready for an editor to refine.</blockquote><h2>${term.charAt(0).toUpperCase() + term.slice(1)} in context</h2><p>This section connects <strong>${term}</strong> with <strong>${nextTerm}</strong>. Use the source-reference view during editing to verify names, dates, quotations and specialist terminology before approval.</p><div class="illustration"><span>ILLUSTRATION DIRECTION</span><strong>${title}</strong><small>${visual}</small></div><div class="takeaway"><b>KEY TAKEAWAYS</b><p>Review the source evidence, explain specialist language for the selected reader, and preserve the meaning while improving clarity.</p></div>${sourceRef ? `<p class="source-note">Source note: ${escapeHtml(sourceRef.title)}, p. ${sourceRef.page}</p>` : ""}`,
+    body: `<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${title}</h1><h2>The central idea</h2><p>${first}</p><p>${second}</p><blockquote>This draft remains anchored to the uploaded source and is ready for an editor to refine.</blockquote><h2>${term.charAt(0).toUpperCase() + term.slice(1)} in context</h2><p>This section connects <strong>${term}</strong> with <strong>${nextTerm}</strong>. Use the source-reference view during editing to verify names, dates, quotations and specialist terminology before approval.</p><div class="illustration"><span>ILLUSTRATION DIRECTION</span><strong>${title}</strong><small>${visual}</small></div><div class="takeaway"><b>KEY TAKEAWAYS</b><p>Review the source evidence, explain specialist language for the selected reader, and preserve the meaning while improving clarity.</p></div>${sourceRef ? `<p class="source-note">Source note: ${escapeHtml(sourceRef.title)}, p. ${sourceRef.page}</p>` : ""}`,
   };
 }
 
@@ -436,8 +496,8 @@ export default function Home() {
       const data = await response.json() as { source?: { name: string; size: number; objectKey: string; pages: number; words: number; headings: string[]; terms: string[]; sections: SourceSection[]; preview: string; quality: string }; error?: string };
       if (!response.ok || !data.source) throw new Error(data.error || "Upload failed");
       const source = data.source;
-      const headings = source.headings.length ? source.headings.slice(0, 10) : ["Opening chapter", "Core ideas", "Applications and examples", "Closing reflections"];
-      const chapterBudget = Math.max(4, Math.floor((project.maxPages - 8) / headings.length));
+      const headings = source.headings.length ? source.headings : ["Opening chapter", "Core ideas", "Applications and examples", "Closing reflections"];
+      const chapterBudget = Math.max(1, Math.floor((project.maxPages - 8) / headings.length));
       patchProject({
         source: source.name,
         sourceSize: source.size,
@@ -450,6 +510,7 @@ export default function Home() {
         sourceSections: source.sections,
         sourcePreview: source.preview,
         briefApproved: false,
+        summaryLengthConfirmed: false,
         chapters: headings.map((title, index) => ({ id: index + 1, title, pages: chapterBudget, status: "planned", locked: false, sourceRefs: source.sections[index] ? [source.sections[index]] : [], body: `<p class="chapter-kicker">CHAPTER ${index + 1}</p><h1>${title}</h1><p class="chapter-deck">This chapter is ready for adaptation from the uploaded source.</p>` })),
       });
       notify(`${file.name} analysed successfully`);
@@ -470,6 +531,7 @@ export default function Home() {
       const data = await response.json() as { source?: { name: string; size: number; objectKey: string; pages: number; words: number; headings: string[]; terms: string[]; sections: SourceSection[]; preview: string; quality: string }; error?: string };
       if (!response.ok || !data.source) throw new Error(data.error || "Source upload failed");
       const source = data.source;
+      const titles = source.headings.length ? source.headings : project.sourceHeadings;
       const next = {
         ...project,
         source: source.name,
@@ -478,14 +540,18 @@ export default function Home() {
         sourcePages: source.pages,
         sourceWords: source.words,
         sourceQuality: source.quality,
-        sourceHeadings: source.headings,
+        sourceHeadings: titles,
         sourceTerms: source.terms,
         sourceSections: source.sections,
         sourcePreview: source.preview,
+        summaryLengthConfirmed: false,
+        briefApproved: false,
+        chapters: reconcileOriginalChapters(project, titles, source.sections),
       };
       setProject(next);
       await persistProject(next);
-      notify("Source refreshed. You can now rebuild the full chapters.");
+      setView("analysis");
+      notify("Original chapters re-detected. Choose the summary length for each one.");
     } catch (error) {
       notify(error instanceof Error ? error.message : "Could not refresh the source");
     } finally {
@@ -508,6 +574,54 @@ export default function Home() {
       await persistProject(next);
       notify("Book saved");
     } catch (error) { notify(error instanceof Error ? error.message : "Save failed"); }
+  }
+
+  async function openProject(selected: Project) {
+    let next = normalizeProject(selected);
+    setProject(next);
+    setActiveChapter(next.chapters[0]?.id ?? 1);
+    if (next.summaryLengthConfirmed) {
+      setView("editor");
+      return;
+    }
+    setView("analysis");
+    if (!next.sourceObjectKey) return;
+    setSourceBusy(true);
+    try {
+      const response = await fetch("/api/source/reanalyse", {
+        method: "POST",
+        headers: requestHeaders(),
+        body: JSON.stringify({ source: next.source, sourceObjectKey: next.sourceObjectKey }),
+      });
+      const data = await response.json() as { source?: { headings: string[]; terms: string[]; sections: SourceSection[]; preview: string; pages: number; words: number; quality: string }; error?: string };
+      if (!response.ok || !data.source) throw new Error(data.error || "Source re-check failed");
+      const titles = data.source.headings.length ? data.source.headings : next.sourceHeadings;
+      next = {
+        ...next,
+        sourcePages: data.source.pages || next.sourcePages,
+        sourceWords: data.source.words || next.sourceWords,
+        sourceQuality: data.source.quality,
+        sourceHeadings: titles,
+        sourceTerms: data.source.terms,
+        sourceSections: data.source.sections,
+        sourcePreview: data.source.preview,
+        chapters: reconcileOriginalChapters(next, titles, data.source.sections),
+      };
+      setProject(next);
+      await persistProject(next);
+      notify(`${titles.length} original chapters detected`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not re-check the original chapters");
+    } finally {
+      setSourceBusy(false);
+    }
+  }
+
+  async function confirmSummaryLengths() {
+    const next = { ...project, summaryLengthConfirmed: true, briefApproved: false };
+    setProject(next);
+    setView("brief");
+    try { await persistProject(next); } catch { notify("Page choices are kept here; save again when connected"); }
   }
 
   async function saveChapterBody() {
@@ -687,7 +801,7 @@ export default function Home() {
     }
   }
 
-  if (view === "dashboard") return <Dashboard projects={projects} onNew={startNewBook} onOpen={(selected) => { setProject(selected); setView("editor"); setActiveChapter(selected.chapters[0]?.id ?? 1); }} onDuplicate={duplicateProject} onDelete={deleteProject} />;
+  if (view === "dashboard") return <Dashboard projects={projects} onNew={startNewBook} onOpen={openProject} onDuplicate={duplicateProject} onDelete={deleteProject} />;
 
   return (
     <div className="studio-shell">
@@ -705,7 +819,7 @@ export default function Home() {
       </header>
 
       {view === "wizard" && <Wizard step={wizardStep} project={project} sourceBusy={sourceBusy} onPatch={patchProject} onFile={handleFile} onBack={() => wizardStep === 0 ? setView("dashboard") : setWizardStep((step) => step - 1)} onNext={() => wizardStep < 4 ? setWizardStep((step) => step + 1) : setView("analysis")} />}
-      {view === "analysis" && <Analysis project={project} onPatch={patchProject} onBack={() => { setView("wizard"); setWizardStep(4); }} onContinue={() => setView("brief")} />}
+      {view === "analysis" && <Analysis project={project} sourceBusy={sourceBusy} onPatch={patchProject} onBack={() => { setView("wizard"); setWizardStep(4); }} onContinue={confirmSummaryLengths} />}
       {view === "brief" && <BookBrief project={project} allocated={allocatedPages} draftBusy={draftBusy} onBack={() => setView("analysis")} onUpdateChapter={updateChapter} onPrepare={prepareDraft} onContinue={() => { patchProject({ briefApproved: true }); setActiveChapter(project.chapters[0]?.id ?? 1); setView("editor"); }} />}
       {view === "editor" && <Editor project={project} active={active} activeId={activeChapter} allocated={allocatedPages} draftBusy={draftBusy} onSelect={setActiveChapter} onSaveBody={saveChapterBody} editorRef={editorRef} onAi={aiAction} onRemember={rememberPreference} onDraft={() => prepareDraft("active")} onToggleLock={() => patchProject({ chapters: project.chapters.map((chapter) => chapter.id === active?.id ? { ...chapter, locked: !chapter.locked } : chapter) })} onAddChapter={addChapter} onUploadImage={uploadChapterImage} onPatchProject={patchProject} onUpdateChapter={updateChapter} />}
 
@@ -750,13 +864,15 @@ function Wizard({ step, project, sourceBusy, onPatch, onFile, onBack, onNext }: 
   </div>;
 }
 
-function Analysis({ project, onPatch, onBack, onContinue }: { project: Project; onPatch: (patch: Partial<Project>) => void; onBack: () => void; onContinue: () => void }) {
+function Analysis({ project, sourceBusy, onPatch, onBack, onContinue }: { project: Project; sourceBusy: boolean; onPatch: (patch: Partial<Project>) => void; onBack: () => void; onContinue: () => void }) {
   const headings = project.sourceHeadings.length ? project.sourceHeadings : ["Opening chapter"];
-  const renameHeading = (index: number, title: string) => onPatch({
-    sourceHeadings: headings.map((heading, headingIndex) => headingIndex === index ? title : heading),
-    chapters: project.chapters.map((chapter, chapterIndex) => chapterIndex === index ? { ...chapter, title } : chapter),
+  const pages = project.chapters.map((chapter) => chapter.pages);
+  const sharedLength = pages.length && pages.every((value) => value === pages[0]) ? pages[0] : "";
+  const setChapterPages = (index: number, value: number) => onPatch({
+    chapters: project.chapters.map((chapter, chapterIndex) => chapterIndex === index ? { ...chapter, pages: Math.max(1, Math.min(30, value || 1)) } : chapter),
   });
-  return <main className="analysis-page"><button className="text-button" onClick={onBack}>← Change setup</button><p className="eyebrow">SOURCE ANALYSIS</p><h1>Your source is ready.</h1><p className="lead">Review the structure detected from this uploaded book before building the new book plan.</p><section className="stats"><div><span>PAGES</span><strong>{project.sourcePages || "—"}</strong></div><div><span>WORDS</span><strong>{project.sourceWords ? project.sourceWords.toLocaleString() : "Pending"}</strong></div><div><span>QUALITY</span><strong>{project.sourceQuality}</strong></div><div><span>OUTPUT LIMIT</span><strong>{project.maxPages}</strong></div></section><div className="analysis-grid"><section className="analysis-card"><header><div><p className="eyebrow">DETECTED OUTLINE</p><h2>{headings.length} chapter candidates</h2></div><span className="good">✓ Reviewable</span></header>{headings.map((heading, index) => <div className="heading-row" key={`${index}-${heading}`}><span>{String(index + 1).padStart(2, "0")}</span><input value={heading} onChange={(event) => renameHeading(index, event.target.value)}/></div>)}</section><aside><div className="analysis-card"><p className="eyebrow">KEY TERMS</p><div className="tags">{(project.sourceTerms.length ? project.sourceTerms : ["analysis pending"]).map((term) => <span key={term}>{term}</span>)}</div></div><div className="analysis-card note"><p className="eyebrow">FRESH FOR EVERY BOOK</p><p>This analysis belongs only to <strong>{project.source}</strong>. Uploading another source begins again.</p></div></aside></div><footer className="analysis-footer"><span>You can rename any detected chapter now or later.</span><button className="primary" onClick={onContinue}>Build book plan →</button></footer></main>;
+  const setAllPages = (value: number) => onPatch({ chapters: project.chapters.map((chapter) => ({ ...chapter, pages: Math.max(1, Math.min(30, value || 1)) })) });
+  return <main className="analysis-page"><button className="text-button" onClick={onBack}>← Change setup</button><p className="eyebrow">SOURCE ANALYSIS</p><h1>{sourceBusy ? "Checking the original chapters…" : "All original chapters detected."}</h1><p className="lead">The adaptation preserves every top-level chapter name and its original order. Now choose how many summary pages each chapter should receive.</p><section className="stats"><div><span>PAGES</span><strong>{project.sourcePages || "—"}</strong></div><div><span>WORDS</span><strong>{project.sourceWords ? project.sourceWords.toLocaleString() : "Pending"}</strong></div><div><span>ORIGINAL CHAPTERS</span><strong>{headings.length}</strong></div><div><span>OUTPUT LIMIT</span><strong>{project.maxPages}</strong></div></section><div className="analysis-grid"><section className="analysis-card chapter-detection"><header><div><p className="eyebrow">ORIGINAL BOOK STRUCTURE</p><h2>{headings.length} chapters will be preserved</h2></div><span className="good">✓ Exact names</span></header><div className="summary-length-question"><div><b>How long should each chapter summary be?</b><span>Set one length for all chapters, then adjust any chapter below.</span></div><label><input aria-label="Summary pages for all chapters" type="number" min="1" max="30" value={sharedLength} placeholder="Mixed" onChange={(event) => setAllPages(Number(event.target.value))}/><span>pages each</span></label></div>{headings.map((heading, index) => <div className="heading-row" key={`${index}-${heading}`}><span>{String(index + 1).padStart(2, "0")}</span><strong>{heading}</strong><label><input aria-label={`Summary pages for ${heading}`} type="number" min="1" max="30" value={project.chapters[index]?.pages ?? 1} onChange={(event) => setChapterPages(index, Number(event.target.value))}/><span>pages</span></label></div>)}</section><aside><div className="analysis-card"><p className="eyebrow">KEY TERMS</p><div className="tags">{(project.sourceTerms.length ? project.sourceTerms : ["analysis pending"]).map((term) => <span key={term}>{term}</span>)}</div></div><div className="analysis-card note"><p className="eyebrow">ORIGINAL NAMES PRESERVED</p><p>Chapter names come from <strong>{project.source}</strong>. The app will not replace them with invented adaptation titles.</p></div></aside></div><footer className="analysis-footer"><span>Summary length can be changed later without renaming the original chapters.</span><button className="primary" disabled={sourceBusy || !headings.length} onClick={onContinue}>Confirm summary pages →</button></footer></main>;
 }
 
 function BookBrief({ project, allocated, draftBusy, onBack, onUpdateChapter, onPrepare, onContinue }: { project: Project; allocated: number; draftBusy: boolean; onBack: () => void; onUpdateChapter: (id: number, patch: Partial<Chapter>) => void; onPrepare: (scope: "sample" | "all" | "active") => void; onContinue: () => void }) {
@@ -766,7 +882,7 @@ function BookBrief({ project, allocated, draftBusy, onBack, onUpdateChapter, onP
   return <main className="brief-page">
     <button className="text-button" onClick={onBack}>← Back to source analysis</button>
     <header className="brief-hero"><div><p className="eyebrow">BOOK BRIEF & PAGE PLAN</p><h1>{project.title}</h1><p className="lead">A {project.bookType.toLowerCase()} for {project.audience.toLowerCase()}, adapted in a {project.tone.toLowerCase()} voice with a {project.aesthetic.toLowerCase()} visual direction.</p><div className="brief-chips"><span>{project.language}</span><span>{project.adaptation}</span><span>{project.imageFrequency}</span></div></div><aside><span>READER PROMISE</span><p>Make the source understandable, visually inviting and faithful enough for an editor to verify every important idea.</p></aside></header>
-    <div className="brief-layout"><section className="plan-card"><header><div><p className="eyebrow">STRUCTURE</p><h2>Chapter and page plan</h2></div><div className={overBudget ? "budget-pill warning" : "budget-pill"}>{allocated} / {project.maxPages} pages</div></header><div className="plan-head"><span>CHAPTER</span><span>TITLE</span><span>PAGES</span><span>STATE</span></div>{project.chapters.map((chapter, index) => <div className="plan-row" key={chapter.id}><span>{String(index + 1).padStart(2, "0")}</span><input value={chapter.title} onChange={(event) => onUpdateChapter(chapter.id, { title: event.target.value })}/><input aria-label={`Pages for ${chapter.title}`} type="number" min="2" max="30" value={chapter.pages} onChange={(event) => onUpdateChapter(chapter.id, { pages: Math.max(2, Number(event.target.value) || 2) })}/><b className={`draft-state ${chapter.status}`}>{chapter.status}</b></div>)}<footer><span>Includes 8 reserved pages for cover, contents, preface and references.</span>{overBudget && <strong>Reduce {allocated - project.maxPages} pages before approval.</strong>}</footer></section>
+    <div className="brief-layout"><section className="plan-card"><header><div><p className="eyebrow">STRUCTURE</p><h2>Chapter and summary-page plan</h2></div><div className={overBudget ? "budget-pill warning" : "budget-pill"}>{allocated} / {project.maxPages} pages</div></header><div className="plan-head"><span>CHAPTER</span><span>ORIGINAL TITLE</span><span>PAGES</span><span>STATE</span></div>{project.chapters.map((chapter, index) => <div className="plan-row" key={chapter.id}><span>{String(index + 1).padStart(2, "0")}</span><strong className="preserved-title">{chapter.title}</strong><input aria-label={`Summary pages for ${chapter.title}`} type="number" min="1" max="30" value={chapter.pages} onChange={(event) => onUpdateChapter(chapter.id, { pages: Math.max(1, Number(event.target.value) || 1) })}/><b className={`draft-state ${chapter.status}`}>{chapter.status}</b></div>)}<footer><span>Includes 8 reserved pages for cover, contents, preface and references.</span>{overBudget && <strong>Reduce {allocated - project.maxPages} pages before approval.</strong>}</footer></section>
       <aside className="generation-card"><p className="eyebrow">FULL CHAPTER BUILDER</p><h2>Prepare the manuscript</h2><p>Build substantial editable chapters from multiple relevant passages in the uploaded source. Page markers and source evidence are added automatically. Locked chapters are never overwritten.</p><div className="draft-progress"><span><b>{drafted}</b> of {project.chapters.length} drafted</span><i><b style={{ width: `${project.chapters.length ? drafted / project.chapters.length * 100 : 0}%` }}/></i></div><button className="secondary full" disabled={draftBusy} onClick={() => onPrepare("sample")}>{draftBusy ? "Reading the source…" : "Build full sample chapter"}</button><button className="primary full" disabled={draftBusy} onClick={() => onPrepare("all")}>{draftBusy ? "Building full chapters…" : "Build all full chapters"}</button><small>This source-grounded builder works without an AI key. Use the editorial assistant afterward when you want stylistic rewriting.</small></aside></div>
     {first && <section className="sample-spread"><div className="sample-copy"><p className="eyebrow">SAMPLE SPREAD</p><span>CHAPTER 01</span><h2>{first.title}</h2><p>{first.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 420)}</p><button className="text-button" onClick={() => onPrepare("sample")}>{first.status === "planned" ? "Create this sample" : "Refresh sample draft"} →</button></div>{first.imageUrl ? <figure className="sample-art sample-art-image"><img src={first.imageUrl} alt={curatedIllustration(first.title, first.body, first.id).alt || first.imageCaption || first.title}/><figcaption>{first.imageCaption || first.title}</figcaption></figure> : <div className="sample-art"><span>ILLUSTRATION DIRECTION</span><strong>{project.aesthetic}</strong><p>{first.title} · {project.imageFrequency}</p><b>✦</b></div>}</section>}
     <footer className="brief-actions"><div><b>{overBudget ? "Page plan needs attention" : "Ready for editorial review"}</b><span>{drafted ? `${drafted} chapter draft${drafted === 1 ? "" : "s"} prepared` : "Prepare at least one chapter now, or begin with a blank structure."}</span></div><button className="primary" disabled={overBudget} onClick={onContinue}>Approve brief & open studio →</button></footer>

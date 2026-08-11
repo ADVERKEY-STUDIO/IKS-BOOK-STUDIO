@@ -156,6 +156,23 @@ function chapterTitlesFromLabels(lines: string[]) {
   return titles.filter((title, index, all) => all.findIndex((item) => item.toLowerCase() === title.toLowerCase()) === index);
 }
 
+function chapterTitlesFromContents(lines: string[], contentsIndex: number) {
+  if (contentsIndex < 0) return [];
+  const titles: string[] = [];
+  let started = false;
+  for (let index = contentsIndex + 1; index < Math.min(lines.length, contentsIndex + 260); index += 1) {
+    const line = lines[index].replace(/\s+/g, " ").trim();
+    if (started && /^(foreword|preface|acknowledgements?)\b/i.test(line)) break;
+    const match = line.match(/^(\d{1,2})\.\s+(?!\d)(.+?)(?:\s+\d+\s*[-–—]\s*\d+)?\s*$/u);
+    if (!match) continue;
+    started = true;
+    const title = match[2].replace(/\s+\d+\s*[-–—]\s*\d+\s*$/u, "").trim();
+    if (title.length < 3 || title.length > 180) continue;
+    titles.push(title);
+  }
+  return titles.filter((title, index, all) => all.findIndex((item) => item.toLocaleLowerCase() === title.toLocaleLowerCase()) === index);
+}
+
 function evidenceSignature(value: string) {
   return contentWords(value).slice(0, 42).join(" ");
 }
@@ -233,8 +250,6 @@ function buildSourceDraft(pageTexts: string[], chapter: DraftChapterInput, index
     if (words >= targetWords) break;
   }
   const safeTitle = escapeHtml(chapter.title);
-  const audience = escapeHtml((project.audience || "the selected readers").toLowerCase());
-  const tone = escapeHtml((project.tone || "clear and engaging").toLowerCase());
   const focusTerms = keywords.slice(0, 3).map((term) => escapeHtml(term));
   const sectionTitles = [
     `Opening the idea`,
@@ -257,7 +272,7 @@ function buildSourceDraft(pageTexts: string[], chapter: DraftChapterInput, index
   const refs = [...new Map(chosen.filter((item) => item.page > 0).map((item) => [item.page, item])).values()].slice(0, 8)
     .map((item) => ({ title: chapter.title, page: item.page, excerpt: item.sentence.slice(0, 520) }));
   const visual = escapeHtml(`${project.illustrationStyle || "Editorial illustration"} in a ${(project.aesthetic || "coherent editorial").toLowerCase()} direction, grounded in the source evidence for ${chapter.title}.`);
-  const body = `<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${safeTitle}</h1><p class="chapter-deck">A ${tone} source-grounded chapter for ${audience}, developed from ${refs.length || selected.length} referenced source locations.</p><div class="source-draft-notice"><b>SOURCE-GROUNDED MANUSCRIPT</b><span>This is a substantial editable draft assembled from the uploaded book. Page markers show where its evidence came from.</span></div>${sections}<div class="illustration"><span>ILLUSTRATION DIRECTION</span><strong>${safeTitle}</strong><small>${visual}</small></div><div class="takeaway"><b>READER REFLECTION</b><p>Which idea in this chapter most changes how you understand the subject? Return to the linked source pages before approving important claims or quotations.</p></div>`;
+  const body = `<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${safeTitle}</h1><div class="source-draft-notice"><b>SOURCE-GROUNDED MANUSCRIPT</b><span>This is a substantial editable draft assembled from the uploaded book. Page markers show where its evidence came from.</span></div>${sections}<div class="illustration"><span>ILLUSTRATION DIRECTION</span><strong>${safeTitle}</strong><small>${visual}</small></div><div class="takeaway"><b>READER REFLECTION</b><p>Which idea in this chapter most changes how you understand the subject? Return to the linked source pages before approving important claims or quotations.</p></div>`;
   return { ...chapter, status: "draft" as const, body, sourceRefs: refs, wordCount: words };
 }
 
@@ -266,19 +281,15 @@ function analyseText(text: string) {
   const words = compact.match(/[\p{L}\p{N}’'-]+/gu) ?? [];
   const lines = compact.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const contentsIndex = lines.findIndex((line) => /^contents$/i.test(line));
+  const contentsHeadings = chapterTitlesFromContents(lines, contentsIndex);
   const labelledChapterTitles = chapterTitlesFromLabels(lines);
-  const contentsHeadings = contentsIndex < 0 ? [] : lines.slice(contentsIndex + 1, contentsIndex + 180)
-    .map((line) => line.match(/^(\d{1,2})\.\s+(?!\d)(.+?)(?:\s+\d+\s*[-–]\s*\d+)?$/))
-    .filter((match): match is RegExpMatchArray => Boolean(match))
-    .map((match) => match[2].replace(/\s+\d+\s*[-–]\s*\d+\s*$/, "").trim())
-    .filter((line) => line.length >= 4 && line.length <= 100);
   const structuralHeadings = lines.filter((line) => line.length >= 4 && line.length <= 90 && (
     /^(chapter|unit|part|section|book)\s+[\divxlc]+\b/i.test(line)
     || (/^[A-Z\d][A-Z\d :,'’&-]+$/.test(line) && line.split(/\s+/).length <= 10)
   )).filter((line, index, array) => array.findIndex((item) => item.toLowerCase() === line.toLowerCase()) === index).slice(0, 18);
-  const headings = (labelledChapterTitles.length ? labelledChapterTitles : contentsHeadings.length >= 2 ? contentsHeadings : structuralHeadings)
+  const headings = (contentsHeadings.length >= 2 ? contentsHeadings : labelledChapterTitles.length ? labelledChapterTitles : structuralHeadings)
     .filter((line, index, array) => array.findIndex((item) => item.toLowerCase() === line.toLowerCase()) === index)
-    .slice(0, 18);
+    .slice(0, 60);
   const frequency = new Map<string, number>();
   for (const raw of words) {
     const word = raw.toLowerCase().replace(/^['’-]+|['’-]+$/g, "");
@@ -477,6 +488,22 @@ async function sourceApi(request: Request, env: Env) {
   return json({ source: { name: file.name, size: file.size, objectKey, pages, ...analysis, sections, quality: analysis.words > 200 ? "Good" : "Needs review — OCR may be required" } });
 }
 
+async function reanalyseSourceApi(request: Request, env: Env) {
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const payload = await request.json() as { source?: string; sourceObjectKey?: string };
+  if (!payload.source || !payload.sourceObjectKey) return json({ error: "The stored source is missing" }, 400);
+  const ownerPrefix = `sources/${ownerKey(request)}/`;
+  if (!payload.sourceObjectKey.startsWith(ownerPrefix)) return json({ error: "The source does not belong to this project" }, 403);
+  const source = await env.BUCKET.get(payload.sourceObjectKey);
+  if (!source) return json({ error: "The original source file is unavailable. Upload it again to re-detect chapters." }, 404);
+  const extension = sourceExtension(payload.source);
+  if (!allowedExtensions.has(extension)) return json({ error: "This source format cannot be analysed" }, 415);
+  const extracted = await extractSourcePages(await source.arrayBuffer(), extension);
+  const analysis = analyseText(extracted.text);
+  const sections = makeSections(analysis.headings, extracted.pageTexts, extracted.text);
+  return json({ source: { pages: extracted.pages, ...analysis, sections, quality: analysis.words > 200 ? "Good" : "Needs review — OCR may be required" } });
+}
+
 async function draftApi(request: Request, env: Env) {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const project = await request.json() as DraftProjectInput;
@@ -522,6 +549,7 @@ const worker = {
       if (url.pathname === "/api/versions") return await versionsApi(request, env);
       if (url.pathname === "/api/preferences") return await preferencesApi(request, env);
       if (url.pathname === "/api/source") return await sourceApi(request, env);
+      if (url.pathname === "/api/source/reanalyse") return await reanalyseSourceApi(request, env);
       if (url.pathname === "/api/draft") return await draftApi(request, env);
       if (url.pathname === "/api/image") return await imageApi(request, env);
       if (url.pathname === "/api/asset") return await assetApi(request, env);
