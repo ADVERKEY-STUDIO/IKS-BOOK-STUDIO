@@ -70,9 +70,12 @@ test("a source-grounded blueprint is created before prose", () => {
     title: "The Council",
     audience: "Ages 7–9",
     language: "English",
+    targetPages: 3,
     sourceMaterial: "The council considers duties, advice, and shared responsibility.",
   });
   assert.match(prompt, /chapter blueprint, not prose/i);
+  assert.match(prompt, /3 comfortable illustrated pages/i);
+  assert.match(prompt, /only 4–6 essential ideas/i);
   assert.match(prompt, /central question/i);
   assert.match(prompt, /factual anchor/i);
   assert.match(prompt, /Do not invent facts/i);

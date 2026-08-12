@@ -469,7 +469,7 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
   if (contentWords(sourceMaterial).length < 120) throw new TeachingEngineError("This chapter does not contain enough readable text. OCR or a clearer source file may be required.", 422);
   const audience = project.audience || "Ages 10–12";
   const language = project.language || "English";
-  const blueprint = await geminiStructured<ChapterBlueprint>(env, blueprintPrompt({ title: chapter.title, audience, language, sourceMaterial }), chapterBlueprintSchema);
+  const blueprint = await geminiStructured<ChapterBlueprint>(env, blueprintPrompt({ title: chapter.title, audience, language, targetPages: chapter.pages, sourceMaterial }), chapterBlueprintSchema);
   const first = await geminiStructured<TeachingChapter>(env, teachingPrompt({ title: chapter.title, audience, language, targetPages: chapter.pages, sourceMaterial, blueprint }), teachingChapterSchema);
   let draft = normalizeTeachingChapter(first, chapter.title);
   let deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, chapter.pages);
