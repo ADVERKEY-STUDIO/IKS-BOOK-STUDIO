@@ -7,7 +7,7 @@ export function childAgeBand(audience = ""): ChildAgeBand {
 }
 
 export function generationProfileKey(audience = "", language = "English") {
-  return `child-adaptation-v6:authorial:${childAgeBand(audience)}:${language.toLowerCase()}`;
+  return `child-adaptation-v7:gemini-pedagogy:authorial:${childAgeBand(audience)}:${language.toLowerCase()}`;
 }
 
 export const AUTHORIAL_READER_INSTRUCTION = "Write as the author of the children’s book. Present ideas directly and confidently. Never mention an uploaded book, source, original text, adaptation process, citation, reference, evidence page, or page number in reader-facing prose.";
@@ -128,7 +128,7 @@ export function ageParagraphText({ sentence, audience, focus, related, chapterTi
       `Now we can connect ${focus} with ${related}.`,
       `This part helps us understand ${focus}.`,
     ];
-    return `${openings[paragraphIndex % openings.length]} ${evidence} This means ${focus} and ${related} are connected.`;
+    return `${openings[paragraphIndex % openings.length]} ${evidence}`;
   }
 
   if (age === "13-15") {
@@ -137,7 +137,7 @@ export function ageParagraphText({ sentence, audience, focus, related, chapterTi
       `The relationship between ${focus} and ${related} becomes clearer here.`,
       `A closer reading of ${focus} reveals both its purpose and its wider consequences.`,
     ];
-    return `${openings[paragraphIndex % openings.length]} ${evidence} These details help explain how ${focus} shapes, and is shaped by, ${related}.`;
+    return `${openings[paragraphIndex % openings.length]} ${evidence}`;
   }
 
   const openings = [
@@ -145,5 +145,5 @@ export function ageParagraphText({ sentence, audience, focus, related, chapterTi
     `The next important connection is between ${focus} and ${related}.`,
     `To understand this idea clearly, we need to look at ${focus} in context.`,
   ];
-  return `${openings[paragraphIndex % openings.length]} ${evidence} Together, these ideas show why ${focus} matters in the chapter.`;
+  return `${openings[paragraphIndex % openings.length]} ${evidence}`;
 }

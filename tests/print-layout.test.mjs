@@ -11,11 +11,13 @@ test("printed chapters start on clean A4 pages", async () => {
   assert.match(css, /\.source-draft-notice[^}]*break-inside:avoid-page/);
 });
 
-test("chapter drafting tracks evidence across the complete book", async () => {
+test("chapter drafting keeps private fact-check references inside each detected range", async () => {
   const worker = await readFile(new URL("../worker/index.ts", import.meta.url), "utf8");
-  assert.match(worker, /const usedEvidence = new Set<string>\(\)/);
-  assert.match(worker, /if \(usedEvidence\.has\(signature\)\) continue/);
-  assert.match(worker, /usedEvidence\.add\(evidenceSignature\(item\.sentence\)\)/);
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(worker, /function privateChapterRefs/);
+  assert.match(worker, /selectChapterPages\(pageTexts, chapter/);
+  assert.match(worker, /page: entry\.pageIndex \+ 1/);
+  assert.match(page, /Private fact check/);
 });
 
 test("chapter labels are paired with their following source titles", async () => {

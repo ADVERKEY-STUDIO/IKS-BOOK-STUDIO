@@ -227,3 +227,17 @@
 }
 
 @media(max-width:740px){.book-border-cards{grid-template-columns:1fr}.preview-scroll>article.book-sheet{flex-basis:85vw;width:85vw;height:120.2vw;min-height:120.2vw;padding:30px}}
+
+/* Meaning-first textbook lessons and visible pedagogy gate */
+.lesson-promise,.learning-goals,.quick-check,.chapter-recap,.chapter-example,.word-helper{margin:18px 0;padding:16px 18px;border-radius:2px;break-inside:avoid}
+.lesson-promise{background:#edf4ef;border-left:4px solid var(--forest)}
+.lesson-promise>b,.learning-goals>b,.quick-check>b,.chapter-recap>b,.chapter-example>b,.word-helper>b{display:block;margin-bottom:7px;color:var(--forest);font:800 8px/1.2 Inter,sans-serif;letter-spacing:.13em}
+.learning-goals{background:#fbf4df;border:1px solid #e4d6a8}.learning-goals ul,.quick-check ul,.chapter-recap ul{margin:8px 0 0;padding-left:20px}.learning-goals li,.quick-check li,.chapter-recap li{margin:6px 0}
+.teaching-section{margin:26px 0}.teaching-section>h2{margin-top:0}
+.chapter-example{background:#f7eee8;border-left:4px solid var(--terra)}.chapter-example>b{color:var(--terra);font-size:9px;letter-spacing:.04em}.chapter-example p{margin:0!important}
+.word-helper{background:#eef3f4;border:1px solid #cad9dc}.word-helper p{margin:6px 0!important;font-size:.92em}.word-helper strong{color:#285b63}
+.quick-check{background:#f0f5ed;border-top:2px solid #7b9e75}.chapter-recap{background:#2c4d44;color:#fff}.chapter-recap>b{color:#f3d791}.chapter-recap li{color:#fff}
+.quality-gates{display:flex;flex-wrap:wrap;gap:5px;margin:13px 0}.quality-gates span{padding:5px 7px;background:#e8f1eb;color:#32634c;font-size:7px;font-weight:800;text-transform:uppercase;letter-spacing:.05em}
+.sample-quality{display:flex;flex-direction:column;gap:4px;margin:8px 0 12px;padding:10px 12px;background:#e8f3eb;border-left:3px solid #3c7657}.sample-quality b{font-size:8px;color:#306349}.sample-quality span{font:8px/1.4 Georgia,serif;color:#52645d}
+.pedagogy-report{margin:12px 0;background:#eef6f0;border:1px solid #bdd5c4}.pedagogy-report>header{padding:12px;border-bottom:1px solid #cfdfd3}.pedagogy-report>header>div{display:flex;justify-content:space-between;align-items:center}.pedagogy-report>header b{font-size:8px;letter-spacing:.08em;color:#286044}.pedagogy-report>header span{font:700 15px Georgia,serif;color:#286044}.pedagogy-report>header p{margin:7px 0 0;font:8px/1.45 Georgia,serif;color:#52645d}.score-grid{display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid #cfdfd3}.score-grid span{display:flex;min-width:0;flex-direction:column;gap:2px;padding:8px 3px;text-align:center;font-size:5.5px;text-transform:uppercase;color:#64746d}.score-grid b{font:700 11px Georgia,serif;color:#2d5f48}.quality-checks{padding:9px 12px}.quality-checks p{margin:4px 0;font-size:6.5px;line-height:1.35;color:#496358}.pedagogy-pending{margin:12px 0;padding:13px;background:#fff3df;border-left:3px solid #c1843e}.pedagogy-pending b{font-size:8px;color:#9b5d28}.pedagogy-pending p{margin:5px 0 0;font:8px/1.45 Georgia,serif;color:#6d5b49}
+@media(max-width:740px){.score-grid{grid-template-columns:repeat(3,1fr)}.lesson-promise,.learning-goals,.quick-check,.chapter-recap,.chapter-example,.word-helper{padding:12px 13px}}

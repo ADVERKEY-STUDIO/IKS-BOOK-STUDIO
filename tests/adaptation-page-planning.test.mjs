@@ -56,7 +56,8 @@ test("100 pages is a ceiling and natural plans are never padded to fill it", () 
 test("the full chapter builder uses the detected source range and the planned adaptation length", () => {
   assert.match(worker, /chapter\.sourceStartPage/);
   assert.match(worker, /chapter\.sourceEndPage/);
-  assert.match(worker, /chapter\.pages \* reading\.wordsPerPage \* \.72/);
+  assert.match(worker, /targetPages: chapter\.pages/);
+  assert.match(worker, /chapterSourceMaterial/);
   assert.doesNotMatch(worker, /Math\.max\(520/);
   assert.match(page, /sourceStartPage, sourceEndPage, sourcePageCount, sourceWordCount, complexityScore/);
 });

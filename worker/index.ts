@@ -4,13 +4,16 @@ import handler from "vinext/server/app-router-entry";
 import mammoth from "mammoth";
 import { extractText, getDocumentProxy } from "unpdf";
 import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, TextRun } from "docx";
-import { ageEvidenceOrder, ageParagraphText, authorialReaderHtml, childAgeBand, generationProfileKey } from "../lib/child-summary";
+import { authorialReaderHtml, generationProfileKey } from "../lib/child-summary";
 import { allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET, recommendedAdaptationPages } from "../lib/adaptation-pages";
+import { blueprintPrompt, chapterBlueprintSchema, evaluateTeachingChapter, normalizeTeachingChapter, renderTeachingChapter, reviewedTeachingChapterSchema, reviewPrompt, teachingChapterSchema, teachingPrompt, type ChapterBlueprint, type PedagogyQuality, type PedagogyScores, type TeachingChapter } from "../lib/pedagogy";
 
 interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
   BUCKET: R2Bucket;
+  GEMINI_API_KEY?: string;
+  GEMINI_MODEL?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -31,6 +34,7 @@ type DraftChapterInput = {
   complexityScore?: number;
   locked?: boolean;
   body?: string;
+  pedagogyQuality?: PedagogyQuality;
 };
 
 type ChapterContextPlan = {
@@ -333,101 +337,136 @@ function selectChapterPages(pageTexts: string[], chapter: DraftChapterInput, ind
   return { selected, keywords };
 }
 
-function ageWritingProfile(audience = "") {
-  const age = childAgeBand(audience);
-  if (age === "7-9") return {
-    intro: "This chapter explains the main idea with short sentences, familiar words and clear examples.",
-    sectionTitles: ["Getting started", "The main idea", "How it works", "Why it matters", "Remember this"],
-    activityLabel: "THINK ABOUT IT",
-    activity: "What is the most important idea in this chapter? Explain it in one or two sentences.",
-  };
-  if (age === "13-15") return {
-    intro: "This chapter develops the central argument, keeps important terms and examines their wider meaning.",
-    sectionTitles: ["Context and foundations", "The central concept", "Connections and consequences", "Why it matters", "Further reflection"],
-    activityLabel: "REFLECT",
-    activity: "Which connection in this chapter is most important, and which details support your view?",
-  };
-  return {
-    intro: "This chapter introduces important terms and connects each idea to the larger topic.",
-    sectionTitles: ["Understanding the idea", "The main concept", "Key connections", "Why it matters", "Think about it"],
-    activityLabel: "THINK ABOUT IT",
-    activity: "Explain the chapter’s main idea in your own words and give one example of how its parts connect.",
-  };
+class TeachingEngineError extends Error {
+  constructor(message: string, readonly status = 502) {
+    super(message);
+  }
 }
 
-function childReadingDensity(audience = "") {
-  if (/7\s*[–-]\s*9|7\s*[-–]\s*10/i.test(audience)) return { wordsPerPage: 115, evidencePerParagraph: 1 };
-  if (/13\s*[–-]\s*15|15\s*[–-]\s*18/i.test(audience)) return { wordsPerPage: 180, evidencePerParagraph: 2 };
-  return { wordsPerPage: 145, evidencePerParagraph: 1 };
+function chapterSourceMaterial(pageTexts: string[], chapter: DraftChapterInput) {
+  const start = chapter.sourceStartPage ? Math.max(0, chapter.sourceStartPage - 1) : 0;
+  const end = chapter.sourceEndPage ? Math.min(pageTexts.length - 1, chapter.sourceEndPage - 1) : pageTexts.length - 1;
+  const selected = pageTexts.slice(start, end + 1).map((page, offset) => {
+    const cleaned = cleanSourceText(page).slice(0, 5200);
+    return cleaned ? `[PRIVATE PAGE ${start + offset + 1}]\n${cleaned}` : "";
+  }).filter(Boolean);
+  const joined = selected.join("\n\n");
+  if (joined.length <= 145000) return joined;
+  const head = joined.slice(0, 72000);
+  const tail = joined.slice(-72000);
+  return `${head}\n\n[PRIVATE MATERIAL CONTINUES]\n\n${tail}`;
 }
 
-function buildSourceDraft(pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput, usedEvidence: Set<string>) {
+function geminiText(data: unknown) {
+  const response = data as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+  return response.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("").trim() ?? "";
+}
+
+async function geminiStructured<T>(env: Env, prompt: string, responseSchema: object): Promise<T> {
+  if (!env.GEMINI_API_KEY) throw new TeachingEngineError("The Gemini teaching engine is not connected yet. Ask the site owner to finish AI setup.", 503);
+  const model = env.GEMINI_MODEL || "gemini-3.6-flash";
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema,
+        maxOutputTokens: 16000,
+        thinkingConfig: { thinkingLevel: "high" },
+      },
+      safetySettings: [
+        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+      ],
+    }),
+  });
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 600);
+    if (response.status === 429) throw new TeachingEngineError("The free Gemini quota has been reached. Your saved chapters are unchanged; try again after the quota resets.", 429);
+    if (response.status === 401 || response.status === 403) throw new TeachingEngineError("The Gemini teaching connection needs attention from the site owner.", 503);
+    throw new TeachingEngineError(`Gemini could not prepare this lesson (${response.status}). ${detail}`, 502);
+  }
+  const data = await response.json();
+  const text = geminiText(data);
+  if (!text) throw new TeachingEngineError("Gemini returned an empty lesson. The existing chapter was kept unchanged.");
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new TeachingEngineError("Gemini returned an incomplete lesson. The existing chapter was kept unchanged.");
+  }
+}
+
+function normalizedScores(value: unknown): PedagogyScores {
+  const raw = (value && typeof value === "object" ? value : {}) as Partial<PedagogyScores>;
+  const score = (item: unknown) => Math.max(0, Math.min(100, Number(item) || 0));
+  return { context: score(raw.context), coherence: score(raw.coherence), ageFit: score(raw.ageFit), pedagogy: score(raw.pedagogy), sourceFidelity: score(raw.sourceFidelity) };
+}
+
+function privateChapterRefs(pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput) {
   const { selected, keywords } = selectChapterPages(pageTexts, chapter, index, total, project.sourceTerms ?? []);
-  const writing = ageWritingProfile(project.audience);
-  const reading = childReadingDensity(project.audience);
-  const targetWords = Math.max(Math.round(reading.wordsPerPage * 1.4), Math.round(chapter.pages * reading.wordsPerPage * .72));
-  const seen = new Set<string>();
-  const evidence: Array<{ page: number; sentence: string }> = [];
-  for (const entry of selected) {
-    const ranked = usefulSentences(entry.page)
-      .map((sentence) => ({ sentence, score: sentenceScore(sentence, keywords) }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 14);
-    for (const item of ranked) {
-      const signature = evidenceSignature(item.sentence);
-      if (seen.has(signature)) continue;
-      if (usedEvidence.has(signature)) continue;
-      seen.add(signature);
-      evidence.push({ page: entry.pageIndex + 1, sentence: item.sentence });
-    }
-  }
-  if (!evidence.length) {
-    for (const sentence of usefulSentences(pageTexts.join(" ")).slice(0, 24)) evidence.push({ page: 0, sentence });
-  }
+  return selected.flatMap((entry) => usefulSentences(entry.page)
+    .map((sentence) => ({ sentence, score: sentenceScore(sentence, keywords) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 1)
+    .map((item) => ({ title: chapter.title, page: entry.pageIndex + 1, excerpt: item.sentence.slice(0, 520) }))).slice(0, 8);
+}
 
-  const orderedEvidence = ageEvidenceOrder(evidence, project.audience ?? "", keywords);
-  const chosen: typeof evidence = [];
-  let words = 0;
-  const evidenceBudgetRatio = childAgeBand(project.audience ?? "") === "7-9" ? .62 : childAgeBand(project.audience ?? "") === "13-15" ? .78 : .7;
-  for (const item of orderedEvidence) {
-    chosen.push(item);
-    usedEvidence.add(evidenceSignature(item.sentence));
-    words += contentWords(item.sentence).length;
-    if (words >= targetWords * evidenceBudgetRatio) break;
+async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput) {
+  const sourceMaterial = chapterSourceMaterial(pageTexts, chapter);
+  if (contentWords(sourceMaterial).length < 120) throw new TeachingEngineError("This chapter does not contain enough readable text. OCR or a clearer source file may be required.", 422);
+  const audience = project.audience || "Ages 10–12";
+  const language = project.language || "English";
+  const blueprint = await geminiStructured<ChapterBlueprint>(env, blueprintPrompt({ title: chapter.title, audience, language, sourceMaterial }), chapterBlueprintSchema);
+  const first = await geminiStructured<TeachingChapter>(env, teachingPrompt({ title: chapter.title, audience, language, targetPages: chapter.pages, sourceMaterial, blueprint }), teachingChapterSchema);
+  let draft = normalizeTeachingChapter(first, chapter.title);
+  let deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial);
+  let review = await geminiStructured<{ chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] }>(env, reviewPrompt({ title: chapter.title, audience, language, sourceMaterial, blueprint, draft, failures: deterministic.failures }), reviewedTeachingChapterSchema);
+  draft = normalizeTeachingChapter(review.chapter, chapter.title);
+  let scores = normalizedScores(review.scores);
+  deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial);
+  let revisionPasses = 1;
+  if (!deterministic.passed || Object.values(scores).some((score) => score < 85)) {
+    review = await geminiStructured<{ chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] }>(env, reviewPrompt({
+      title: chapter.title,
+      audience,
+      language,
+      sourceMaterial,
+      blueprint,
+      draft,
+      failures: [...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 85).map(([name, score]) => `${name} score ${score} is below 85`)],
+    }), reviewedTeachingChapterSchema);
+    draft = normalizeTeachingChapter(review.chapter, chapter.title);
+    scores = normalizedScores(review.scores);
+    deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial);
+    revisionPasses = 2;
   }
-  const safeTitle = escapeHtml(chapter.title);
-  const focusTerms = keywords.slice(0, 3).map((term) => escapeHtml(term));
-  const sectionTitles = writing.sectionTitles.map((heading, sectionIndex) => sectionIndex === 1 && focusTerms[0]
-    ? `${heading}: ${focusTerms[0][0].toUpperCase()}${focusTerms[0].slice(1)}`
-    : sectionIndex === 2 && focusTerms[1]
-      ? `${heading}: ${focusTerms[1][0].toUpperCase()}${focusTerms[1].slice(1)}`
-      : heading);
-  const groupSize = Math.max(2, Math.ceil(chosen.length / sectionTitles.length));
-  const sections = sectionTitles.map((heading, sectionIndex) => {
-    const slice = chosen.slice(sectionIndex * groupSize, (sectionIndex + 1) * groupSize);
-    if (!slice.length) return "";
-    const paragraphs: string[] = [];
-    for (let cursor = 0; cursor < slice.length; cursor += reading.evidencePerParagraph) {
-      const pair = slice.slice(cursor, cursor + reading.evidencePerParagraph);
-      const paragraphNumber = sectionIndex * groupSize + cursor;
-      const rendered = pair.map((item, pairIndex) => ageParagraphText({
-        sentence: item.sentence,
-        audience: project.audience ?? "",
-        focus: focusTerms[(sectionIndex + pairIndex) % Math.max(1, focusTerms.length)] || "the main idea",
-        related: focusTerms[(sectionIndex + pairIndex + 1) % Math.max(1, focusTerms.length)] || "the chapter context",
-        chapterTitle: chapter.title,
-        paragraphIndex: paragraphNumber + pairIndex,
-      }));
-      paragraphs.push(rendered.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join(""));
-    }
-    return `<h2>${heading}</h2>${paragraphs.join("")}`;
-  }).join("");
-  const refs = [...new Map(chosen.filter((item) => item.page > 0).map((item) => [item.page, item])).values()].slice(0, 8)
-    .map((item) => ({ title: chapter.title, page: item.page, excerpt: item.sentence.slice(0, 520) }));
-  const visual = escapeHtml(`${project.illustrationStyle || "Editorial illustration"} in a ${(project.aesthetic || "coherent editorial").toLowerCase()} direction, shaped by the central ideas in ${chapter.title}.`);
-  const body = authorialReaderHtml(`<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${safeTitle}</h1><div class="child-opening child-opening-natural"><p>${writing.intro}</p></div>${sections}<div class="illustration"><span>ILLUSTRATION DIRECTION</span><strong>${safeTitle}</strong><small>${visual}</small></div><div class="takeaway child-activity"><b>${writing.activityLabel}</b><p>${writing.activity}</p></div>`);
-  const wordCount = contentWords(body.replace(/<[^>]+>/g, " ")).length;
-  return { ...chapter, status: "draft" as const, body, sourceRefs: refs, wordCount, generationProfile: generationProfileKey(project.audience, project.language) };
+  if (!deterministic.passed || Object.values(scores).some((score) => score < 80)) {
+    throw new TeachingEngineError(`This chapter did not pass the children’s textbook quality gate: ${[...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 80).map(([name]) => `${name} needs improvement`)].join("; ")}. The previous chapter was kept unchanged.`, 422);
+  }
+  const model = env.GEMINI_MODEL || "gemini-3.6-flash";
+  const pedagogyQuality: PedagogyQuality = {
+    status: "passed",
+    engine: model,
+    scores,
+    revisionPasses,
+    summary: typeof review.summary === "string" ? review.summary : "This chapter passed the teaching-quality review.",
+    checks: [...new Set([...(Array.isArray(review.checks) ? review.checks.filter((item): item is string => typeof item === "string") : []), `Readable lesson: ${deterministic.totalWords} words`, `Age-fit sentence average: ${deterministic.averageSentenceWords} words`, `Chapter concepts used: ${deterministic.sourceTermOverlap.slice(0, 6).join(", ")}`])].slice(0, 9),
+    learningGoals: draft.learningGoals,
+  };
+  const body = authorialReaderHtml(renderTeachingChapter(draft, index + 1, escapeHtml));
+  return {
+    ...chapter,
+    status: "draft" as const,
+    body,
+    sourceRefs: privateChapterRefs(pageTexts, chapter, index, total, project),
+    wordCount: contentWords(body.replace(/<[^>]+>/g, " ")).length,
+    generationProfile: generationProfileKey(project.audience, project.language),
+    pedagogyQuality,
+  };
 }
 
 function analyseText(text: string) {
@@ -731,16 +770,17 @@ async function draftApi(request: Request, env: Env) {
   if (!allowedExtensions.has(extension)) return json({ error: "This source format cannot be drafted" }, 415);
   const extracted = await extractSourcePages(bytes, extension);
   const requested = new Set(project.chapterIds.map(Number));
-  const usedEvidence = new Set<string>();
-  for (const chapter of project.chapters) {
-    if (!requested.has(chapter.id) || chapter.locked) {
-      for (const signature of existingEvidence(chapter.body)) usedEvidence.add(signature);
+  const chapters = [];
+  try {
+    for (let index = 0; index < project.chapters.length; index += 1) {
+      const chapter = project.chapters[index];
+      if (!requested.has(chapter.id) || chapter.locked) continue;
+      chapters.push(await buildPedagogicalDraft(env, extracted.pageTexts, chapter, index, project.chapters.length, project));
     }
+  } catch (error) {
+    if (error instanceof TeachingEngineError) return json({ error: error.message }, error.status);
+    throw error;
   }
-  const chapters = project.chapters.map((chapter, index) => {
-    if (!requested.has(chapter.id) || chapter.locked) return null;
-    return buildSourceDraft(extracted.pageTexts, chapter, index, project.chapters.length, project, usedEvidence);
-  }).filter(Boolean);
   if (!chapters.length) return json({ error: "No unlocked chapters were selected" }, 400);
   return json({ chapters, sourcePages: extracted.pages });
 }

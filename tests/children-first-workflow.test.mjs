@@ -34,10 +34,10 @@ test("reader and design choices show a live book glimpse", () => {
   assert.match(css, /\.age-7-9 \.glimpse-page>p/);
 });
 
-test("one natural writing pipeline changes prose only by age band", () => {
-  assert.match(worker, /function ageWritingProfile/);
-  assert.match(worker, /ageEvidenceOrder/);
-  assert.match(worker, /ageParagraphText/);
+test("one pedagogy pipeline changes prose requirements only by age band", () => {
+  assert.match(worker, /buildPedagogicalDraft/);
+  assert.match(worker, /teachingPrompt/);
+  assert.match(worker, /reviewPrompt/);
   assert.match(worker, /generationProfileKey/);
   assert.doesNotMatch(worker, /childWritingMode|modeParagraphParts|modeEvidenceOrder/);
 
@@ -50,7 +50,8 @@ test("one natural writing pipeline changes prose only by age band", () => {
   assert.notEqual(middle, teen);
   assert.notEqual(early, teen);
   assert.match(early, /so forms/i);
-  assert.match(middle, /Together, these ideas/);
+  assert.doesNotMatch(early, /This means .* are connected/i);
+  assert.doesNotMatch(middle, /Together, these ideas show why/i);
   assert.match(teen, /wider context|wider consequences/);
 });
 
@@ -61,7 +62,7 @@ test("generation profiles invalidate drafts made for another age or language", (
   assert.notEqual(early, teen);
   assert.notEqual(early, hindi);
   assert.match(early, /authorial:7-9:english/);
-  assert.match(page, /Update writing for \$\{project\.audience\}/);
+  assert.match(page, /Build reviewed lessons for \$\{project\.audience\}/);
 });
 
 test("three child-friendly book worlds replace academic design controls", () => {
