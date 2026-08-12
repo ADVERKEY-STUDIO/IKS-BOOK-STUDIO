@@ -646,8 +646,13 @@ function manuscriptParagraphs(html: string) {
 
 async function exportDocxApi(request: Request) {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  const project = await request.json() as { title?: string; source?: string; audience?: string; citationStyle?: string; chapters?: Array<{ title?: string; body?: string; imageCaption?: string; sourceRefs?: Array<{ title?: string; page?: number }> }> };
+  const project = await request.json() as { title?: string; source?: string; audience?: string; citationStyle?: string; fontTheme?: string; chapters?: Array<{ title?: string; body?: string; imageCaption?: string; sourceRefs?: Array<{ title?: string; page?: number }> }> };
   if (!project.title || !project.chapters?.length) return json({ error: "The book has no chapters" }, 400);
+  const docxFont = /storybook|serif|literary/i.test(project.fontTheme || "")
+    ? "Georgia"
+    : /friendly|rounded/i.test(project.fontTheme || "")
+      ? "Trebuchet MS"
+      : "Aptos";
   const children: Paragraph[] = [
     new Paragraph({ text: project.title, heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER, spacing: { before: 1600, after: 360 } }),
     new Paragraph({ text: `An illustrated book for ${project.audience || "young readers"}`, alignment: AlignmentType.CENTER }),
@@ -663,7 +668,7 @@ async function exportDocxApi(request: Request) {
     creator: "IKS Book Studio",
     title: project.title,
     description: `An illustrated children’s book for ${project.audience || "young readers"}`,
-    styles: { default: { document: { run: { font: "Aptos", size: 22 }, paragraph: { spacing: { line: 300 } } } } },
+    styles: { default: { document: { run: { font: docxFont, size: 22 }, paragraph: { spacing: { line: 300 } } } } },
     sections: [{ properties: { page: { margin: { top: 1080, right: 1080, bottom: 1080, left: 1080 } } }, footers: { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ children: ["IKS Book Studio · ", PageNumber.CURRENT] })] })] }) }, children }],
   });
   const blob = await Packer.toBlob(document);

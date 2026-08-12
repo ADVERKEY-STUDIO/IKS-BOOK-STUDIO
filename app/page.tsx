@@ -485,6 +485,12 @@ const bookBorders = [
   },
 ] as const;
 
+const typographyThemes = [
+  { value: "Storybook Serif", label: "Storybook Serif", description: "Warm, literary letterforms with expressive chapter titles.", detail: "Classic and inviting for stories and cultural subjects", sample: "Once an idea begins, it can travel through generations." },
+  { value: "Friendly Rounded", label: "Friendly Rounded", description: "Soft, open letters that feel lively and approachable.", detail: "Comfortable for younger and visual-first readers", sample: "Let’s discover how every part of this idea connects!" },
+  { value: "Clear Reader", label: "Clear Reader", description: "A clean, highly readable type system with calm spacing.", detail: "Excellent for longer chapters and confident readers", sample: "The central idea becomes clearer when we examine each connection." },
+] as const;
+
 function childAudienceProfile(value: string) {
   const direct = childAudienceProfiles.find((profile) => profile.value === value);
   if (direct) return direct;
@@ -522,6 +528,14 @@ function bookBorder(value: string) {
   return bookBorders[0];
 }
 
+function typographyTheme(value: string) {
+  const direct = typographyThemes.find((theme) => theme.value === value);
+  if (direct) return direct;
+  if (/serif|literary|classic|heritage/i.test(value)) return typographyThemes[0];
+  if (/clear|reader|sans|clean/i.test(value)) return typographyThemes[2];
+  return typographyThemes[1];
+}
+
 function audiencePatch(value: string): Partial<Project> {
   const profile = childAudienceProfile(value);
   const writing = naturalWritingProfile(profile.value);
@@ -539,7 +553,6 @@ function designWorldPatch(value: string): Partial<Project> {
   return {
     aesthetic: world.value,
     illustrationStyle: world.illustrationStyle,
-    fontTheme: world.fontTheme,
   };
 }
 
@@ -549,6 +562,10 @@ function pageAestheticPatch(value: string): Partial<Project> {
 
 function bookBorderPatch(value: string): Partial<Project> {
   return { bookBorder: bookBorder(value).value };
+}
+
+function typographyPatch(value: string): Partial<Project> {
+  return { fontTheme: typographyTheme(value).value };
 }
 
 function fitChaptersToBookLimit(chapters: Chapter[]) {
@@ -730,6 +747,7 @@ function normalizeProject(saved: Project): Project {
   const design = childDesignWorld(cleanSaved.aesthetic ?? "");
   const pages = pageAesthetic(cleanSaved.pageAesthetic ?? "");
   const border = bookBorder(cleanSaved.bookBorder ?? "");
+  const typography = typographyTheme(cleanSaved.fontTheme ?? "");
   const childFirstSaved: Project = {
     ...emptyProject,
     ...cleanSaved,
@@ -744,7 +762,7 @@ function normalizeProject(saved: Project): Project {
     pageAesthetic: pages.value,
     bookBorder: border.value,
     illustrationStyle: design.illustrationStyle,
-    fontTheme: design.fontTheme,
+    fontTheme: typography.value,
     imageFrequency: reader.imageFrequency,
   };
   const normalizedChapters = (cleanSaved.chapters ?? []).map((chapter, index) => {
@@ -789,7 +807,7 @@ function normalizeProject(saved: Project): Project {
     sourcePreview: cleanSaved.sourcePreview ?? "",
     sourceSections: cleanSaved.sourceSections ?? [],
     illustrationStyle: cleanSaved.illustrationStyle ?? "Editorial watercolour",
-    fontTheme: cleanSaved.fontTheme ?? "Literary serif",
+    fontTheme: typography.value,
     citationStyle: cleanSaved.citationStyle ?? "Source page notes",
     learningFeatures: [...writing.learningFeatures],
     briefApproved: cleanSaved.briefApproved ?? false,
@@ -1359,12 +1377,14 @@ function BookGlimpse({ project, focus }: { project: Project; focus: "reader" | "
   const design = childDesignWorld(project.aesthetic);
   const pages = pageAesthetic(project.pageAesthetic);
   const border = bookBorder(project.bookBorder);
+  const typography = typographyTheme(project.fontTheme);
   const chapterTitle = project.sourceHeadings[0] || "A Big Idea to Explore";
   const worldClass = normalizedTitle(design.value).replace(/[^a-z]+/g, "-");
   const pageClass = normalizedTitle(pages.value).replace(/[^a-z]+/g, "-");
   const borderClass = normalizedTitle(border.value).replace(/[^a-z]+/g, "-");
+  const typographyClass = normalizedTitle(typography.value).replace(/[^a-z]+/g, "-");
   const ageClass = reader.value.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "");
-  return <aside className={`book-glimpse world-${worldClass} page-aesthetic-${pageClass} book-border-${borderClass} age-${ageClass}`} aria-live="polite">
+  return <aside className={`book-glimpse world-${worldClass} page-aesthetic-${pageClass} book-border-${borderClass} typography-${typographyClass} age-${ageClass}`} aria-live="polite">
     <header><div><p className="eyebrow">LIVE BOOK & PAGE GLIMPSE</p><h2>See every important page before you build</h2></div><span>{focus === "reader" ? reader.value : `${pages.label} · ${border.label}`}</span></header>
     <nav className="glimpse-tabs" aria-label="Preview a page type">{glimpsePages.map((item) => <button type="button" className={previewPage === item.value ? "active" : ""} onClick={() => setPreviewPage(item.value)} key={item.value}>{item.label}</button>)}</nav>
     <div className="glimpse-spread">
@@ -1376,8 +1396,12 @@ function BookGlimpse({ project, focus }: { project: Project; focus: "reader" | "
         {previewPage === "activity" && <><span>{writing.activityLabel}</span><h3>Pause, connect and create</h3><div className="glimpse-activity-card"><b>YOUR CHALLENGE</b><p>{writing.activity}</p><ol><li>Find one important idea.</li><li>Connect it to an example.</li><li>Share what you discovered.</li></ol></div></>}
       </div>
     </div>
-    <footer><span><b>Aa</b>{reader.readingLevel}</span><span><b>▣</b>{pages.label}</span><span><b>⌑</b>{border.label} border</span><span><b>◈</b>{project.imageFrequency}</span></footer>
+    <footer><span><b>Aa</b>{typography.label}</span><span><b>▣</b>{pages.label}</span><span><b>⌑</b>{border.label} border</span><span><b>◈</b>{project.imageFrequency}</span></footer>
   </aside>;
+}
+
+function TypographyPicker({ project, onPatch }: { project: Project; onPatch: (patch: Partial<Project>) => void }) {
+  return <section className="typography-section"><div className="typography-heading"><div><p className="choice-label">TYPOGRAPHY · APPLIES TO THE WHOLE BOOK</p><h2>Choose how the words feel</h2></div><span>Watch the live book glimpse above change instantly</span></div><div className="typography-cards">{typographyThemes.map((theme) => { const typographyClass = normalizedTitle(theme.value).replace(/[^a-z]+/g, "-"); return <button className={`${project.fontTheme === theme.value ? "selected " : ""}typography-choice typography-${typographyClass}`} onClick={() => onPatch(typographyPatch(theme.value))} key={theme.value}><span className="typography-thumbnail"><b>Aa</b><strong>Chapter title</strong><i>{theme.sample}</i></span><strong>{theme.label}</strong><small>{theme.description}</small><em>{theme.detail}</em></button>; })}</div></section>;
 }
 
 function Wizard({ step, project, sourceBusy, onPatch, onFile, onBack, onNext }: { step: number; project: Project; sourceBusy: boolean; onPatch: (patch: Partial<Project>) => void; onFile: (e: ChangeEvent<HTMLInputElement>) => void; onBack: () => void; onNext: () => void }) {
@@ -1389,6 +1413,7 @@ function Wizard({ step, project, sourceBusy, onPatch, onFile, onBack, onNext }: 
       {step === 1 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">READER AGE</p><div className="choice-cards">{childAudienceProfiles.map((profile) => <button className={project.audience === profile.value ? "choice selected" : "choice"} onClick={() => onPatch(audiencePatch(profile.value))} key={profile.value}><span>{profile.value}</span><strong>{profile.label}</strong><small>{profile.description}</small><i>“{profile.sample}”</i></button>)}</div><div className="language-choice"><span>BOOK LANGUAGE</span>{["English", "Hindi", "English + Hindi"].map((language) => <button className={project.language === language ? "selected" : ""} onClick={() => onPatch({ language })} key={language}>{language}</button>)}</div><div className="auto-settings"><b>Natural writing is automatic</b><span>{project.learningFeatures.join(" · ")}</span><small>The studio changes vocabulary, sentence length, explanation depth and reflection for the selected age. There are no separate writing modes.</small></div></div><BookGlimpse project={project} focus="reader"/></section>}
       {step === 2 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">ILLUSTRATION WORLD</p><div className="design-world-cards">{childDesignWorlds.map((world) => <button className={`${project.aesthetic === world.value ? "selected " : ""}design-world world-${normalizedTitle(world.value).replace(/[^a-z]+/g, "-")}`} onClick={() => onPatch(designWorldPatch(world.value))} key={world.value}><span className="world-thumbnail"><i/><b>Ab</b><i/></span><strong>{world.label}</strong><small>{world.description}</small><em>{world.illustrationStyle}</em></button>)}</div><div className="page-aesthetic-section"><p className="choice-label">PAGE AESTHETIC · APPLIES TO EVERY PAGE</p><div className="page-aesthetic-cards">{pageAesthetics.map((aesthetic) => { const aestheticClass = normalizedTitle(aesthetic.value).replace(/[^a-z]+/g, "-"); return <button className={`${project.pageAesthetic === aesthetic.value ? "selected " : ""}page-aesthetic-choice aesthetic-${aestheticClass}`} onClick={() => onPatch(pageAestheticPatch(aesthetic.value))} key={aesthetic.value}><span className="page-aesthetic-thumbnail"><i/><b>Chapter</b><i/><i/><i/></span><strong>{aesthetic.label}</strong><small>{aesthetic.description}</small><em>{aesthetic.detail}</em></button>; })}</div></div><div className="book-border-section"><p className="choice-label">BOOK BORDER · MIX WITH ANY PAGE AESTHETIC</p><div className="book-border-cards">{bookBorders.map((border) => { const borderClass = normalizedTitle(border.value).replace(/[^a-z]+/g, "-"); return <button className={`${project.bookBorder === border.value ? "selected " : ""}book-border-choice border-${borderClass}`} onClick={() => onPatch(bookBorderPatch(border.value))} key={border.value}><span className="book-border-thumbnail"><i/><b>Chapter</b><i/><i/><i/></span><strong>{border.label}</strong><small>{border.description}</small><em>{border.detail}</em></button>; })}</div></div><div className="auto-settings"><b>Visual guarantee</b><span>One unique image, page aesthetic and chosen border in every chapter</span><small>If a literal scene is unsuitable, the app creates a relevant map, timeline, tree, cycle or relationship diagram. Use the live tabs to inspect the chapter, reading, visual and activity pages.</small></div></div><BookGlimpse project={project} focus="design"/></section>}
       {step === 3 && <><section className="brief-review child-review"><div><span>SOURCE</span><strong>{project.source}</strong></div><div><span>CHILD READER</span><strong>{project.audience} · {project.readingLevel}</strong></div><div><span>BOOK</span><strong>{project.bookType}</strong></div><div><span>WRITING</span><strong>Natural age-based writing · {project.language}</strong></div><div><span>ILLUSTRATION WORLD</span><strong>{project.aesthetic} · {project.illustrationStyle}</strong></div><div><span>PAGE AESTHETIC</span><strong>{project.pageAesthetic} · applied to every page</strong></div><div><span>BOOK BORDER</span><strong>{project.bookBorder} · applied to every page</strong></div><div><span>LENGTH</span><strong>Shortest clear length · never padded · under 100 pages</strong></div></section><BookGlimpse project={project} focus="design"/></>}
+      {step === 2 && <TypographyPicker project={project} onPatch={onPatch}/>}
       <footer className="wizard-footer"><button className="secondary" onClick={onBack}>← Back</button><button className="primary" onClick={onNext} disabled={sourceBusy || (step === 0 && project.source === "No source selected")}>{step === 3 ? "Detect original chapters" : "Continue"} →</button></footer>
     </main>
   </div>;
@@ -1424,6 +1449,7 @@ function Editor({ project, active, activeId, allocated, draftBusy, onSelect, edi
   const pageClass = normalizedTitle(project.pageAesthetic).replace(/[^a-z]+/g, "-");
   const borderClass = normalizedTitle(project.bookBorder).replace(/[^a-z]+/g, "-");
   return <main className="editor-layout">
+    <label className="editor-typography-select">Typography<select value={project.fontTheme} onChange={(event) => onPatchProject(typographyPatch(event.target.value))}>{typographyThemes.map((theme) => <option key={theme.value}>{theme.value}</option>)}</select></label>
     <aside className="chapters"><header><p className="eyebrow">BOOK STRUCTURE</p><button onClick={onAddChapter} aria-label="Add chapter">＋</button></header><div className="front-matter"><span>FM</span><div><b>Front matter</b><small>Cover · Contents · Preface</small></div></div>{project.chapters.map((chapter) => <button className={chapter.id === activeId ? "chapter active" : "chapter"} onClick={() => onSelect(chapter.id)} key={chapter.id}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small>{chapter.pages} pages · {chapter.status}</small></div><i>{chapter.locked ? "◆" : ""}</i></button>)}<div className="page-budget"><span><b>{allocated}</b> planned pages</span><small>Natural length · 100-page safety ceiling</small></div></aside>
     <section className="canvas"><nav className="editor-tools"><div><button onClick={() => document.execCommand("bold")}><b>B</b></button><button onClick={() => document.execCommand("italic")}><i>I</i></button><button onClick={() => document.execCommand("formatBlock", false, "h2")}>H2</button><button onClick={() => document.execCommand("insertUnorderedList")}>• List</button></div><div className="chapter-meter"><span>{active.pages} target pages</span><i><b style={{ width: active.status === "planned" ? "18%" : "67%" }}/></i><button onClick={onToggleLock}>{active.locked ? "◆ Locked" : "◇ Lock"}</button></div></nav><div className="page-stage"><article className={`paper font-${fontClass} world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")} page-aesthetic-${pageClass} book-border-${borderClass} age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}${active.imageUrl ? " has-chapter-image" : ""}`}><header><span>{project.title}</span><span>{project.audience}</span></header><div className="ornament">✦</div><div key={active.id} ref={editorRef} className="book-copy" contentEditable={!active.locked} suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: authorialReaderHtml(active.body) }}/>{active.imageUrl && <figure className="chapter-image"><img src={active.imageUrl} alt={active.imageAlt || active.imageCaption || active.title}/><figcaption>{active.imageCaption || active.title}</figcaption></figure>}<footer><span>{project.title}</span><span>{active.id}</span></footer></article></div><button className="save-float" onClick={onSaveBody}>✓ Save chapter</button></section>
     <aside className="assistant"><nav><button className={tab === "ai" ? "active" : ""} onClick={() => setTab("ai")}>✦<span>AI EDIT</span></button><button className={tab === "design" ? "active" : ""} onClick={() => setTab("design")}>◈<span>DESIGN</span></button><button className={tab === "sources" ? "active" : ""} onClick={() => setTab("sources")}>⌕<span>SOURCES</span></button></nav><div className="assistant-body">
@@ -1443,6 +1469,10 @@ function AiRoundTrip({ request, onChange, onClose, onApply }: { request: { actio
 }
 
 function Preview({ project, draftBusy, onFill, onRefresh, onClose, onPrint }: { project: Project; draftBusy: boolean; onFill: () => void; onRefresh: () => void; onClose: () => void; onPrint: () => void }) {
+  useEffect(() => {
+    document.documentElement.dataset.bookTypography = normalizedTitle(typographyTheme(project.fontTheme).value).replace(/[^a-z]+/g, "-");
+    return () => { delete document.documentElement.dataset.bookTypography; };
+  }, [project.fontTheme]);
   const thinChapters = project.chapters.filter((chapter) => chapterWordCount(chapter) < 350 && !chapter.locked);
   const selectedProfile = generationProfileKey(project.audience, project.language);
   const staleChapters = project.chapters.filter((chapter) => !chapter.locked && chapterWordCount(chapter) >= 350 && chapter.generationProfile !== selectedProfile);
