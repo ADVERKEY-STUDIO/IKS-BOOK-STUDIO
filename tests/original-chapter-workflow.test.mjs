@@ -8,6 +8,9 @@ const worker = await readFile(new URL("../worker/index.ts", import.meta.url), "u
 test("contents-page chapter names take priority and every top-level entry is retained", () => {
   assert.match(worker, /function chapterTitlesFromContents/);
   assert.match(worker, /contentsHeadings\.length >= 2 \? contentsHeadings/);
+  assert.match(worker, /lastFrontMatterPage/);
+  assert.match(worker, /foreword\|preface\|acknowledg/);
+  assert.match(worker, /lastFrontMatterPage \+ 1/);
   assert.match(worker, /\.slice\(0, 60\)/);
   assert.match(worker, /\/api\/source\/reanalyse/);
 });

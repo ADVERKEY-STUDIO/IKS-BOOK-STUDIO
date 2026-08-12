@@ -249,7 +249,16 @@ function fitDraftChaptersToBookLimit(chapters: DraftChapterInput[]) {
 function chapterContextPlans(headings: string[], pageTexts: string[], audience = "Ages 10–12"): ChapterContextPlan[] {
   const cleanedPages = pageTexts.map(cleanSourceText);
   const contentsPage = cleanedPages.findIndex((page, index) => index < Math.min(20, cleanedPages.length) && /\bcontents\b/i.test(page));
-  const firstBodyPage = Math.max(0, contentsPage + 1);
+  // A chapter title often appears first in the contents, forewords, or preface.
+  // Start chapter matching only after the final clearly labelled front-matter
+  // page so those mentions cannot become the chapter's source range.
+  const frontMatterLimit = Math.min(35, cleanedPages.length);
+  const lastFrontMatterPage = cleanedPages.reduce((last, page, pageIndex) => {
+    if (pageIndex >= frontMatterLimit) return last;
+    const opening = page.slice(0, 700);
+    return /\b(?:foreword|preface|acknowledg(?:e)?ments?)\b/i.test(opening) ? pageIndex : last;
+  }, contentsPage);
+  const firstBodyPage = Math.max(0, contentsPage + 1, lastFrontMatterPage + 1);
   const anchors: number[] = [];
 
   for (let index = 0; index < headings.length; index += 1) {
