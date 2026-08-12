@@ -469,6 +469,12 @@ const pageAesthetics = [
 
 const bookBorders = [
   {
+    value: "No Border",
+    label: "No Border",
+    description: "A clean open page with no decorative frame around the reading area.",
+    detail: "Maximum space and the quietest reading experience",
+  },
+  {
     value: "Lotus Arch",
     label: "Lotus Arch",
     description: "A warm temple-inspired frame with lotus-like corner details.",
@@ -532,9 +538,10 @@ function pageAesthetic(value: string) {
 function bookBorder(value: string) {
   const direct = bookBorders.find((border) => border.value === value);
   if (direct) return direct;
-  if (/folk|geometry|pattern|colour/i.test(value)) return bookBorders[1];
-  if (/gold|line|simple|minimal/i.test(value)) return bookBorders[2];
-  return bookBorders[0];
+  if (/none|no border|borderless|open/i.test(value)) return bookBorders[0];
+  if (/folk|geometry|pattern|colour/i.test(value)) return bookBorders[2];
+  if (/gold|line|simple|minimal/i.test(value)) return bookBorders[3];
+  return bookBorders[1];
 }
 
 function pageWatermark(value: string) {
@@ -1502,6 +1509,30 @@ function AiRoundTrip({ request, onChange, onClose, onApply }: { request: { actio
   return <div className="modal-backdrop"><section className="ai-modal"><header><div><p className="eyebrow">CHATGPT EDIT</p><h2>{request.action}</h2></div><button onClick={onClose}>×</button></header><ol><li><button className="primary" onClick={openChatGPT}>Open this edit in ChatGPT ↗</button><small>The instruction is also copied automatically.</small></li><li><label>Paste ChatGPT’s revised text here<textarea value={request.result} onChange={(e) => onChange(e.target.value)} placeholder="Paste the approved revision…"/></label></li></ol><footer><button className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={!request.result.trim()} onClick={onApply}>Apply and save revision</button></footer></section></div>;
 }
 
+function paginateReaderHtml(html: string, audience: string) {
+  const clean = authorialReaderHtml(html);
+  const blocks = clean.match(/<(h2|h3|p|blockquote|ul|ol)\b[^>]*>[\s\S]*?<\/\1>/gi) ?? [clean];
+  const age = childAgeBand(audience);
+  const pageCapacity = age === "7-9" ? 1180 : age === "13-15" ? 1580 : 1380;
+  const pages: string[] = [];
+  let current: string[] = [];
+  let weight = 0;
+
+  for (const block of blocks) {
+    const textLength = block.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().length;
+    const blockWeight = textLength + (/^<h[23]/i.test(block) ? 260 : 0) + (/^<(?:ul|ol|blockquote)/i.test(block) ? 150 : 0);
+    if (current.length && weight + blockWeight > pageCapacity) {
+      pages.push(current.join(""));
+      current = [];
+      weight = 0;
+    }
+    current.push(block);
+    weight += blockWeight;
+  }
+  if (current.length) pages.push(current.join(""));
+  return pages.length ? pages : [clean];
+}
+
 function Preview({ project, draftBusy, onFill, onRefresh, onClose, onPrint }: { project: Project; draftBusy: boolean; onFill: () => void; onRefresh: () => void; onClose: () => void; onPrint: () => void }) {
   useEffect(() => {
     document.documentElement.dataset.bookTypography = normalizedTitle(typographyTheme(project.fontTheme).value).replace(/[^a-z]+/g, "-");
@@ -1521,7 +1552,12 @@ function Preview({ project, draftBusy, onFill, onRefresh, onClose, onPrint }: { 
   const pageClass = `page-aesthetic-${normalizedTitle(project.pageAesthetic).replace(/[^a-z]+/g, "-")}`;
   const borderClass = `book-border-${normalizedTitle(project.bookBorder).replace(/[^a-z]+/g, "-")}`;
   const ageClass = `age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}`;
-  return <div className="modal-backdrop"><section className="preview-modal"><header><div><p className="eyebrow">FINAL CHILDREN’S BOOK PREVIEW</p><h2>{project.title}</h2></div><div>{staleChapters.length > 0 ? <button className="fill-chapters" disabled={draftBusy} onClick={onRefresh}>{draftBusy ? "Updating chapters…" : `Update writing for ${project.audience}`}</button> : thinChapters.length > 0 && <button className="fill-chapters" disabled={draftBusy} onClick={onFill}>{draftBusy ? "Building chapters…" : `Fill ${thinChapters.length} short chapter${thinChapters.length === 1 ? "" : "s"}`}</button>}<button onClick={onPrint}>Print / Save PDF</button><button onClick={onClose}>×</button></div></header>{(staleChapters.length > 0 || thinChapters.length > 0 || printable.duplicatesRemoved > 0) && <div className="preview-warning"><b>{staleChapters.length > 0 ? `${staleChapters.length} chapter${staleChapters.length === 1 ? " needs" : "s need"} age-based writing.` : thinChapters.length > 0 ? `${thinChapters.length} chapter${thinChapters.length === 1 ? " is" : "s are"} still too short.` : "Repeated content repaired."}</b><span>{staleChapters.length > 0 ? `Rebuild the natural writing for ${project.audience.toLowerCase()}; locked chapters will stay unchanged.` : printable.duplicatesRemoved > 0 ? `${printable.duplicatesRemoved} repeated paragraph${printable.duplicatesRemoved === 1 ? " was" : "s were"} omitted from this preview and PDF.` : "Finish the short chapters before exporting."}</span></div>}<div className="preview-scroll"><article className={`preview-cover ${worldClass} ${pageClass} ${borderClass}`}><p>AN ILLUSTRATED BOOK FOR {project.audience.toUpperCase()}</p><h1>{project.title}</h1><span>Written to invite curiosity, imagination and thoughtful questions</span><b>✦</b></article><article className={`preview-page contents-page ${worldClass} ${pageClass} ${borderClass}`}><span>CONTENTS</span><h2>Inside this book</h2><ol>{printable.chapters.map((chapter, index) => <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{chapter.pages} pages</i></li>)}</ol></article>{printable.chapters.map((chapter) => <article className={`preview-page chapter-preview ${worldClass} ${pageClass} ${borderClass} ${ageClass}${chapter.imageUrl ? " has-chapter-image" : ""}`} key={chapter.id}><header className="print-chapter-header"><span>CHAPTER {chapter.id}</span><span>{project.audience.toUpperCase()}</span></header><h2>{chapter.title}</h2><div className="preview-body" dangerouslySetInnerHTML={{ __html: authorialReaderHtml(chapter.body) }}/>{chapter.imageUrl && <figure className="chapter-image"><img src={chapter.imageUrl} alt={chapter.imageAlt || chapter.imageCaption || chapter.title}/><figcaption>{chapter.imageCaption || chapter.title}</figcaption></figure>}</article>)}<article className={`preview-page backmatter ${worldClass} ${pageClass} ${borderClass}`}><span>A FINAL THOUGHT</span><h2>Keep wondering</h2><p>The most powerful ideas do not end on the last page. They grow when we ask careful questions, notice new connections and share what we discover.</p><p>Carry one idea from this book into the world—and see where it leads.</p></article></div></section></div>;
+  const chapterSheets = printable.chapters.flatMap((chapter) => {
+    const textPages = paginateReaderHtml(chapter.body, project.audience);
+    const textSheets = textPages.map((body, pageIndex) => ({ chapter, body, pageIndex, pageCount: textPages.length, image: false }));
+    return chapter.imageUrl ? [...textSheets, { chapter, body: "", pageIndex: textPages.length, pageCount: textPages.length + 1, image: true }] : textSheets;
+  });
+  return <div className="modal-backdrop"><section className="preview-modal"><header><div><p className="eyebrow">FINAL CHILDREN’S BOOK · PAGE-BY-PAGE PREVIEW</p><h2>{project.title}</h2></div><div>{staleChapters.length > 0 ? <button className="fill-chapters" disabled={draftBusy} onClick={onRefresh}>{draftBusy ? "Updating chapters…" : `Update writing for ${project.audience}`}</button> : thinChapters.length > 0 && <button className="fill-chapters" disabled={draftBusy} onClick={onFill}>{draftBusy ? "Building chapters…" : `Fill ${thinChapters.length} short chapter${thinChapters.length === 1 ? "" : "s"}`}</button>}<button onClick={onPrint}>Print / Save PDF</button><button onClick={onClose}>×</button></div></header>{(staleChapters.length > 0 || thinChapters.length > 0 || printable.duplicatesRemoved > 0) && <div className="preview-warning"><b>{staleChapters.length > 0 ? `${staleChapters.length} chapter${staleChapters.length === 1 ? " needs" : "s need"} age-based writing.` : thinChapters.length > 0 ? `${thinChapters.length} chapter${thinChapters.length === 1 ? " is" : "s are"} still too short.` : "Repeated content repaired."}</b><span>{staleChapters.length > 0 ? `Rebuild the natural writing for ${project.audience.toLowerCase()}; locked chapters will stay unchanged.` : printable.duplicatesRemoved > 0 ? `${printable.duplicatesRemoved} repeated paragraph${printable.duplicatesRemoved === 1 ? " was" : "s were"} omitted from this preview and PDF.` : "Finish the short chapters before exporting."}</span></div>}<div className="preview-scroll"><article className={`book-sheet preview-cover ${worldClass} ${pageClass} ${borderClass}`}><p>AN ILLUSTRATED BOOK FOR {project.audience.toUpperCase()}</p><h1>{project.title}</h1><span>Written to invite curiosity, imagination and thoughtful questions</span><b>✦</b></article><article className={`book-sheet preview-page contents-page ${worldClass} ${pageClass} ${borderClass}`}><span>CONTENTS</span><h2>Inside this book</h2><ol>{printable.chapters.map((chapter, index) => <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{chapter.pages} pages</i></li>)}</ol></article>{chapterSheets.map(({ chapter, body, pageIndex, pageCount, image }) => <article className={`book-sheet preview-page chapter-preview ${worldClass} ${pageClass} ${borderClass} ${ageClass}${image ? " chapter-visual-sheet" : ""}`} key={`${chapter.id}-${pageIndex}-${image ? "visual" : "text"}`}><header className="print-chapter-header"><span>CHAPTER {chapter.id}</span><span>PAGE {pageIndex + 1} OF {pageCount}</span></header>{pageIndex === 0 && <h2>{chapter.title}</h2>}{pageIndex > 0 && !image && <p className="continued-title">{chapter.title} · continued</p>}{body && <div className="preview-body" dangerouslySetInnerHTML={{ __html: body }}/>} {image && chapter.imageUrl && <figure className="chapter-image"><img src={chapter.imageUrl} alt={chapter.imageAlt || chapter.imageCaption || chapter.title}/><figcaption>{chapter.imageCaption || chapter.title}</figcaption></figure>}<footer className="sheet-number">{project.title}</footer></article>)}<article className={`book-sheet preview-page backmatter ${worldClass} ${pageClass} ${borderClass}`}><span>A FINAL THOUGHT</span><h2>Keep wondering</h2><p>The most powerful ideas do not end on the last page. They grow when we ask careful questions, notice new connections and share what we discover.</p><p>Carry one idea from this book into the world—and see where it leads.</p></article></div></section></div>;
 }
 
 function Versions({ versions, onCreate, onRestore, onClose }: { versions: { label: string; date: string; snapshot: Project }[]; onCreate: () => void; onRestore: (project: Project) => void; onClose: () => void }) {

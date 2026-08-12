@@ -5,8 +5,8 @@ import fs from "node:fs";
 const page = fs.readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
 const css = fs.readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
 
-test("three book borders can be selected independently of page aesthetics", () => {
-  for (const border of ["Lotus Arch", "Folk Geometry", "Golden Lines"]) {
+test("borderless plus three decorative borders can be selected independently", () => {
+  for (const border of ["No Border", "Lotus Arch", "Folk Geometry", "Golden Lines"]) {
     assert.match(page, new RegExp(border));
   }
   assert.match(page, /bookBorder: string/);
@@ -20,6 +20,15 @@ test("book-border selections appear in the live multi-page glimpse", () => {
   assert.match(css, /\.book-glimpse\.book-border-lotus-arch \.glimpse-page/);
   assert.match(css, /\.book-glimpse\.book-border-folk-geometry \.glimpse-page/);
   assert.match(css, /\.book-glimpse\.book-border-golden-lines \.glimpse-page/);
+  assert.match(css, /\.book-border-no-border/);
+});
+
+test("screen preview and PDF use the same physical page sheets", () => {
+  assert.match(page, /function paginateReaderHtml/);
+  assert.match(page, /book-sheet preview-page chapter-preview/);
+  assert.match(page, /PAGE \{pageIndex \+ 1\} OF \{pageCount\}/);
+  assert.match(css, /\.preview-scroll>article\.book-sheet[^}]*height:665px/);
+  assert.match(css, /\.preview-scroll>article\.book-sheet[^}]*height:263mm!important/);
 });
 
 test("selected borders reach editor, preview and print output", () => {

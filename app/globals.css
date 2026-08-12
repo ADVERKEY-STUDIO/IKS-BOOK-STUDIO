@@ -201,3 +201,29 @@
 /* Source-aware adaptation page planning */
 .chapter-detection>header{align-items:flex-start;gap:18px}.recalculate-plan{flex:0 0 auto;border:1px solid var(--line);background:#fff;padding:8px 10px;color:var(--terra);font-size:8px;font-weight:800}.adaptation-plan-note{display:flex;flex-direction:column;gap:4px;margin:7px 0 3px;padding:14px 16px;background:#eef5f0;border-left:3px solid var(--forest)}.adaptation-plan-note b{font:14px Georgia,serif;color:var(--forest)}.adaptation-plan-note span{font-size:8px;line-height:1.5;color:var(--muted)}.chapter-detection .context-row{grid-template-columns:34px minmax(0,1fr) 106px;align-items:start;gap:14px;padding:17px 0}.chapter-context{display:flex;flex-direction:column;gap:5px;min-width:0}.chapter-context>strong{font:15px/1.32 Georgia,serif;color:var(--ink)}.chapter-context>p{margin:0;font:10px/1.5 Georgia,serif;color:#52645d}.chapter-context>div{display:flex;flex-wrap:wrap;gap:5px}.chapter-context em{font-style:normal;font-size:7px;font-weight:800;letter-spacing:.05em;color:#52665f;background:#edf3ef;padding:5px 6px}.chapter-context>small{font:8px/1.45 Georgia,serif;color:var(--muted)}.chapter-detection .context-row>label{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:5px;color:var(--muted);font-size:8px}.chapter-detection .context-row>label>b{font-size:6px;letter-spacing:.11em;color:#3f7558}.chapter-detection .context-row>label input{width:66px;background:#fff;font-weight:800}.chapter-detection .context-row>label span{font:8px Inter,sans-serif;color:var(--muted)}
 @media(max-width:740px){.chapter-detection .context-row{grid-template-columns:26px minmax(0,1fr) 78px;gap:8px}.chapter-context>small{display:none}.chapter-context em{font-size:6px}.analysis-footer{align-items:stretch;flex-direction:column;gap:14px}.analysis-footer .primary{width:100%}}
+
+/* True page-by-page screen preview and optional borderless book */
+.book-border-cards{grid-template-columns:repeat(4,1fr)}
+.border-no-border .book-border-thumbnail{border:1px solid #e5ddd0;padding:18px}
+.border-no-border .book-border-thumbnail:before{content:"OPEN PAGE";display:block;text-align:center;color:#86918c;font-size:6px;letter-spacing:.16em}
+.preview-scroll{scroll-snap-type:x mandatory;align-items:flex-start}
+.preview-scroll>article.book-sheet{display:flex;flex-direction:column;flex:0 0 470px;width:470px;height:665px;min-height:665px;overflow:hidden;scroll-snap-align:center}
+.preview-scroll>article.book-sheet .preview-body{min-height:0}
+.continued-title{margin:0 0 20px;color:var(--terra);font:italic 10px/1.4 Georgia,serif}
+.sheet-number{margin-top:auto;padding-top:10px;border-top:1px solid var(--line);font-size:7px;color:var(--muted)}
+.chapter-visual-sheet .chapter-image{margin:auto 0}
+.chapter-visual-sheet .chapter-image img{max-height:450px;object-fit:contain}
+.book-border-no-border{border:0!important;outline:0!important;border-image:none!important}
+
+@media print{
+  .preview-modal:after{content:none!important}
+  .preview-scroll>article.book-sheet{display:flex!important;width:100%!important;height:263mm!important;min-height:263mm!important;max-height:263mm!important;padding:12mm 14mm 10mm!important;overflow:hidden!important;break-before:page;page-break-before:always;break-after:page;page-break-after:always;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .preview-scroll>article.book-sheet:first-child{break-before:auto;page-break-before:auto}
+  .preview-scroll>article.book-border-no-border{border:0!important;outline:0!important;border-image:none!important;background-image:none!important}
+  .preview-scroll>article.book-border-lotus-arch{border:1.5mm double #b4873c!important;outline:.3mm solid #a94e3a!important;outline-offset:-2.7mm!important}
+  .preview-scroll>article.book-border-folk-geometry{border:2mm solid #b84e3a!important;outline:1mm double #e0a844!important;outline-offset:-3.2mm!important;border-image:none!important}
+  .preview-scroll>article.book-border-golden-lines{border:1mm double #b58a3e!important;outline:.25mm solid #d2bd8b!important;outline-offset:-2.2mm!important}
+  [data-page-watermark] .preview-page:before{position:absolute!important;left:42mm;right:42mm;top:76mm;bottom:76mm;opacity:.055}
+}
+
+@media(max-width:740px){.book-border-cards{grid-template-columns:1fr}.preview-scroll>article.book-sheet{flex-basis:85vw;width:85vw;height:120.2vw;min-height:120.2vw;padding:30px}}
