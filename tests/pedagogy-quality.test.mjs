@@ -7,7 +7,7 @@ const worker = await readFile(new URL("../worker/index.ts", import.meta.url), "u
 const pedagogy = await import(new URL("../lib/pedagogy.ts", import.meta.url));
 
 test("chapter generation uses a draft, independent review, and hard quality gate", () => {
-  assert.match(worker, /gemini-3\.6-flash/);
+  assert.match(worker, /gemini-3\.5-flash/);
   assert.match(worker, /blueprintPrompt/);
   assert.match(worker, /chapterBlueprintSchema/);
   assert.match(worker, /thinkingLevel: "high" \| "medium"/);

@@ -389,7 +389,7 @@ function geminiRetryDelay(response: Response, detail: string, fallbackMs: number
 
 async function geminiStructured<T>(env: Env, prompt: string, responseSchema: object): Promise<T> {
   if (!env.GEMINI_API_KEY) throw new TeachingEngineError("The Gemini teaching engine is not connected yet. Ask the site owner to finish AI setup.", 503);
-  const model = env.GEMINI_MODEL || "gemini-3.6-flash";
+  const model = env.GEMINI_MODEL || "gemini-3.5-flash";
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
   const requestBody = (thinkingLevel: "high" | "medium") => JSON.stringify({
     contents: [{ role: "user", parts: [{ text: prompt }] }],
@@ -496,7 +496,7 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
   if (!deterministic.passed || Object.values(scores).some((score) => score < 80)) {
     throw new TeachingEngineError(`This chapter did not pass the children’s textbook quality gate: ${[...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 80).map(([name]) => `${name} needs improvement`)].join("; ")}. The previous chapter was kept unchanged.`, 422);
   }
-  const model = env.GEMINI_MODEL || "gemini-3.6-flash";
+  const model = env.GEMINI_MODEL || "gemini-3.5-flash";
   const pedagogyQuality: PedagogyQuality = {
     status: "passed",
     engine: model,
