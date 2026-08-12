@@ -228,6 +228,11 @@ function averageSentenceWords(value: string) {
   return sentences.length ? sentences.reduce((sum, count) => sum + count, 0) / sentences.length : 0;
 }
 
+function comfortableWordTarget(audience: string, targetPages: number) {
+  const wordsPerPage = /7\s*[–-]\s*9/.test(audience) ? 105 : /13\s*[–-]\s*15/.test(audience) ? 175 : 140;
+  return Math.max(450, Math.min(1200, Math.round(Math.max(1, targetPages) * wordsPerPage)));
+}
+
 function significantSourceTerms(sourceText: string) {
   const ignored = new Set("about after again also among and are because been before being between book can chapter could did does each for from had has have into its may more most not other our out over page pages part should some such than that the their them then there these they this through under use used using very was were what when where which while who will with would your introduction conclusion source text".split(" "));
   const counts = new Map<string, number>();
@@ -239,7 +244,7 @@ function significantSourceTerms(sourceText: string) {
   return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40).map(([word]) => word);
 }
 
-export function evaluateTeachingChapter(chapter: TeachingChapter, audience: string, sourceText: string) {
+export function evaluateTeachingChapter(chapter: TeachingChapter, audience: string, sourceText: string, targetPages = 5) {
   const failures: string[] = [];
   const age = /7\s*[–-]\s*9/.test(audience) ? "7-9" : /13\s*[–-]\s*15/.test(audience) ? "13-15" : "10-12";
   const text = plainChapterText(chapter);
@@ -248,6 +253,8 @@ export function evaluateTeachingChapter(chapter: TeachingChapter, audience: stri
   const exampleCount = chapter.sections.filter((section) => words(section.example).length >= 18).length;
   const vocabularyCount = chapter.sections.reduce((sum, section) => sum + section.vocabulary.length, 0);
   const maximumAverage = age === "7-9" ? 20 : age === "10-12" ? 29 : 38;
+  const comfortableWords = comfortableWordTarget(audience, targetPages);
+  const maximumWords = comfortableWords + Math.max(200, Math.round(comfortableWords * .35));
 
   if (chapter.learningGoals.length < 3) failures.push("Fewer than three clear learning goals");
   if (introductionWords < (age === "7-9" ? 45 : age === "10-12" ? 65 : 80)) failures.push("Introduction does not give enough context");
@@ -258,6 +265,7 @@ export function evaluateTeachingChapter(chapter: TeachingChapter, audience: stri
   if (chapter.quickCheck.length < 2) failures.push("Comprehension questions are missing");
   if (chapter.recap.length < 3) failures.push("The recap is incomplete");
   if (totalWords < 380) failures.push("The chapter is too thin to teach its subject");
+  if (totalWords > maximumWords) failures.push(`The chapter is too long for ${targetPages} comfortable pages (${totalWords} words; maximum ${maximumWords})`);
   if (averageSentenceWords(text) > maximumAverage) failures.push(`Sentence length is too high for ages ${age}`);
   if (/\b(?:the|this|uploaded|original) (?:source|text|book|document)\b|according to (?:the|this) source|source page/iu.test(text)) failures.push("Reader-facing prose mentions the private source workflow");
   if (/this means [^.]{1,80} and [^.]{1,80} are connected|together,? these ideas show why [^.]+ matters in the chapter/iu.test(text)) failures.push("Generic connection filler remains");
@@ -295,7 +303,7 @@ ${sourceMaterial}`;
 }
 
 export function teachingPrompt({ title, audience, language, targetPages, sourceMaterial, blueprint }: { title: string; audience: string; language: string; targetPages: number; sourceMaterial: string; blueprint: ChapterBlueprint }) {
-  const targetWords = Math.max(450, Math.min(1200, Math.round(targetPages * (/7\s*[–-]\s*9/.test(audience) ? 105 : /13\s*[–-]\s*15/.test(audience) ? 175 : 140))));
+  const targetWords = comfortableWordTarget(audience, targetPages);
   return `You are a senior children’s textbook author and curriculum designer. Create a meaningful lesson for ${audience} in ${language}.
 
 CHAPTER: ${title}
@@ -327,8 +335,12 @@ PRIVATE CHAPTER MATERIAL:
 ${sourceMaterial}`;
 }
 
-export function reviewPrompt({ title, audience, language, sourceMaterial, blueprint, draft, failures = [] }: { title: string; audience: string; language: string; sourceMaterial: string; blueprint: ChapterBlueprint; draft: TeachingChapter; failures?: string[] }) {
+export function reviewPrompt({ title, audience, language, targetPages = 5, sourceMaterial, blueprint, draft, failures = [] }: { title: string; audience: string; language: string; targetPages?: number; sourceMaterial: string; blueprint: ChapterBlueprint; draft: TeachingChapter; failures?: string[] }) {
+  const targetWords = comfortableWordTarget(audience, targetPages);
+  const maximumWords = targetWords + Math.max(200, Math.round(targetWords * .35));
   return `You are the final quality editor for a children’s textbook. Review and rewrite this entire chapter for ${audience} in ${language}. Return a complete improved chapter, not comments alone.
+
+LENGTH GATE: Aim for about ${targetWords} words and never exceed ${maximumWords} words. This chapter has ${targetPages} comfortable book pages. Preserve every essential idea by compressing repetition and secondary detail, not by making the page dense.
 
 QUALITY GATES (each score must be at least 85):
 - context: the introduction gives a child a clear entry point and reason to care;

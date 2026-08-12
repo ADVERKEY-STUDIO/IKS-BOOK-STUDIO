@@ -21,6 +21,7 @@ test("chapter generation uses a draft, independent review, and hard quality gate
   assert.match(worker, /teachingChapterSchema/);
   assert.match(worker, /reviewedTeachingChapterSchema/);
   assert.match(worker, /Object\.values\(scores\).*score < 85/s);
+  assert.match(worker, /evaluateTeachingChapter\(draft, audience, sourceMaterial, chapter\.pages\)/);
   assert.match(worker, /previous chapter was kept unchanged/i);
   assert.doesNotMatch(worker, /buildSourceDraft/);
 });
@@ -48,6 +49,20 @@ test("the teaching prompt requires context, ordered concepts, examples, vocabula
   }
   assert.match(prompt, /Never mention a source/);
   assert.match(prompt, /Do not pad/);
+});
+
+test("the final review is bounded by the planned comfortable page count", () => {
+  const prompt = pedagogy.reviewPrompt({
+    title: "Introduction",
+    audience: "Ages 10–12",
+    language: "English",
+    targetPages: 5,
+    sourceMaterial: "Governance requires learning, welfare, resources, and careful judgement.",
+    blueprint: { centralQuestion: "How should leaders learn?", readerHook: "Choices matter.", essentialIdeas: [], conceptOrder: [], requiredVocabulary: [], historicalContext: "Ancient India", sensitiveContext: "None", avoidRepeating: [] },
+    draft: { title: "Introduction", chapterPromise: "Learn", learningGoals: [], introduction: "Begin", sections: [], quickCheck: [], activity: { title: "Try", prompt: "Think", steps: [] }, recap: [] },
+  });
+  assert.match(prompt, /never exceed 945 words/i);
+  assert.match(prompt, /5 comfortable book pages/i);
 });
 
 test("a source-grounded blueprint is created before prose", () => {

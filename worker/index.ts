@@ -472,17 +472,18 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
   const blueprint = await geminiStructured<ChapterBlueprint>(env, blueprintPrompt({ title: chapter.title, audience, language, sourceMaterial }), chapterBlueprintSchema);
   const first = await geminiStructured<TeachingChapter>(env, teachingPrompt({ title: chapter.title, audience, language, targetPages: chapter.pages, sourceMaterial, blueprint }), teachingChapterSchema);
   let draft = normalizeTeachingChapter(first, chapter.title);
-  let deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial);
-  let review = await geminiStructured<{ chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] }>(env, reviewPrompt({ title: chapter.title, audience, language, sourceMaterial, blueprint, draft, failures: deterministic.failures }), reviewedTeachingChapterSchema);
+  let deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, chapter.pages);
+  let review = await geminiStructured<{ chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] }>(env, reviewPrompt({ title: chapter.title, audience, language, targetPages: chapter.pages, sourceMaterial, blueprint, draft, failures: deterministic.failures }), reviewedTeachingChapterSchema);
   draft = normalizeTeachingChapter(review.chapter, chapter.title);
   let scores = normalizedScores(review.scores);
-  deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial);
+  deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, chapter.pages);
   let revisionPasses = 1;
   if (!deterministic.passed || Object.values(scores).some((score) => score < 85)) {
     review = await geminiStructured<{ chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] }>(env, reviewPrompt({
       title: chapter.title,
       audience,
       language,
+      targetPages: chapter.pages,
       sourceMaterial,
       blueprint,
       draft,
@@ -490,7 +491,7 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
     }), reviewedTeachingChapterSchema);
     draft = normalizeTeachingChapter(review.chapter, chapter.title);
     scores = normalizedScores(review.scores);
-    deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial);
+    deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, chapter.pages);
     revisionPasses = 2;
   }
   if (!deterministic.passed || Object.values(scores).some((score) => score < 80)) {
