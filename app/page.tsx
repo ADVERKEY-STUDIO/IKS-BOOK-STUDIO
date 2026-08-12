@@ -72,6 +72,7 @@ type Project = {
   aesthetic: string;
   pageAesthetic: string;
   bookBorder: string;
+  pageWatermark: string;
   illustrationStyle: string;
   fontTheme: string;
   imageFrequency: string;
@@ -244,6 +245,7 @@ let seedProject: Project = {
   aesthetic: "Bright Explorer",
   pageAesthetic: "Playful Panels",
   bookBorder: "Lotus Arch",
+  pageWatermark: "Lotus Seal",
   illustrationStyle: "Colourful educational illustration",
   fontTheme: "Friendly rounded",
   imageFrequency: "Picture-rich — at least 1 per chapter",
@@ -348,6 +350,7 @@ const emptyProject: Project = {
   aesthetic: "Bright Explorer",
   pageAesthetic: "Playful Panels",
   bookBorder: "Lotus Arch",
+  pageWatermark: "Lotus Seal",
   illustrationStyle: "Colourful educational illustration",
   fontTheme: "Friendly rounded",
   imageFrequency: "Picture-rich — at least 1 per chapter",
@@ -485,6 +488,12 @@ const bookBorders = [
   },
 ] as const;
 
+const pageWatermarks = [
+  { value: "Lotus Seal", label: "Lotus Seal", description: "A soft lotus medallion centred behind the page.", detail: "Calm and cultural without distracting from reading" },
+  { value: "Knowledge Tree", label: "Knowledge Tree", description: "A faint branching tree rising gently from the lower page.", detail: "Ideal for learning, ideas and connected concepts" },
+  { value: "Sun Mandala", label: "Sun Mandala", description: "A quiet circular geometry placed behind the page content.", detail: "Balanced and refined for every age group" },
+] as const;
+
 const typographyThemes = [
   { value: "Storybook Serif", label: "Storybook Serif", description: "Warm, literary letterforms with expressive chapter titles.", detail: "Classic and inviting for stories and cultural subjects", sample: "Once an idea begins, it can travel through generations." },
   { value: "Friendly Rounded", label: "Friendly Rounded", description: "Soft, open letters that feel lively and approachable.", detail: "Comfortable for younger and visual-first readers", sample: "Let’s discover how every part of this idea connects!" },
@@ -528,6 +537,14 @@ function bookBorder(value: string) {
   return bookBorders[0];
 }
 
+function pageWatermark(value: string) {
+  const direct = pageWatermarks.find((watermark) => watermark.value === value);
+  if (direct) return direct;
+  if (/tree|branch|knowledge/i.test(value)) return pageWatermarks[1];
+  if (/sun|mandala|circle|geometry/i.test(value)) return pageWatermarks[2];
+  return pageWatermarks[0];
+}
+
 function typographyTheme(value: string) {
   const direct = typographyThemes.find((theme) => theme.value === value);
   if (direct) return direct;
@@ -562,6 +579,10 @@ function pageAestheticPatch(value: string): Partial<Project> {
 
 function bookBorderPatch(value: string): Partial<Project> {
   return { bookBorder: bookBorder(value).value };
+}
+
+function pageWatermarkPatch(value: string): Partial<Project> {
+  return { pageWatermark: pageWatermark(value).value };
 }
 
 function typographyPatch(value: string): Partial<Project> {
@@ -747,6 +768,7 @@ function normalizeProject(saved: Project): Project {
   const design = childDesignWorld(cleanSaved.aesthetic ?? "");
   const pages = pageAesthetic(cleanSaved.pageAesthetic ?? "");
   const border = bookBorder(cleanSaved.bookBorder ?? "");
+  const watermark = pageWatermark(cleanSaved.pageWatermark ?? "");
   const typography = typographyTheme(cleanSaved.fontTheme ?? "");
   const childFirstSaved: Project = {
     ...emptyProject,
@@ -761,6 +783,7 @@ function normalizeProject(saved: Project): Project {
     aesthetic: design.value,
     pageAesthetic: pages.value,
     bookBorder: border.value,
+    pageWatermark: watermark.value,
     illustrationStyle: design.illustrationStyle,
     fontTheme: typography.value,
     imageFrequency: reader.imageFrequency,
@@ -1377,15 +1400,17 @@ function BookGlimpse({ project, focus }: { project: Project; focus: "reader" | "
   const design = childDesignWorld(project.aesthetic);
   const pages = pageAesthetic(project.pageAesthetic);
   const border = bookBorder(project.bookBorder);
+  const watermark = pageWatermark(project.pageWatermark);
   const typography = typographyTheme(project.fontTheme);
   const chapterTitle = project.sourceHeadings[0] || "A Big Idea to Explore";
   const worldClass = normalizedTitle(design.value).replace(/[^a-z]+/g, "-");
   const pageClass = normalizedTitle(pages.value).replace(/[^a-z]+/g, "-");
   const borderClass = normalizedTitle(border.value).replace(/[^a-z]+/g, "-");
+  const watermarkClass = normalizedTitle(watermark.value).replace(/[^a-z]+/g, "-");
   const typographyClass = normalizedTitle(typography.value).replace(/[^a-z]+/g, "-");
   const ageClass = reader.value.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "");
-  return <aside className={`book-glimpse world-${worldClass} page-aesthetic-${pageClass} book-border-${borderClass} typography-${typographyClass} age-${ageClass}`} aria-live="polite">
-    <header><div><p className="eyebrow">LIVE BOOK & PAGE GLIMPSE</p><h2>See every important page before you build</h2></div><span>{focus === "reader" ? reader.value : `${pages.label} · ${border.label}`}</span></header>
+  return <aside className={`book-glimpse world-${worldClass} page-aesthetic-${pageClass} book-border-${borderClass} page-watermark-${watermarkClass} typography-${typographyClass} age-${ageClass}`} aria-live="polite">
+    <header><div><p className="eyebrow">LIVE BOOK & PAGE GLIMPSE</p><h2>See every important page before you build</h2></div><span>{focus === "reader" ? reader.value : `${pages.label} · ${border.label} · ${watermark.label}`}</span></header>
     <nav className="glimpse-tabs" aria-label="Preview a page type">{glimpsePages.map((item) => <button type="button" className={previewPage === item.value ? "active" : ""} onClick={() => setPreviewPage(item.value)} key={item.value}>{item.label}</button>)}</nav>
     <div className="glimpse-spread">
       <div className="glimpse-cover"><small>AN ILLUSTRATED BOOK FOR</small><strong>{reader.value.replace("Ages ", "AGES ")}</strong><div className="cover-symbol"><i/><i/><i/></div><h3>{project.title === "Untitled adaptation" ? "YOUR NEW BOOK" : project.title}</h3><span>{design.label}</span></div>
@@ -1396,12 +1421,16 @@ function BookGlimpse({ project, focus }: { project: Project; focus: "reader" | "
         {previewPage === "activity" && <><span>{writing.activityLabel}</span><h3>Pause, connect and create</h3><div className="glimpse-activity-card"><b>YOUR CHALLENGE</b><p>{writing.activity}</p><ol><li>Find one important idea.</li><li>Connect it to an example.</li><li>Share what you discovered.</li></ol></div></>}
       </div>
     </div>
-    <footer><span><b>Aa</b>{typography.label}</span><span><b>▣</b>{pages.label}</span><span><b>⌑</b>{border.label} border</span><span><b>◈</b>{project.imageFrequency}</span></footer>
+    <footer><span><b>Aa</b>{typography.label}</span><span><b>▣</b>{pages.label}</span><span><b>⌑</b>{border.label} border</span><span><b>◉</b>{watermark.label}</span></footer>
   </aside>;
 }
 
 function TypographyPicker({ project, onPatch }: { project: Project; onPatch: (patch: Partial<Project>) => void }) {
   return <section className="typography-section"><div className="typography-heading"><div><p className="choice-label">TYPOGRAPHY · APPLIES TO THE WHOLE BOOK</p><h2>Choose how the words feel</h2></div><span>Watch the live book glimpse above change instantly</span></div><div className="typography-cards">{typographyThemes.map((theme) => { const typographyClass = normalizedTitle(theme.value).replace(/[^a-z]+/g, "-"); return <button className={`${project.fontTheme === theme.value ? "selected " : ""}typography-choice typography-${typographyClass}`} onClick={() => onPatch(typographyPatch(theme.value))} key={theme.value}><span className="typography-thumbnail"><b>Aa</b><strong>Chapter title</strong><i>{theme.sample}</i></span><strong>{theme.label}</strong><small>{theme.description}</small><em>{theme.detail}</em></button>; })}</div></section>;
+}
+
+function WatermarkPicker({ project, onPatch }: { project: Project; onPatch: (patch: Partial<Project>) => void }) {
+  return <section className="page-watermark-section"><div className="typography-heading"><div><p className="choice-label">PAGE WATERMARK · APPLIES TO EVERY PAGE</p><h2>Choose a quiet background mark</h2></div><span>The live book glimpse changes instantly</span></div><div className="page-watermark-cards">{pageWatermarks.map((watermark) => { const watermarkClass = normalizedTitle(watermark.value).replace(/[^a-z]+/g, "-"); return <button className={`${project.pageWatermark === watermark.value ? "selected " : ""}page-watermark-choice watermark-${watermarkClass}`} onClick={() => onPatch(pageWatermarkPatch(watermark.value))} key={watermark.value}><span className="page-watermark-thumbnail"><i/><b>Chapter</b><span/><span/><span/></span><strong>{watermark.label}</strong><small>{watermark.description}</small><em>{watermark.detail}</em></button>; })}</div></section>;
 }
 
 function Wizard({ step, project, sourceBusy, onPatch, onFile, onBack, onNext }: { step: number; project: Project; sourceBusy: boolean; onPatch: (patch: Partial<Project>) => void; onFile: (e: ChangeEvent<HTMLInputElement>) => void; onBack: () => void; onNext: () => void }) {
@@ -1412,8 +1441,9 @@ function Wizard({ step, project, sourceBusy, onPatch, onFile, onBack, onNext }: 
       {step === 0 && <section className="form-card"><label className={`upload ${sourceBusy ? "busy" : ""}`}><input type="file" accept=".pdf,.docx,.txt,.md" onChange={onFile} disabled={sourceBusy}/><span>{sourceBusy ? "…" : "↑"}</span><strong>{sourceBusy ? "Reading and analysing your book…" : project.source}</strong><small>{sourceBusy ? "Large PDFs can take a short while" : "Click to choose a PDF, DOCX or TXT book (maximum 30 MB)"}</small></label><div className="fields two"><label>New book title<input value={project.title} onChange={(e) => onPatch({ title: e.target.value })}/></label><label>Source book<input value={project.source} readOnly/></label></div></section>}
       {step === 1 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">READER AGE</p><div className="choice-cards">{childAudienceProfiles.map((profile) => <button className={project.audience === profile.value ? "choice selected" : "choice"} onClick={() => onPatch(audiencePatch(profile.value))} key={profile.value}><span>{profile.value}</span><strong>{profile.label}</strong><small>{profile.description}</small><i>“{profile.sample}”</i></button>)}</div><div className="language-choice"><span>BOOK LANGUAGE</span>{["English", "Hindi", "English + Hindi"].map((language) => <button className={project.language === language ? "selected" : ""} onClick={() => onPatch({ language })} key={language}>{language}</button>)}</div><div className="auto-settings"><b>Natural writing is automatic</b><span>{project.learningFeatures.join(" · ")}</span><small>The studio changes vocabulary, sentence length, explanation depth and reflection for the selected age. There are no separate writing modes.</small></div></div><BookGlimpse project={project} focus="reader"/></section>}
       {step === 2 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">ILLUSTRATION WORLD</p><div className="design-world-cards">{childDesignWorlds.map((world) => <button className={`${project.aesthetic === world.value ? "selected " : ""}design-world world-${normalizedTitle(world.value).replace(/[^a-z]+/g, "-")}`} onClick={() => onPatch(designWorldPatch(world.value))} key={world.value}><span className="world-thumbnail"><i/><b>Ab</b><i/></span><strong>{world.label}</strong><small>{world.description}</small><em>{world.illustrationStyle}</em></button>)}</div><div className="page-aesthetic-section"><p className="choice-label">PAGE AESTHETIC · APPLIES TO EVERY PAGE</p><div className="page-aesthetic-cards">{pageAesthetics.map((aesthetic) => { const aestheticClass = normalizedTitle(aesthetic.value).replace(/[^a-z]+/g, "-"); return <button className={`${project.pageAesthetic === aesthetic.value ? "selected " : ""}page-aesthetic-choice aesthetic-${aestheticClass}`} onClick={() => onPatch(pageAestheticPatch(aesthetic.value))} key={aesthetic.value}><span className="page-aesthetic-thumbnail"><i/><b>Chapter</b><i/><i/><i/></span><strong>{aesthetic.label}</strong><small>{aesthetic.description}</small><em>{aesthetic.detail}</em></button>; })}</div></div><div className="book-border-section"><p className="choice-label">BOOK BORDER · MIX WITH ANY PAGE AESTHETIC</p><div className="book-border-cards">{bookBorders.map((border) => { const borderClass = normalizedTitle(border.value).replace(/[^a-z]+/g, "-"); return <button className={`${project.bookBorder === border.value ? "selected " : ""}book-border-choice border-${borderClass}`} onClick={() => onPatch(bookBorderPatch(border.value))} key={border.value}><span className="book-border-thumbnail"><i/><b>Chapter</b><i/><i/><i/></span><strong>{border.label}</strong><small>{border.description}</small><em>{border.detail}</em></button>; })}</div></div><div className="auto-settings"><b>Visual guarantee</b><span>One unique image, page aesthetic and chosen border in every chapter</span><small>If a literal scene is unsuitable, the app creates a relevant map, timeline, tree, cycle or relationship diagram. Use the live tabs to inspect the chapter, reading, visual and activity pages.</small></div></div><BookGlimpse project={project} focus="design"/></section>}
-      {step === 3 && <><section className="brief-review child-review"><div><span>SOURCE</span><strong>{project.source}</strong></div><div><span>CHILD READER</span><strong>{project.audience} · {project.readingLevel}</strong></div><div><span>BOOK</span><strong>{project.bookType}</strong></div><div><span>WRITING</span><strong>Natural age-based writing · {project.language}</strong></div><div><span>ILLUSTRATION WORLD</span><strong>{project.aesthetic} · {project.illustrationStyle}</strong></div><div><span>PAGE AESTHETIC</span><strong>{project.pageAesthetic} · applied to every page</strong></div><div><span>BOOK BORDER</span><strong>{project.bookBorder} · applied to every page</strong></div><div><span>LENGTH</span><strong>Shortest clear length · never padded · under 100 pages</strong></div></section><BookGlimpse project={project} focus="design"/></>}
+      {step === 3 && <><section className="brief-review child-review"><div><span>SOURCE</span><strong>{project.source}</strong></div><div><span>CHILD READER</span><strong>{project.audience} · {project.readingLevel}</strong></div><div><span>BOOK</span><strong>{project.bookType}</strong></div><div><span>WRITING</span><strong>Natural age-based writing · {project.language}</strong></div><div><span>ILLUSTRATION WORLD</span><strong>{project.aesthetic} · {project.illustrationStyle}</strong></div><div><span>PAGE AESTHETIC</span><strong>{project.pageAesthetic} · applied to every page</strong></div><div><span>BOOK BORDER</span><strong>{project.bookBorder} · applied to every physical page</strong></div><div><span>PAGE WATERMARK</span><strong>{project.pageWatermark} · subtle background design</strong></div><div><span>LENGTH</span><strong>Shortest clear length · never padded · under 100 pages</strong></div></section><BookGlimpse project={project} focus="design"/></>}
       {step === 2 && <TypographyPicker project={project} onPatch={onPatch}/>}
+      {step === 2 && <WatermarkPicker project={project} onPatch={onPatch}/>}
       <footer className="wizard-footer"><button className="secondary" onClick={onBack}>← Back</button><button className="primary" onClick={onNext} disabled={sourceBusy || (step === 0 && project.source === "No source selected")}>{step === 3 ? "Detect original chapters" : "Continue"} →</button></footer>
     </main>
   </div>;
@@ -1444,6 +1474,10 @@ function BookBrief({ project, allocated, draftBusy, onBack, onUpdateChapter, onP
 
 function Editor({ project, active, activeId, allocated, draftBusy, onSelect, editorRef, onSaveBody, onAi, onRemember, onDraft, onToggleLock, onAddChapter, onUploadImage, onPatchProject, onUpdateChapter }: { project: Project; active?: Chapter; activeId: number; allocated: number; draftBusy: boolean; onSelect: (id: number) => void; editorRef: React.RefObject<HTMLDivElement | null>; onSaveBody: () => void; onAi: (action: string) => void; onRemember: (scope: "book" | "designer") => void; onDraft: () => void; onToggleLock: () => void; onAddChapter: () => void; onUploadImage: (file: File) => void; onPatchProject: (patch: Partial<Project>) => void; onUpdateChapter: (id: number, patch: Partial<Chapter>) => void }) {
   const [tab, setTab] = useState<"ai" | "design" | "sources">("ai");
+  useEffect(() => {
+    document.documentElement.dataset.pageWatermark = normalizedTitle(pageWatermark(project.pageWatermark).value).replace(/[^a-z]+/g, "-");
+    return () => { delete document.documentElement.dataset.pageWatermark; };
+  }, [project.pageWatermark]);
   if (!active) return null;
   const fontClass = project.fontTheme.toLowerCase().replace(/[^a-z]+/g, "-");
   const pageClass = normalizedTitle(project.pageAesthetic).replace(/[^a-z]+/g, "-");
@@ -1454,7 +1488,7 @@ function Editor({ project, active, activeId, allocated, draftBusy, onSelect, edi
     <section className="canvas"><nav className="editor-tools"><div><button onClick={() => document.execCommand("bold")}><b>B</b></button><button onClick={() => document.execCommand("italic")}><i>I</i></button><button onClick={() => document.execCommand("formatBlock", false, "h2")}>H2</button><button onClick={() => document.execCommand("insertUnorderedList")}>• List</button></div><div className="chapter-meter"><span>{active.pages} target pages</span><i><b style={{ width: active.status === "planned" ? "18%" : "67%" }}/></i><button onClick={onToggleLock}>{active.locked ? "◆ Locked" : "◇ Lock"}</button></div></nav><div className="page-stage"><article className={`paper font-${fontClass} world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")} page-aesthetic-${pageClass} book-border-${borderClass} age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}${active.imageUrl ? " has-chapter-image" : ""}`}><header><span>{project.title}</span><span>{project.audience}</span></header><div className="ornament">✦</div><div key={active.id} ref={editorRef} className="book-copy" contentEditable={!active.locked} suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: authorialReaderHtml(active.body) }}/>{active.imageUrl && <figure className="chapter-image"><img src={active.imageUrl} alt={active.imageAlt || active.imageCaption || active.title}/><figcaption>{active.imageCaption || active.title}</figcaption></figure>}<footer><span>{project.title}</span><span>{active.id}</span></footer></article></div><button className="save-float" onClick={onSaveBody}>✓ Save chapter</button></section>
     <aside className="assistant"><nav><button className={tab === "ai" ? "active" : ""} onClick={() => setTab("ai")}>✦<span>AI EDIT</span></button><button className={tab === "design" ? "active" : ""} onClick={() => setTab("design")}>◈<span>DESIGN</span></button><button className={tab === "sources" ? "active" : ""} onClick={() => setTab("sources")}>⌕<span>SOURCES</span></button></nav><div className="assistant-body">
       {tab === "ai" && <><div className="assistant-title"><span>✦</span><div><b>Editorial assistant</b><small>Select text, then choose an action.</small></div></div>{!active.locked && <button className="draft-chapter-button" disabled={draftBusy} onClick={onDraft}>{draftBusy ? "Understanding the chapter…" : chapterWordCount(active) < 350 ? "✦ Build this full chapter" : "↻ Rebuild full chapter"}</button>}<p className="selection-tip">This chapter has <b>{chapterWordCount(active).toLocaleString()} words</b>. Every edit keeps the voice direct and authorial for the selected age.</p><div className="ai-list">{["Simplify language", "Shorten selection", "Expand with examples", "Make age-appropriate", "Improve storytelling", "Check factual accuracy", "Suggest an illustration"].map((action) => <button onClick={() => onAi(action)} key={action}><span>✦</span>{action}<i>→</i></button>)}</div><div className="memory-box"><p className="eyebrow">EDITORIAL MEMORY</p><p>{project.editorialPreferences.length ? project.editorialPreferences.join(" · ") : "No saved preferences yet"}</p><button onClick={() => onRemember("book")}>＋ Remember for this book</button><button onClick={() => onRemember("designer")}>＋ Remember for future books</button></div></>}
-      {tab === "design" && <><div className="assistant-title"><span>◈</span><div><b>Book design</b><small>Illustration world, page aesthetic and border apply across the whole adaptation.</small></div></div><div className="design-controls"><div className="visual-status"><b>✓ Chapter visual ready</b><span>{active.visualType === "uploaded" ? "Your uploaded image" : `${active.visualType || "context"} visual generated from this chapter`}</span></div><label>Illustration world<select value={project.aesthetic} onChange={(e) => onPatchProject(designWorldPatch(e.target.value))}>{childDesignWorlds.map((world) => <option key={world.value}>{world.value}</option>)}</select></label><label>Page aesthetic<select value={project.pageAesthetic} onChange={(e) => onPatchProject(pageAestheticPatch(e.target.value))}>{pageAesthetics.map((aesthetic) => <option key={aesthetic.value}>{aesthetic.value}</option>)}</select></label><label>Book border<select value={project.bookBorder} onChange={(e) => onPatchProject(bookBorderPatch(e.target.value))}>{bookBorders.map((border) => <option key={border.value}>{border.value}</option>)}</select></label><div className="design-summary"><b>{project.pageAesthetic} · {project.bookBorder}</b><span>{project.illustrationStyle} · {project.fontTheme} · {project.imageFrequency}</span></div><label className="image-upload">Replace chapter image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && onUploadImage(e.target.files[0])}/></label>{active.imageUrl && <label>Image caption<input value={active.imageCaption || ""} onChange={(e) => onUpdateChapter(active.id, { imageCaption: e.target.value })}/></label>}</div></>}
+      {tab === "design" && <><div className="assistant-title"><span>◈</span><div><b>Book design</b><small>Illustration world, page aesthetic, border and watermark apply across the whole adaptation.</small></div></div><div className="design-controls"><div className="visual-status"><b>✓ Chapter visual ready</b><span>{active.visualType === "uploaded" ? "Your uploaded image" : `${active.visualType || "context"} visual generated from this chapter`}</span></div><label>Illustration world<select value={project.aesthetic} onChange={(e) => onPatchProject(designWorldPatch(e.target.value))}>{childDesignWorlds.map((world) => <option key={world.value}>{world.value}</option>)}</select></label><label>Page aesthetic<select value={project.pageAesthetic} onChange={(e) => onPatchProject(pageAestheticPatch(e.target.value))}>{pageAesthetics.map((aesthetic) => <option key={aesthetic.value}>{aesthetic.value}</option>)}</select></label><label>Book border<select value={project.bookBorder} onChange={(e) => onPatchProject(bookBorderPatch(e.target.value))}>{bookBorders.map((border) => <option key={border.value}>{border.value}</option>)}</select></label><label>Page watermark<select value={project.pageWatermark} onChange={(e) => onPatchProject(pageWatermarkPatch(e.target.value))}>{pageWatermarks.map((watermark) => <option key={watermark.value}>{watermark.value}</option>)}</select></label><div className="design-summary"><b>{project.pageAesthetic} · {project.bookBorder} · {project.pageWatermark}</b><span>{project.illustrationStyle} · {project.fontTheme} · {project.imageFrequency}</span></div><label className="image-upload">Replace chapter image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && onUploadImage(e.target.files[0])}/></label>{active.imageUrl && <label>Image caption<input value={active.imageCaption || ""} onChange={(e) => onUpdateChapter(active.id, { imageCaption: e.target.value })}/></label>}</div></>}
       {tab === "sources" && <><div className="assistant-title"><span>⌕</span><div><b>Private fact check</b><small>{active.sourceRefs.length} editor-only reference{active.sourceRefs.length === 1 ? "" : "s"} linked to this chapter · never printed.</small></div></div><div className="source-list">{active.sourceRefs.length ? active.sourceRefs.map((ref, index) => <article key={`${ref.title}-${index}`}><span>PRIVATE · PAGE {ref.page || "—"}</span><b>{ref.title}</b><p>{ref.excerpt}</p></article>) : <p className="empty">No private reference is linked yet. Prepare this chapter to attach the closest fact-checking passage.</p>}</div><div className="source-policy"><b>Editor-only provenance</b><p>Verify important names, dates and quotations before approval. These notes never appear in Preview, PDF or DOCX.</p></div></>}
     </div></aside>
   </main>;
@@ -1471,8 +1505,14 @@ function AiRoundTrip({ request, onChange, onClose, onApply }: { request: { actio
 function Preview({ project, draftBusy, onFill, onRefresh, onClose, onPrint }: { project: Project; draftBusy: boolean; onFill: () => void; onRefresh: () => void; onClose: () => void; onPrint: () => void }) {
   useEffect(() => {
     document.documentElement.dataset.bookTypography = normalizedTitle(typographyTheme(project.fontTheme).value).replace(/[^a-z]+/g, "-");
-    return () => { delete document.documentElement.dataset.bookTypography; };
-  }, [project.fontTheme]);
+    document.documentElement.dataset.bookBorder = normalizedTitle(bookBorder(project.bookBorder).value).replace(/[^a-z]+/g, "-");
+    document.documentElement.dataset.pageWatermark = normalizedTitle(pageWatermark(project.pageWatermark).value).replace(/[^a-z]+/g, "-");
+    return () => {
+      delete document.documentElement.dataset.bookTypography;
+      delete document.documentElement.dataset.bookBorder;
+      delete document.documentElement.dataset.pageWatermark;
+    };
+  }, [project.fontTheme, project.bookBorder, project.pageWatermark]);
   const thinChapters = project.chapters.filter((chapter) => chapterWordCount(chapter) < 350 && !chapter.locked);
   const selectedProfile = generationProfileKey(project.audience, project.language);
   const staleChapters = project.chapters.filter((chapter) => !chapter.locked && chapterWordCount(chapter) >= 350 && chapter.generationProfile !== selectedProfile);
