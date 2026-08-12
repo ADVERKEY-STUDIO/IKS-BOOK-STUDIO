@@ -1,3 +1,5 @@
+import { authorialReaderHtml } from "./child-summary.ts";
+
 export type TeachingVocabulary = { term: string; meaning: string };
 
 export type TeachingSection = {
@@ -158,35 +160,42 @@ export const reviewedTeachingChapterSchema = {
   required: ["chapter", "scores", "summary", "checks"],
 } as const;
 
+function cleanReaderText(value: string) {
+  return authorialReaderHtml(value)
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function normalizeTeachingChapter(value: unknown, fallbackTitle: string): TeachingChapter {
   const raw = (value && typeof value === "object" ? value : {}) as Partial<TeachingChapter>;
   const sections = Array.isArray(raw.sections) ? raw.sections : [];
   return {
     title: typeof raw.title === "string" && raw.title.trim() ? raw.title.trim() : fallbackTitle,
-    chapterPromise: typeof raw.chapterPromise === "string" ? raw.chapterPromise.trim() : "",
-    learningGoals: Array.isArray(raw.learningGoals) ? raw.learningGoals.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()) : [],
-    introduction: typeof raw.introduction === "string" ? raw.introduction.trim() : "",
+    chapterPromise: typeof raw.chapterPromise === "string" ? cleanReaderText(raw.chapterPromise) : "",
+    learningGoals: Array.isArray(raw.learningGoals) ? raw.learningGoals.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map(cleanReaderText) : [],
+    introduction: typeof raw.introduction === "string" ? cleanReaderText(raw.introduction) : "",
     sections: sections.map((item) => {
       const section = (item && typeof item === "object" ? item : {}) as Partial<TeachingSection>;
       const vocabulary = Array.isArray(section.vocabulary) ? section.vocabulary : [];
       return {
-        heading: typeof section.heading === "string" ? section.heading.trim() : "",
-        paragraphs: Array.isArray(section.paragraphs) ? section.paragraphs.filter((paragraph): paragraph is string => typeof paragraph === "string" && Boolean(paragraph.trim())).map((paragraph) => paragraph.trim()) : [],
-        exampleTitle: typeof section.exampleTitle === "string" ? section.exampleTitle.trim() : "A clear example",
-        example: typeof section.example === "string" ? section.example.trim() : "",
+        heading: typeof section.heading === "string" ? cleanReaderText(section.heading) : "",
+        paragraphs: Array.isArray(section.paragraphs) ? section.paragraphs.filter((paragraph): paragraph is string => typeof paragraph === "string" && Boolean(paragraph.trim())).map(cleanReaderText) : [],
+        exampleTitle: typeof section.exampleTitle === "string" ? cleanReaderText(section.exampleTitle) : "A clear example",
+        example: typeof section.example === "string" ? cleanReaderText(section.example) : "",
         vocabulary: vocabulary.map((entry) => {
           const word = (entry && typeof entry === "object" ? entry : {}) as Partial<TeachingVocabulary>;
-          return { term: typeof word.term === "string" ? word.term.trim() : "", meaning: typeof word.meaning === "string" ? word.meaning.trim() : "" };
+          return { term: typeof word.term === "string" ? cleanReaderText(word.term) : "", meaning: typeof word.meaning === "string" ? cleanReaderText(word.meaning) : "" };
         }).filter((entry) => entry.term && entry.meaning),
       };
     }),
-    quickCheck: Array.isArray(raw.quickCheck) ? raw.quickCheck.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()) : [],
+    quickCheck: Array.isArray(raw.quickCheck) ? raw.quickCheck.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map(cleanReaderText) : [],
     activity: {
-      title: typeof raw.activity?.title === "string" ? raw.activity.title.trim() : "TRY IT",
-      prompt: typeof raw.activity?.prompt === "string" ? raw.activity.prompt.trim() : "",
-      steps: Array.isArray(raw.activity?.steps) ? raw.activity.steps.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()) : [],
+      title: typeof raw.activity?.title === "string" ? cleanReaderText(raw.activity.title) : "TRY IT",
+      prompt: typeof raw.activity?.prompt === "string" ? cleanReaderText(raw.activity.prompt) : "",
+      steps: Array.isArray(raw.activity?.steps) ? raw.activity.steps.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map(cleanReaderText) : [],
     },
-    recap: Array.isArray(raw.recap) ? raw.recap.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()) : [],
+    recap: Array.isArray(raw.recap) ? raw.recap.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map(cleanReaderText) : [],
   };
 }
 

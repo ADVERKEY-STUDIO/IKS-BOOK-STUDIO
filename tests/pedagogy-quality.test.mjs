@@ -63,6 +63,20 @@ test("a source-grounded blueprint is created before prose", () => {
   assert.match(prompt, /Do not invent facts/i);
 });
 
+test("normalized chapter fields deterministically remove private source-workflow language", () => {
+  const chapter = pedagogy.normalizeTeachingChapter({
+    title: "Introduction",
+    chapterPromise: "The private source material explains wise government.",
+    learningGoals: ["Use evidence from the source"],
+    introduction: "According to the original source, leaders must learn.",
+    sections: [{ heading: "Ideas", paragraphs: ["This source shows why learning matters."], exampleTitle: "Example", example: "A council listens.", vocabulary: [] }],
+    quickCheck: ["What does the source say?"],
+    activity: { title: "Try it", prompt: "Review the source workflow.", steps: ["Discuss the idea."] },
+    recap: ["The source's main argument values learning."],
+  }, "Introduction");
+  assert.doesNotMatch(JSON.stringify(chapter), /(?:private|uploaded|original) source|the source|source workflow|source material/i);
+});
+
 test("meaningless keyword filler is rejected before it can enter the book", () => {
   const result = pedagogy.evaluateTeachingChapter({
     title: "Introduction",

@@ -28,6 +28,8 @@ export function authorialReaderHtml(value = "") {
     .replace(/evidence from the source/gi, "details in the chapter")
     .replace(/source connections/gi, "idea connections")
     .replace(/grounded in (?:the )?source evidence/gi, "shaped by the chapter’s central ideas")
+    .replace(/\b(?:private|uploaded|reviewed|original) source(?: material| workflow| document| pages?)?\b/gi, "the chapter")
+    .replace(/\bsource (?:workflow|material|document|pages?)\b/gi, "the chapter")
     .replace(/from the (?:uploaded|reviewed|original) (?:book|source|text|source material)(?:\s+in\s+[^.<]+)?/gi, "for this chapter")
     .replace(/according to (?:(?:the|this|an?)\s+)?(?:original\s+)?(?:source|text|book|work),?\s*/gi, "")
     .replace(/\b(?:the|this|an?) (?:original\s+)?(?:source|text|book|work)\b/gi, "this chapter")
