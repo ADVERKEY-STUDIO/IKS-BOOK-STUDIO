@@ -13,7 +13,9 @@ test("chapter generation uses a draft, independent review, and hard quality gate
   assert.match(worker, /thinkingLevel: "high" \| "medium"/);
   assert.match(worker, /attempt === 0 \? "high" : "medium"/);
   assert.match(worker, /maxOutputTokens: 32768/);
-  assert.match(worker, /retryDelays = \[900, 2200, 4800\]/);
+  assert.match(worker, /retryDelays = \[1000, 4000, 12000, 30000\]/);
+  assert.match(worker, /response\.status === 429/);
+  assert.match(worker, /geminiRetryDelay/);
   assert.match(worker, /response\.status === 503/);
   assert.match(worker, /temporarily busy after several automatic retries/i);
   assert.match(worker, /teachingChapterSchema/);

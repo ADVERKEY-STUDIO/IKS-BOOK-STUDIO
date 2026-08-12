@@ -376,6 +376,17 @@ function geminiResponseIssue(data: unknown) {
   return response.promptFeedback?.blockReason || response.candidates?.[0]?.finishReason || "empty response";
 }
 
+function geminiRetryDelay(response: Response, detail: string, fallbackMs: number) {
+  const headerSeconds = Number(response.headers.get("retry-after"));
+  const bodySeconds = Number(detail.match(/"retryDelay"\s*:\s*"([\d.]+)s"/i)?.[1]);
+  const suggestedMs = Number.isFinite(headerSeconds) && headerSeconds > 0
+    ? headerSeconds * 1000
+    : Number.isFinite(bodySeconds) && bodySeconds > 0
+      ? bodySeconds * 1000
+      : fallbackMs;
+  return Math.max(500, Math.min(30000, Math.round(suggestedMs)));
+}
+
 async function geminiStructured<T>(env: Env, prompt: string, responseSchema: object): Promise<T> {
   if (!env.GEMINI_API_KEY) throw new TeachingEngineError("The Gemini teaching engine is not connected yet. Ask the site owner to finish AI setup.", 503);
   const model = env.GEMINI_MODEL || "gemini-3.6-flash";
@@ -395,7 +406,7 @@ async function geminiStructured<T>(env: Env, prompt: string, responseSchema: obj
       { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
     ],
   });
-  const retryDelays = [900, 2200, 4800];
+  const retryDelays = [1000, 4000, 12000, 30000];
   let response: Response | undefined;
   let detail = "";
 
@@ -422,16 +433,16 @@ async function geminiStructured<T>(env: Env, prompt: string, responseSchema: obj
       continue;
     }
     detail = (await response.text()).slice(0, 600);
-    const temporaryFailure = response.status === 500 || response.status === 502 || response.status === 503 || response.status === 504;
+    const temporaryFailure = response.status === 429 || response.status === 500 || response.status === 502 || response.status === 503 || response.status === 504;
     if (!temporaryFailure || attempt === retryDelays.length) break;
-    await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+    await new Promise((resolve) => setTimeout(resolve, geminiRetryDelay(response, detail, retryDelays[attempt])));
   }
 
   if (response?.ok) {
     throw new TeachingEngineError(`Gemini could not complete the structured lesson after several automatic retries (${detail}). The existing chapter was kept unchanged.`, 502);
   } else {
     const status = response?.status ?? 502;
-    if (status === 429) throw new TeachingEngineError("The free Gemini quota has been reached. Your saved chapters are unchanged; try again after the quota resets.", 429);
+    if (status === 429) throw new TeachingEngineError("Gemini is still rate-limited after several automatic retries. Your saved chapters are unchanged; try again after the Google quota resets.", 429);
     if (status === 401 || status === 403) throw new TeachingEngineError("The Gemini teaching connection needs attention from the site owner.", 503);
     if (status === 503) throw new TeachingEngineError("Gemini is temporarily busy after several automatic retries. Your saved chapters are unchanged; try again in a few minutes.", 503);
     throw new TeachingEngineError(`Gemini could not prepare this lesson (${status}). ${detail}`, 502);
