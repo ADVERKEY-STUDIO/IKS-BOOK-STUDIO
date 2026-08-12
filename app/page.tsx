@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { strToU8, unzipSync, zipSync } from "fflate";
 import { AUTHORIAL_READER_INSTRUCTION, authorialReaderHtml, childAgeBand, generationProfileKey } from "../lib/child-summary";
 import { ADAPTATION_PLAN_VERSION, allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET, FIXED_MATTER_PAGES, recommendedAdaptationPages, TOTAL_BOOK_PAGE_LIMIT } from "../lib/adaptation-pages";
 import type { PedagogyQuality } from "../lib/pedagogy";
@@ -886,6 +887,65 @@ function packagePageHtml(text: string, purpose: string, pageNumber: number) {
   return authorialReaderHtml(`<div data-imported-page="${pageNumber}"><p class="page-purpose">${escapeHtml(purpose)}</p>${blocks}</div>`);
 }
 
+function safeDownloadName(value: string) {
+  return value.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "children-book";
+}
+
+function packageTemplate(project: Project): BookPackage {
+  return {
+    format: BOOK_PACKAGE_FORMAT,
+    bookTitle: project.title,
+    audience: project.audience,
+    chapters: project.chapters.map((chapter, chapterIndex) => ({
+      chapterId: expectedChapterId(chapterIndex + 1),
+      chapterNumber: chapterIndex + 1,
+      title: chapter.title,
+      contextKey: expectedContextKey(chapterIndex + 1, chapter.title),
+      pages: [],
+    })),
+  };
+}
+
+function chatGptBookInstructions(project: Project) {
+  return `IKS BOOK STUDIO — CHATGPT BOOK REQUEST
+
+You are creating a complete, illustrated children's adaptation from the source file inside this ZIP.
+
+The designer should only need to do two things in ChatGPT:
+1. Ask you to show a concise chapter plan and wait for approval.
+2. After approval, ask you to create the complete book and return one ZIP.
+
+BOOK SETTINGS
+- Audience: ${project.audience}
+- Language: ${project.language}
+- Maximum total length: 100 pages including front and back matter
+- Illustration style: ${project.illustrationStyle}
+- Visual world: ${project.aesthetic}
+- Image frequency: ${project.imageFrequency}
+
+NON-NEGOTIABLE CONTENT RULES
+- Read the complete source before planning.
+- Keep every concept in its correct chapter. Do not move Chapter 1 material into Chapter 3.
+- Use the chapter IDs, order, titles and context keys in book-request.json exactly.
+- For each chapter plan, state: what belongs here, what does not belong here, pages and images.
+- Wait for the exact words PLAN APPROVED before writing final pages or generating images.
+- Write as the author of a finished children's book. Never mention the PDF, source, adaptation process, ChatGPT or AI to readers.
+- Preserve facts; do not invent information. Explain mature historical topics safely and non-graphically.
+- Give every page one clear purpose. Do not pad the book to reach 100 pages.
+- Generate final illustrations only after the plan is approved. Keep style and recurring characters consistent.
+
+FINAL DELIVERY
+- Return exactly one ZIP named Completed-Children-Book.zip.
+- The ZIP must contain book.json and an images folder with every actual PNG, JPG or WebP file.
+- book.json must follow output-template.json exactly. Add as many page objects as the approved plan needs; do not leave template or placeholder text.
+- Each image.fileName in book.json must be the image's basename, such as chapter-01-page-02.webp.
+- Every pageId and image filename must begin with its correct chapter ID.
+- Do not return image prompts, Markdown image links or descriptions instead of the actual image files.
+- Before delivery, verify chapter order, page IDs, image files, missing content, duplicate text, age fit and the 100-page ceiling.
+
+First response: show only the chapter plan in a simple table, then stop and ask for approval.`;
+}
+
 function chapterWordCount(chapter: Chapter) {
   return chapter.body.replace(/<[^>]+>/g, " ").match(/[\p{L}\p{N}’'-]+/gu)?.length ?? 0;
 }
@@ -1255,6 +1315,54 @@ export default function Home() {
     notify("Illustration added to chapter");
   }
 
+  async function downloadChatGptBookRequest() {
+    if (!project.sourceObjectKey || !project.source) throw new Error("Upload the source book before creating a ChatGPT request.");
+    const response = await fetch(`/api/source/download?key=${encodeURIComponent(project.sourceObjectKey)}`, { headers: ownerHeaders() });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({})) as { error?: string };
+      throw new Error(data.error || "The source book could not be added to the request.");
+    }
+    const sourceBytes = new Uint8Array(await response.arrayBuffer());
+    const request = {
+      format: "iks-chatgpt-book-request-v1",
+      projectTitle: project.title,
+      sourceFile: project.source,
+      settings: {
+        audience: project.audience,
+        language: project.language,
+        maximumTotalPages: TOTAL_BOOK_PAGE_LIMIT,
+        illustrationStyle: project.illustrationStyle,
+        visualWorld: project.aesthetic,
+        imageFrequency: project.imageFrequency,
+        pageAesthetic: project.pageAesthetic,
+        typography: project.fontTheme,
+        border: project.bookBorder,
+        watermark: project.pageWatermark,
+      },
+      chapters: project.chapters.map((chapter, index) => ({
+        chapterId: expectedChapterId(index + 1),
+        chapterNumber: index + 1,
+        title: chapter.title,
+        contextKey: expectedContextKey(index + 1, chapter.title),
+        sourcePages: chapter.sourceStartPage && chapter.sourceEndPage ? `${chapter.sourceStartPage}-${chapter.sourceEndPage}` : undefined,
+        centralContext: chapter.context || chapter.sourceRefs[0]?.excerpt || "Study this chapter directly from the source.",
+        recommendedPages: chapter.recommendedPages || chapter.pages,
+      })),
+    };
+    const archive = zipSync({
+      "READ-ME-FIRST.txt": strToU8(chatGptBookInstructions(project)),
+      "book-request.json": strToU8(JSON.stringify(request, null, 2)),
+      "output-template.json": strToU8(JSON.stringify(packageTemplate(project), null, 2)),
+      [`source/${project.source.replace(/[\\/]/g, "-")}`]: sourceBytes,
+    }, { level: 6 });
+    const href = URL.createObjectURL(new Blob([archive.slice().buffer], { type: "application/zip" }));
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.download = `${safeDownloadName(project.title)}-chatgpt-book-request.zip`;
+    anchor.click();
+    URL.revokeObjectURL(href);
+  }
+
   async function importBookPackage(bookPackage: BookPackage, imageFiles: File[]) {
     const validation = validateBookPackage(bookPackage, project.chapters, project.audience);
     if (!validation.package) throw new Error(validation.errors[0] || "The package does not match this book plan.");
@@ -1413,7 +1521,7 @@ export default function Home() {
         <div className="current-project"><i /> <span><strong>{project.title}</strong><small>{project.source}</small></span></div>
         <div className="top-actions">
           {view === "editor" && <button onClick={() => setView("brief")}>☷ <span>Book plan</span></button>}
-          {(view === "editor" || view === "brief") && <button className="package-import-button" onClick={() => setShowPackageImport(true)}>⇧ <span>Import book package</span></button>}
+          {(view === "editor" || view === "brief") && <button className="package-import-button" onClick={() => setShowPackageImport(true)}>✦ <span>ChatGPT Book</span></button>}
           {(view === "editor" || view === "brief") && <label className="top-upload">{sourceBusy ? "Reading…" : "↥ Source"}<input type="file" accept=".pdf,.docx,.txt,.md" disabled={sourceBusy || draftBusy} onChange={(event) => event.target.files?.[0] && refreshSource(event.target.files[0])}/></label>}
           <button onClick={openVersions}>↺ <span>Versions</span></button>
           <button onClick={saveProject}>✓ <span>Save</span></button>
@@ -1429,7 +1537,7 @@ export default function Home() {
 
       {showPreview && <Preview project={project} draftBusy={draftBusy} onFill={() => prepareDraft("thin")} onRefresh={() => prepareDraft("all")} onClose={() => setShowPreview(false)} onPrint={() => window.print()} />}
       {showVersions && <Versions versions={versions} onCreate={createVersion} onRestore={(snapshot) => { setProject(normalizeProject(snapshot)); setShowVersions(false); notify("Version restored"); }} onClose={() => setShowVersions(false)} />}
-      {showPackageImport && <BookPackageImporter project={project} busy={packageBusy} onClose={() => setShowPackageImport(false)} onImport={importBookPackage} />}
+      {showPackageImport && <BookPackageImporter project={project} busy={packageBusy} onClose={() => setShowPackageImport(false)} onDownloadRequest={downloadChatGptBookRequest} onImport={importBookPackage} />}
       {aiRequest && <AiRoundTrip request={aiRequest} onChange={(result) => setAiRequest({ ...aiRequest, result })} onClose={() => setAiRequest(null)} onApply={applyAiResult} />}
       {toast && <div className="toast">✓ {toast}</div>}
     </div>
@@ -1574,54 +1682,54 @@ function Editor({ project, active, activeId, allocated, draftBusy, onSelect, edi
   </main>;
 }
 
-function BookPackageImporter({ project, busy, onClose, onImport }: { project: Project; busy: boolean; onClose: () => void; onImport: (bookPackage: BookPackage, images: File[]) => Promise<void> }) {
+function BookPackageImporter({ project, busy, onClose, onDownloadRequest, onImport }: { project: Project; busy: boolean; onClose: () => void; onDownloadRequest: () => Promise<void>; onImport: (bookPackage: BookPackage, images: File[]) => Promise<void> }) {
   const [bookPackage, setBookPackage] = useState<BookPackage | null>(null);
   const [validation, setValidation] = useState<BookPackageValidation | null>(null);
   const [images, setImages] = useState<File[]>([]);
   const [error, setError] = useState("");
+  const [requestBusy, setRequestBusy] = useState(false);
+  const [requestDownloaded, setRequestDownloaded] = useState(false);
 
-  async function readManifest(file: File) {
+  async function downloadRequest() {
     setError("");
+    setRequestBusy(true);
     try {
-      const parsed = JSON.parse(await file.text()) as unknown;
-      const checked = validateBookPackage(parsed, project.chapters, project.audience);
-      setValidation(checked);
-      setBookPackage(checked.package);
-    } catch {
-      setBookPackage(null);
-      setValidation({ package: null, errors: ["This is not a valid JSON book package."], warnings: [], chapterCount: 0, pageCount: 0, imageNames: [] });
+      await onDownloadRequest();
+      setRequestDownloaded(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The ChatGPT request could not be created.");
+    } finally {
+      setRequestBusy(false);
     }
   }
 
-  function downloadTemplate() {
-    const template: BookPackage = {
-      format: BOOK_PACKAGE_FORMAT,
-      bookTitle: project.title,
-      audience: project.audience,
-      chapters: project.chapters.map((chapter, chapterIndex) => ({
-        chapterId: expectedChapterId(chapterIndex + 1),
-        chapterNumber: chapterIndex + 1,
-        title: chapter.title,
-        contextKey: expectedContextKey(chapterIndex + 1, chapter.title),
-        pages: [{
-          pageId: expectedPageId(chapterIndex + 1, 1),
-          pageNumber: 1,
-          purpose: "State this page’s one clear teaching purpose",
-          text: "Replace this with the final reader-facing text for this exact page.",
-          image: {
-            fileName: `${expectedChapterId(chapterIndex + 1)}-page-01.webp`,
-            caption: "Reader-facing caption",
-            alt: "Accessible description of this page illustration",
-          },
-        }],
-      })),
-    };
-    const href = URL.createObjectURL(new Blob([JSON.stringify(template, null, 2)], { type: "application/json" }));
-    const anchor = document.createElement("a");
-    anchor.href = href;
-    anchor.download = `${project.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "book"}-package-template.json`;
-    anchor.click();
-    URL.revokeObjectURL(href);
+  async function readCompletedZip(file: File) {
+    setError("");
+    setBookPackage(null);
+    setValidation(null);
+    setImages([]);
+    try {
+      if (!file.name.toLowerCase().endsWith(".zip")) throw new Error("Choose the single Completed-Children-Book.zip file from ChatGPT.");
+      const entries = unzipSync(new Uint8Array(await file.arrayBuffer()));
+      const manifestEntry = Object.entries(entries).find(([name]) => /(^|\/)book\.json$/i.test(name));
+      if (!manifestEntry) throw new Error("This ZIP does not contain book.json. Ask ChatGPT to repair the completed package.");
+      const parsed = JSON.parse(new TextDecoder().decode(manifestEntry[1])) as unknown;
+      const checked = validateBookPackage(parsed, project.chapters, project.audience);
+      setValidation(checked);
+      setBookPackage(checked.package);
+      const imageFiles = Object.entries(entries)
+        .filter(([name]) => /\.(png|jpe?g|webp)$/i.test(name) && !name.endsWith("/"))
+        .map(([name, bytes]) => {
+          const basename = name.split("/").pop() || name;
+          const extension = basename.toLowerCase().split(".").pop();
+          const type = extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : "image/jpeg";
+          return new File([bytes.slice().buffer], basename, { type });
+        });
+      setImages(imageFiles);
+    } catch (reason) {
+      setBookPackage(null);
+      setValidation({ package: null, errors: [reason instanceof Error ? reason.message : "This is not a valid completed book ZIP."], warnings: [], chapterCount: 0, pageCount: 0, imageNames: [] });
+    }
   }
 
   const suppliedNames = new Set(images.map((file) => file.name));
@@ -1635,7 +1743,7 @@ function BookPackageImporter({ project, busy, onClose, onImport }: { project: Pr
     catch (reason) { setError(reason instanceof Error ? reason.message : "The package could not be imported."); }
   }
 
-  return <div className="modal-backdrop"><section className="package-import-modal"><header><div><p className="eyebrow">ONE-STEP STRUCTURED IMPORT</p><h2>Import the complete book package</h2><p>Text and images stay attached to exact chapter and page IDs. Nothing is automatically moved between chapters.</p></div><button onClick={onClose} disabled={busy}>×</button></header><div className="package-import-grid"><section><span className="package-step">01</span><h3>Use the locked template</h3><p>Give this JSON template to ChatGPT with the source and approved plan. Its IDs already match this book.</p><button className="secondary full" onClick={downloadTemplate}>↓ Download package template</button></section><section><span className="package-step">02</span><h3>Select one manifest</h3><p>The website checks chapter titles, order, IDs, page IDs, audience, repeated text and the 100-page ceiling before import.</p><label className="package-drop">Choose JSON manifest<input type="file" accept="application/json,.json" disabled={busy} onChange={(event) => event.target.files?.[0] && void readManifest(event.target.files[0])}/></label></section><section><span className="package-step">03</span><h3>Select all images once</h3><p>Every filename must begin with its chapter ID, so an image for Chapter 1 cannot silently enter Chapter 3.</p><label className="package-drop">Choose all page images<input type="file" accept="image/png,image/jpeg,image/webp" multiple disabled={busy} onChange={(event) => setImages(Array.from(event.target.files ?? []))}/></label></section></div>{validation && <div className={`package-validation ${validation.errors.length ? "invalid" : "valid"}`}><header><b>{validation.errors.length ? "Package needs correction" : "Structure verified"}</b><span>{validation.chapterCount} chapters · {validation.pageCount} content pages · {validation.imageNames.length} images</span></header>{validation.errors.map((message) => <p key={message}>× {message}</p>)}{!validation.errors.length && missingImages.map((name) => <p key={name}>○ Missing image: {name}</p>)}{!validation.errors.length && !missingImages.length && <p>✓ Every chapter, page and supplied image has one unambiguous destination.</p>}</div>}{error && <p className="package-error">{error}</p>}<footer><div><b>No semantic remixing</b><span>The importer validates placement; it never rewrites, summarizes or redistributes the supplied content.</span></div><button className="secondary" onClick={onClose} disabled={busy}>Cancel</button><button className="primary" disabled={!canImport} onClick={() => void apply()}>{busy ? "Uploading and locking pages…" : "Import exactly as mapped →"}</button></footer></section></div>;
+  return <div className="modal-backdrop"><section className="package-import-modal simple-book-flow"><header><div><p className="eyebrow">CHATGPT BOOK WORKFLOW</p><h2>Two files. No JSON work.</h2><p>Download one request for ChatGPT, then bring back one completed ZIP. The website keeps every page and image inside its correct chapter.</p></div><button onClick={onClose} disabled={busy || requestBusy}>×</button></header><div className="simple-flow-line" aria-label="Book workflow"><span className="active">1&nbsp; Website request</span><i>→</i><span>2&nbsp; ChatGPT creates book</span><i>→</i><span>3&nbsp; Upload finished book</span></div><div className="package-import-grid two-step"><section><span className="package-step">01</span><h3>Download the ChatGPT request</h3><p>It already contains the source book, age, language, design settings, chapter map and instructions. Upload this one ZIP to your personal ChatGPT.</p><button className="primary full" disabled={requestBusy || !project.sourceObjectKey} onClick={() => void downloadRequest()}>{requestBusy ? "Preparing source and settings…" : requestDownloaded ? "✓ Download again" : "↓ Download ChatGPT Book Request"}</button>{!project.sourceObjectKey && <small className="step-help">Upload the source book first.</small>}<div className="chatgpt-words"><b>Then tell ChatGPT:</b><span>“Show me the book plan. Do not create the final book until I approve it.”</span><span>After checking it, reply: “PLAN APPROVED. Create the complete book ZIP.”</span></div></section><section><span className="package-step">02</span><h3>Upload the completed book</h3><p>Choose only the single <b>Completed-Children-Book.zip</b> returned by ChatGPT. You do not select JSON or images separately.</p><label className="package-drop completed-drop">{validation ? "Choose a different completed ZIP" : "⇧ Choose Completed Book ZIP"}<input type="file" accept="application/zip,.zip" disabled={busy || requestBusy} onChange={(event) => event.target.files?.[0] && void readCompletedZip(event.target.files[0])}/></label><small className="step-help">The ZIP must contain book.json and the actual images.</small></section></div>{validation && <div className={`package-validation ${validation.errors.length || missingImages.length ? "invalid" : "valid"}`}><header><b>{validation.errors.length || missingImages.length ? "The finished book needs repair" : "Finished book verified"}</b><span>{validation.chapterCount} chapters · {validation.pageCount} content pages · {validation.imageNames.length} images</span></header>{validation.errors.map((message) => <p key={message}>× {message}</p>)}{!validation.errors.length && missingImages.map((name) => <p key={name}>× Missing actual image: {name}</p>)}{!validation.errors.length && !missingImages.length && <p>✓ No placeholders. Every page and image has one verified chapter destination.</p>}</div>}{error && <p className="package-error">{error}</p>}<footer><div><b>Nothing is guessed or moved</b><span>A broken or incomplete ZIP is rejected before it can replace your current book.</span></div><button className="secondary" onClick={onClose} disabled={busy || requestBusy}>Cancel</button><button className="primary" disabled={!canImport} onClick={() => void apply()}>{busy ? "Creating the finished book…" : "Accept completed book →"}</button></footer></section></div>;
 }
 
 function AiRoundTrip({ request, onChange, onClose, onApply }: { request: { action: string; prompt: string; selection: string; result: string }; onChange: (value: string) => void; onClose: () => void; onApply: () => void }) {

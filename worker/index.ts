@@ -804,6 +804,22 @@ async function reanalyseSourceApi(request: Request, env: Env) {
   return json({ source: { pages: extracted.pages, ...analysis, sections, chapterPlans, quality: analysis.words > 200 ? "Good" : "Needs review — OCR may be required" } });
 }
 
+async function downloadSourceApi(request: Request, env: Env) {
+  if (request.method !== "GET") return json({ error: "Method not allowed" }, 405);
+  const key = new URL(request.url).searchParams.get("key") || "";
+  const ownerPrefix = `sources/${ownerKey(request)}/`;
+  if (!key.startsWith(ownerPrefix)) return json({ error: "The source does not belong to this project" }, 403);
+  const source = await env.BUCKET.get(key);
+  if (!source) return json({ error: "The original source file is unavailable. Upload it again." }, 404);
+  const headers = new Headers({
+    "content-type": source.httpMetadata?.contentType || "application/octet-stream",
+    "cache-control": "private, no-store",
+    "content-disposition": `attachment; filename="${(source.customMetadata?.originalName || "source-book").replace(/[\"\\\r\n]/g, "-")}"`,
+    "x-content-type-options": "nosniff",
+  });
+  return new Response(source.body, { headers });
+}
+
 async function draftApi(request: Request, env: Env) {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const incoming = await request.json() as DraftProjectInput;
@@ -851,6 +867,7 @@ const worker = {
       if (url.pathname === "/api/versions") return await versionsApi(request, env);
       if (url.pathname === "/api/preferences") return await preferencesApi(request, env);
       if (url.pathname === "/api/source") return await sourceApi(request, env);
+      if (url.pathname === "/api/source/download") return await downloadSourceApi(request, env);
       if (url.pathname === "/api/source/reanalyse") return await reanalyseSourceApi(request, env);
       if (url.pathname === "/api/draft") return await draftApi(request, env);
       if (url.pathname === "/api/image") return await imageApi(request, env);

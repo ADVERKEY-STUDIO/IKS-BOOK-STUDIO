@@ -58,12 +58,21 @@ test("page IDs and substantial duplicated text are rejected", () => {
   assert.ok(result.errors.some((error) => /repeats substantial text/.test(error)));
 });
 
-test("the UI imports one manifest and many images, then previews exact imported pages", () => {
-  assert.match(page, /Import book package/);
-  assert.match(page, /multiple disabled=\{busy\}/);
+test("the UI exchanges one request ZIP and one completed ZIP", () => {
+  assert.match(page, /Download ChatGPT Book Request/);
+  assert.match(page, /Choose Completed Book ZIP/);
+  assert.match(page, /unzipSync/);
+  assert.doesNotMatch(page, /Choose JSON manifest/);
+  assert.doesNotMatch(page, /Choose all page images/);
   assert.match(page, /importedPages\.map/);
-  assert.match(page, /No semantic remixing/);
+  assert.match(page, /Nothing is guessed or moved/);
   assert.match(page, /exact-import-page/);
   assert.match(css, /\.package-import-modal/);
 });
 
+test("template and placeholder page text is rejected", () => {
+  const unfinished = validPackage();
+  unfinished.chapters[0].pages[0].text = "Replace this with the final reader-facing text for this exact page.";
+  const result = packageTools.validateBookPackage(unfinished, plan, "Ages 10–12");
+  assert.ok(result.errors.some((error) => /placeholder text/.test(error)));
+});

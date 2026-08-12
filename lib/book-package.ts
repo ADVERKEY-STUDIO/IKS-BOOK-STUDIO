@@ -105,6 +105,9 @@ export function validateBookPackage(input: unknown, plannedChapters: PlannedChap
       seenPageIds.add(pageId);
       if (!String(page.purpose || "").trim()) errors.push(`${expectedId} needs a clear page purpose.`);
       if (!text) errors.push(`${expectedId} has no text.`);
+      if (/\b(?:replace this|placeholder|lorem ipsum|state this page|final reader-facing text)\b/i.test(text)) {
+        errors.push(`${expectedId} still contains template or placeholder text.`);
+      }
       const signature = normalized(text).split(/\s+/).slice(0, 45).join(" ");
       if (signature.length > 120) {
         const previous = seenText.get(signature);
