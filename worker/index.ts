@@ -365,30 +365,45 @@ function geminiText(data: unknown) {
 async function geminiStructured<T>(env: Env, prompt: string, responseSchema: object): Promise<T> {
   if (!env.GEMINI_API_KEY) throw new TeachingEngineError("The Gemini teaching engine is not connected yet. Ask the site owner to finish AI setup.", 503);
   const model = env.GEMINI_MODEL || "gemini-3.6-flash";
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema,
-        maxOutputTokens: 16000,
-        thinkingConfig: { thinkingLevel: "high" },
-      },
-      safetySettings: [
-        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
-        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
-        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
-        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
-      ],
-    }),
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  const body = JSON.stringify({
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema,
+      maxOutputTokens: 16000,
+      thinkingConfig: { thinkingLevel: "high" },
+    },
+    safetySettings: [
+      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+    ],
   });
-  if (!response.ok) {
-    const detail = (await response.text()).slice(0, 600);
-    if (response.status === 429) throw new TeachingEngineError("The free Gemini quota has been reached. Your saved chapters are unchanged; try again after the quota resets.", 429);
-    if (response.status === 401 || response.status === 403) throw new TeachingEngineError("The Gemini teaching connection needs attention from the site owner.", 503);
-    throw new TeachingEngineError(`Gemini could not prepare this lesson (${response.status}). ${detail}`, 502);
+  const retryDelays = [900, 2200, 4800];
+  let response: Response | undefined;
+  let detail = "";
+
+  for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+      body,
+    });
+    if (response.ok) break;
+    detail = (await response.text()).slice(0, 600);
+    const temporaryFailure = response.status === 500 || response.status === 502 || response.status === 503 || response.status === 504;
+    if (!temporaryFailure || attempt === retryDelays.length) break;
+    await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+  }
+
+  if (!response?.ok) {
+    const status = response?.status ?? 502;
+    if (status === 429) throw new TeachingEngineError("The free Gemini quota has been reached. Your saved chapters are unchanged; try again after the quota resets.", 429);
+    if (status === 401 || status === 403) throw new TeachingEngineError("The Gemini teaching connection needs attention from the site owner.", 503);
+    if (status === 503) throw new TeachingEngineError("Gemini is temporarily busy after several automatic retries. Your saved chapters are unchanged; try again in a few minutes.", 503);
+    throw new TeachingEngineError(`Gemini could not prepare this lesson (${status}). ${detail}`, 502);
   }
   const data = await response.json();
   const text = geminiText(data);

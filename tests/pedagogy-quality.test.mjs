@@ -11,6 +11,9 @@ test("chapter generation uses a draft, independent review, and hard quality gate
   assert.match(worker, /blueprintPrompt/);
   assert.match(worker, /chapterBlueprintSchema/);
   assert.match(worker, /thinkingLevel: "high"/);
+  assert.match(worker, /retryDelays = \[900, 2200, 4800\]/);
+  assert.match(worker, /response\.status === 503/);
+  assert.match(worker, /temporarily busy after several automatic retries/i);
   assert.match(worker, /teachingChapterSchema/);
   assert.match(worker, /reviewedTeachingChapterSchema/);
   assert.match(worker, /Object\.values\(scores\).*score < 85/s);
