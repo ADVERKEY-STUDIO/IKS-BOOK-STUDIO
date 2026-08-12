@@ -10,7 +10,9 @@ test("chapter generation uses a draft, independent review, and hard quality gate
   assert.match(worker, /gemini-3\.6-flash/);
   assert.match(worker, /blueprintPrompt/);
   assert.match(worker, /chapterBlueprintSchema/);
-  assert.match(worker, /thinkingLevel: "high"/);
+  assert.match(worker, /thinkingLevel: "high" \| "medium"/);
+  assert.match(worker, /attempt === 0 \? "high" : "medium"/);
+  assert.match(worker, /maxOutputTokens: 32768/);
   assert.match(worker, /retryDelays = \[900, 2200, 4800\]/);
   assert.match(worker, /response\.status === 503/);
   assert.match(worker, /temporarily busy after several automatic retries/i);

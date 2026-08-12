@@ -362,17 +362,22 @@ function geminiText(data: unknown) {
   return response.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("").trim() ?? "";
 }
 
+function geminiResponseIssue(data: unknown) {
+  const response = data as { candidates?: Array<{ finishReason?: string }>; promptFeedback?: { blockReason?: string } };
+  return response.promptFeedback?.blockReason || response.candidates?.[0]?.finishReason || "empty response";
+}
+
 async function geminiStructured<T>(env: Env, prompt: string, responseSchema: object): Promise<T> {
   if (!env.GEMINI_API_KEY) throw new TeachingEngineError("The Gemini teaching engine is not connected yet. Ask the site owner to finish AI setup.", 503);
   const model = env.GEMINI_MODEL || "gemini-3.6-flash";
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-  const body = JSON.stringify({
+  const requestBody = (thinkingLevel: "high" | "medium") => JSON.stringify({
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: {
       responseMimeType: "application/json",
       responseSchema,
-      maxOutputTokens: 16000,
-      thinkingConfig: { thinkingLevel: "high" },
+      maxOutputTokens: 32768,
+      thinkingConfig: { thinkingLevel },
     },
     safetySettings: [
       { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
@@ -389,29 +394,38 @@ async function geminiStructured<T>(env: Env, prompt: string, responseSchema: obj
     response = await fetch(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
-      body,
+      body: requestBody(attempt === 0 ? "high" : "medium"),
     });
-    if (response.ok) break;
+    if (response.ok) {
+      const data = await response.json();
+      const text = geminiText(data);
+      if (text) {
+        try {
+          return JSON.parse(text) as T;
+        } catch {
+          detail = "incomplete structured response";
+        }
+      } else {
+        detail = geminiResponseIssue(data);
+      }
+      if (attempt === retryDelays.length) break;
+      await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+      continue;
+    }
     detail = (await response.text()).slice(0, 600);
     const temporaryFailure = response.status === 500 || response.status === 502 || response.status === 503 || response.status === 504;
     if (!temporaryFailure || attempt === retryDelays.length) break;
     await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
   }
 
-  if (!response?.ok) {
+  if (response?.ok) {
+    throw new TeachingEngineError(`Gemini could not complete the structured lesson after several automatic retries (${detail}). The existing chapter was kept unchanged.`, 502);
+  } else {
     const status = response?.status ?? 502;
     if (status === 429) throw new TeachingEngineError("The free Gemini quota has been reached. Your saved chapters are unchanged; try again after the quota resets.", 429);
     if (status === 401 || status === 403) throw new TeachingEngineError("The Gemini teaching connection needs attention from the site owner.", 503);
     if (status === 503) throw new TeachingEngineError("Gemini is temporarily busy after several automatic retries. Your saved chapters are unchanged; try again in a few minutes.", 503);
     throw new TeachingEngineError(`Gemini could not prepare this lesson (${status}). ${detail}`, 502);
-  }
-  const data = await response.json();
-  const text = geminiText(data);
-  if (!text) throw new TeachingEngineError("Gemini returned an empty lesson. The existing chapter was kept unchanged.");
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    throw new TeachingEngineError("Gemini returned an incomplete lesson. The existing chapter was kept unchanged.");
   }
 }
 
