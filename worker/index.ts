@@ -6,7 +6,7 @@ import { extractText, getDocumentProxy } from "unpdf";
 import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, TextRun } from "docx";
 import { authorialReaderHtml, generationProfileKey } from "../lib/child-summary";
 import { allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET, recommendedAdaptationPages } from "../lib/adaptation-pages";
-import { efficientChapterPrompt, evaluateChapterOneGate, evaluateTeachingChapter, normalizeTeachingChapter, renderTeachingChapter, reviewPrompt, type ChapterBlueprint, type ChapterOneGate, type PedagogyQuality, type PedagogyScores, type TeachingChapter } from "../lib/pedagogy";
+import { efficientChapterPrompt, evaluateChapterOneGate, evaluateTeachingChapter, localPedagogyScores, normalizeTeachingChapter, renderTeachingChapter, reviewPrompt, type ChapterBlueprint, type ChapterOneGate, type PedagogyQuality, type PedagogyScores, type TeachingChapter } from "../lib/pedagogy";
 
 interface Env {
   ASSETS: Fetcher;
@@ -556,15 +556,20 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
   if (contentWords(sourceMaterial).length < 120) throw new TeachingEngineError("This chapter does not contain enough readable text. OCR or a clearer source file may be required.", 422);
   const audience = project.audience || "Ages 10–12";
   const language = project.language || "English";
-  const initial = await openRouterStructured<{ chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] }>(
+  const initial = await openRouterStructured<TeachingChapter>(
     env,
     efficientChapterPrompt({ title: chapter.title, audience, language, targetPages: chapter.pages, sourceMaterial, strictChapterOneTrial: !allowAutomaticRepair }),
-    allowAutomaticRepair ? 3600 : 2900,
+    allowAutomaticRepair ? 3200 : 2300,
   );
-  let review = initial.data;
+  let review: { chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] } = {
+    chapter: initial.data,
+    scores: { context: 0, coherence: 0, ageFit: 0, pedagogy: 0, sourceFidelity: 0 },
+    summary: "The chapter was scored by deterministic local teaching checks.",
+    checks: [],
+  };
   let draft = normalizeTeachingChapter(review.chapter, chapter.title);
-  let scores = normalizedScores(review.scores);
   let deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, chapter.pages);
+  let scores = localPedagogyScores(deterministic);
   let revisionPasses = 0;
   let usage = initial.usage;
   if (!allowAutomaticRepair && (!deterministic.passed || Object.values(scores).some((score) => score < 80))) {
@@ -604,8 +609,8 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
     review = repair.data;
     usage = addUsage(usage, repair.usage);
     draft = normalizeTeachingChapter(review.chapter, chapter.title);
-    scores = normalizedScores(review.scores);
     deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, chapter.pages);
+    scores = localPedagogyScores(deterministic);
     revisionPasses = 1;
   }
   if (!deterministic.passed || Object.values(scores).some((score) => score < 80)) {
@@ -616,7 +621,7 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
     engine: initial.model,
     scores,
     revisionPasses,
-    summary: typeof review.summary === "string" ? review.summary : "This chapter passed the teaching-quality review.",
+    summary: revisionPasses ? (typeof review.summary === "string" ? review.summary : "The targeted repair passed local teaching checks.") : "Local checks passed for structure, age fit, teaching completeness, length, and source grounding.",
     checks: [...new Set([...(Array.isArray(review.checks) ? review.checks.filter((item): item is string => typeof item === "string") : []), `Readable lesson: ${deterministic.totalWords} words`, `Age-fit sentence average: ${deterministic.averageSentenceWords} words`, `Chapter concepts used: ${deterministic.sourceTermOverlap.slice(0, 6).join(", ")}`])].slice(0, 9),
     learningGoals: draft.learningGoals,
   };

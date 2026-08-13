@@ -4,7 +4,7 @@ import test from "node:test";
 
 const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 const worker = await readFile(new URL("../worker/index.ts", import.meta.url), "utf8");
-const { efficientChapterPrompt, evaluateChapterOneGate } = await import(new URL("../lib/pedagogy.ts", import.meta.url));
+const { efficientChapterPrompt, evaluateChapterOneGate, localPedagogyScores } = await import(new URL("../lib/pedagogy.ts", import.meta.url));
 
 test("Phase 8 gives Nemotron a hard, complete one-pass Chapter 1 contract", () => {
   const prompt = efficientChapterPrompt({
@@ -25,6 +25,8 @@ test("Phase 8 gives Nemotron a hard, complete one-pass Chapter 1 contract", () =
   assert.match(prompt, /finish and close the JSON object before the token limit/i);
   assert.match(prompt, /empty paragraphs array is invalid/i);
   assert.match(prompt, /do not invent who found it/i);
+  assert.match(prompt, /chapter object directly/i);
+  assert.match(prompt, /no wrapper, scores, summary, checks/i);
 });
 
 test("Phase 8 Chapter 1 gate rejects both summaries and overlong drafts", () => {
@@ -39,8 +41,18 @@ test("the gated Chapter 1 browser flow never performs a hidden retry", () => {
   assert.match(page, /const maximumAttempts = singleShotChapterOneTrial \? 1 : 2/);
   assert.match(page, /PHASE 8 · CHAPTER 1 GATE/);
   assert.match(worker, /strictChapterOneTrial: !allowAutomaticRepair/);
-  assert.match(worker, /allowAutomaticRepair \? 3600 : 2900/);
+  assert.match(worker, /allowAutomaticRepair \? 3200 : 2300/);
   assert.match(worker, /finish the JSON before the token limit/);
+  assert.match(worker, /openRouterStructured<TeachingChapter>/);
+  assert.match(worker, /localPedagogyScores\(deterministic\)/);
+});
+
+test("Phase 8 scores are derived locally instead of accepted from the model", () => {
+  const strong = localPedagogyScores({ passed: true, failures: [], totalWords: 620, averageSentenceWords: 15, sourceTermOverlap: ["governance", "artha", "treatise", "kauṭilya"] });
+  assert.deepEqual(strong, { context: 92, coherence: 94, ageFit: 93, pedagogy: 95, sourceFidelity: 96 });
+  const weak = localPedagogyScores({ passed: false, failures: ["Not enough concrete examples or analogies", "The lesson introduces unsupported numeric claims: 2300"], totalWords: 620, averageSentenceWords: 15, sourceTermOverlap: [] });
+  assert.equal(weak.pedagogy, 72);
+  assert.equal(weak.sourceFidelity, 68);
 });
 
 test("local teaching validation rejects sections without explanatory prose", async () => {
