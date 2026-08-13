@@ -46,7 +46,17 @@ test("the main workflow is chapter-wise instead of a wall of global buttons", ()
   assert.match(page, /project\.chapters\.map\(\(chapter\) =>/);
   assert.match(page, /onGenerateChapter\(chapter\.id\)/);
   assert.match(page, /chapter\.id > 1 && !chapterOnePassed/);
-  assert.match(page, /status === "Completed" \? "View"/);
+  assert.match(page, /status === "Completed" \|\| status === "Designer handoff" \? "View"/);
   assert.match(page, /<summary>More actions<\/summary>/);
   assert.match(page, /prepareDraft\("active", \{ chapterId \}\)/);
+});
+
+test("failed chapters can be handed to a designer without blocking PDF export", () => {
+  assert.match(page, /\| "Designer handoff"/);
+  assert.match(page, /async function leaveActiveForDesigner\(\)/);
+  assert.match(page, /Leave Chapter \{active\.id\} for designer/);
+  assert.match(page, /chapterGenerationState\(chapter\) !== "Designer handoff"/);
+  assert.match(page, /function exportPdf\(\)/);
+  assert.match(page, /window\.setTimeout\(\(\) => window\.print\(\), 450\)/);
+  assert.match(page, />↓ PDF<\/button>/);
 });

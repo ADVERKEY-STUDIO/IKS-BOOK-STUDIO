@@ -11,7 +11,7 @@ type View = "dashboard" | "wizard" | "analysis" | "brief" | "editor";
 
 type SourceSection = { title: string; page: number; excerpt: string };
 
-type ChapterGenerationStatus = "Waiting" | "Generating" | "Completed" | "Needs review" | "Paused by quota";
+type ChapterGenerationStatus = "Waiting" | "Generating" | "Completed" | "Needs review" | "Paused by quota" | "Designer handoff";
 
 type GenerationUsage = {
   inputTokens: number;
@@ -1295,7 +1295,7 @@ export default function Home() {
   async function saveChapterBody() {
     if (!active || !editorRef.current) return;
     const html = authorialReaderHtml(editorRef.current.innerHTML);
-    const edited = project.chapters.map((chapter) => chapter.id === active.id ? { ...chapter, body: html, status: "draft" as const, generationStatus: "Needs review" as const, generationProfile: "", pedagogyQuality: undefined, importedPages: undefined, importValidated: false } : chapter);
+    const edited = project.chapters.map((chapter) => chapter.id === active.id ? { ...chapter, body: html, status: "draft" as const, generationStatus: chapterGenerationState(chapter) === "Designer handoff" ? "Designer handoff" as const : "Needs review" as const, generationProfile: "", pedagogyQuality: undefined, importedPages: undefined, importValidated: false } : chapter);
     const next = { ...project, chapters: attachChapterVisuals(project, edited) };
     setProject(next);
     try { await persistProject(next); notify("Chapter updated and saved"); } catch { notify("Chapter changed; save again when connected"); }
@@ -1369,6 +1369,17 @@ export default function Home() {
       notify("Editable DOCX downloaded");
     } catch { notify("Could not create the DOCX"); }
     finally { setExportBusy(false); }
+  }
+
+  function exportPdf() {
+    const blocked = project.chapters.filter((chapter) => !chapter.importValidated && chapter.pedagogyQuality?.status !== "passed" && chapterGenerationState(chapter) !== "Designer handoff");
+    if (blocked.length) {
+      notify(`${blocked.length} chapter${blocked.length === 1 ? " is" : "s are"} still waiting for review or designer handoff`);
+      setShowPreview(true);
+      return;
+    }
+    setShowPreview(true);
+    window.setTimeout(() => window.print(), 450);
   }
 
   async function duplicateProject(source: Project) {
@@ -1623,6 +1634,7 @@ export default function Home() {
     const selectedProfile = generationProfileKey(project.audience, project.language);
     const requestedChapterIds = project.chapters.filter((chapter, index) => {
       if (chapter.locked) return false;
+      if (chapterGenerationState(chapter) === "Designer handoff") return false;
       if (typeof options.chapterId === "number") return chapter.id === options.chapterId;
       if (scope === "all") return chapter.generationStatus !== "Completed" || chapter.generationProfile !== selectedProfile;
       if (scope === "sample") return index === 0;
@@ -1854,6 +1866,32 @@ export default function Home() {
     }
   }
 
+  async function leaveActiveForDesigner() {
+    if (!active || chapterGenerationState(active) === "Completed") return;
+    try {
+      await preserveGenerationVersion(project, active);
+      const handoffBody = chapterWordCount(active) >= 80 ? active.body : `<p class="chapter-kicker">DESIGNER HANDOFF</p><h1>${active.title}</h1><div class="designer-handoff-page"><b>Reserved for final human development</b><p>This section is intentionally left for the book designer and editor. Its final text, layout and any supporting material will be completed during the human review stage.</p><p>The rest of the reviewed book can be exported now without asking Nemotron to regenerate this chapter.</p></div>`;
+      const next = {
+        ...project,
+        chapters: project.chapters.map((chapter) => chapter.id === active.id ? {
+          ...chapter,
+          body: handoffBody,
+          status: "draft" as const,
+          generationStatus: "Designer handoff" as const,
+          generationError: "Reserved for the human designer. This chapter is excluded from automatic generation and the AI quality gate.",
+          pedagogyQuality: undefined,
+          importedPages: undefined,
+          importValidated: false,
+        } : chapter),
+      };
+      setProject(next);
+      await persistProject(next);
+      notify(`Chapter ${active.id} left for the designer. PDF export is now available.`);
+    } catch {
+      notify("The designer handoff could not be saved");
+    }
+  }
+
   if (view === "dashboard") return <Dashboard projects={projects} onNew={startNewBook} onOpen={openProject} onDuplicate={duplicateProject} onDelete={deleteProject} />;
 
   return (
@@ -1865,6 +1903,7 @@ export default function Home() {
           {view === "editor" && <button onClick={() => setView("brief")}>☷ <span>Book plan</span></button>}
           {(view === "editor" || view === "brief") && <details className="advanced-tools"><summary>Advanced tools</summary><div><label className="advanced-upload">{sourceBusy ? "Reading source…" : "Replace source book"}<input type="file" accept=".pdf,.docx,.txt,.md" disabled={sourceBusy || draftBusy} onChange={(event) => event.target.files?.[0] && refreshSource(event.target.files[0])}/></label><button onClick={openVersions}>Version history</button><button onClick={saveProject}>Save project now</button><button className="package-import-button" onClick={() => setShowPackageImport(true)}>ChatGPT ZIP workflow</button><small>Source, versions, manual save, and ZIP import</small></div></details>}
           <button onClick={() => setShowPreview(true)}>Preview</button>
+          <button className="pdf-button" onClick={exportPdf}>↓ PDF</button>
           <button className="export-button" onClick={exportDoc} disabled={exportBusy}>{exportBusy ? "Preparing…" : "↓ DOCX"}</button>
         </div>
       </header>
@@ -1885,6 +1924,7 @@ export default function Home() {
         onAccept={acceptImprovement}
         onKeep={() => void keepOriginal()}
         onRepair={() => void repairActiveOnce()}
+        onDesignerHandoff={() => void leaveActiveForDesigner()}
         onRestore={() => void restorePreviousVersion()}
       />}
 
@@ -1903,7 +1943,7 @@ export default function Home() {
   );
 }
 
-function SimpleWorkflowBar({ project, active, busy, paused, connection, hasComparison, onTest, onSelectChapter, onGenerateChapter, onPause, onResume, onCompare, onAccept, onKeep, onRepair, onRestore }: {
+function SimpleWorkflowBar({ project, active, busy, paused, connection, hasComparison, onTest, onSelectChapter, onGenerateChapter, onPause, onResume, onCompare, onAccept, onKeep, onRepair, onDesignerHandoff, onRestore }: {
   project: Project;
   active: Chapter;
   busy: boolean;
@@ -1919,10 +1959,11 @@ function SimpleWorkflowBar({ project, active, busy, paused, connection, hasCompa
   onAccept: () => void;
   onKeep: () => void;
   onRepair: () => void;
+  onDesignerHandoff: () => void;
   onRestore: () => void;
 }) {
   const quotaPaused = project.chapters.some((chapter) => chapter.generationStatus === "Paused by quota");
-  const unfinished = project.chapters.some((chapter) => chapter.generationStatus !== "Completed" && !chapter.locked);
+  const unfinished = project.chapters.some((chapter) => chapterGenerationState(chapter) !== "Completed" && chapterGenerationState(chapter) !== "Designer handoff" && !chapter.locked);
   const chapterOneGate = project.chapters.find((chapter) => chapter.id === 1)?.phase7Evaluation;
   const chapterOnePassed = Boolean(chapterOneGate?.passed);
   return <section className="simple-workflow-bar" aria-label="Book improvement controls">
@@ -1931,14 +1972,14 @@ function SimpleWorkflowBar({ project, active, busy, paused, connection, hasCompa
       {project.chapters.map((chapter) => {
         const status = chapterGenerationState(chapter);
         const gateLocked = chapter.id > 1 && !chapterOnePassed;
-        const disabled = busy || chapter.locked || gateLocked;
-        const action = status === "Completed" ? "View" : status === "Needs review" ? "Try again" : status === "Paused by quota" ? "Resume" : status === "Generating" ? "Generating…" : "Generate";
+        const disabled = busy || chapter.locked || gateLocked || status === "Designer handoff";
+        const action = status === "Completed" || status === "Designer handoff" ? "View" : status === "Needs review" ? "Try again" : status === "Paused by quota" ? "Resume" : status === "Generating" ? "Generating…" : "Generate";
         return <article className={`chapter-generation-card ${active.id === chapter.id ? "active" : ""} ${normalizedTitle(status).replace(/[^a-z]+/g, "-")} ${gateLocked ? "gate-locked" : ""}`} key={chapter.id}><button className="chapter-card-select" onClick={() => onSelectChapter(chapter.id)}><span>CH {String(chapter.id).padStart(2, "0")}</span><b>{chapter.title}</b></button><button className="chapter-card-action" disabled={disabled} onClick={() => status === "Completed" ? onSelectChapter(chapter.id) : onGenerateChapter(chapter.id)}>{gateLocked ? "Locked" : action}</button></article>;
       })}
     </div>
     <div className="workflow-lower-row">
       <Phase7Report evaluation={chapterOneGate}/>
-      <div className="workflow-context-actions">{busy && <button onClick={onPause} disabled={paused}>Pause after this chapter</button>}{(paused || quotaPaused) && <button onClick={onResume} disabled={busy || !unfinished}>Resume book</button>}<details><summary>More actions</summary><div><button onClick={onCompare} disabled={!hasComparison}>Compare versions</button><button onClick={onAccept} disabled={!hasComparison}>Accept improvement</button><button onClick={onKeep} disabled={!hasComparison}>Keep original</button><button onClick={onRepair} disabled={busy || active.locked || (active.repairAttempts || 0) >= 1}>Repair once</button><button onClick={onRestore} disabled={busy}>Restore previous version</button></div></details></div>
+      <div className="workflow-context-actions">{chapterGenerationState(active) === "Needs review" && <button className="designer-handoff-action" onClick={onDesignerHandoff} disabled={busy}>Leave Chapter {active.id} for designer</button>}{busy && <button onClick={onPause} disabled={paused}>Pause after this chapter</button>}{(paused || quotaPaused) && <button onClick={onResume} disabled={busy || !unfinished}>Resume book</button>}<details><summary>More actions</summary><div><button onClick={onCompare} disabled={!hasComparison}>Compare versions</button><button onClick={onAccept} disabled={!hasComparison}>Accept improvement</button><button onClick={onKeep} disabled={!hasComparison}>Keep original</button><button onClick={onRepair} disabled={busy || active.locked || (active.repairAttempts || 0) >= 1}>Repair once</button><button onClick={onRestore} disabled={busy}>Restore previous version</button></div></details></div>
     </div>
   </section>;
 }
@@ -2200,10 +2241,10 @@ function Preview({ project, draftBusy, onFill, onRefresh, onClose, onPrint }: { 
       delete document.documentElement.dataset.pageWatermark;
     };
   }, [project.fontTheme, project.bookBorder, project.pageWatermark]);
-  const thinChapters = project.chapters.filter((chapter) => chapterWordCount(chapter) < 350 && !chapter.locked && !chapter.importValidated);
+  const thinChapters = project.chapters.filter((chapter) => chapterWordCount(chapter) < 350 && !chapter.locked && !chapter.importValidated && chapterGenerationState(chapter) !== "Designer handoff");
   const selectedProfile = generationProfileKey(project.audience, project.language);
-  const staleChapters = project.chapters.filter((chapter) => !chapter.locked && !chapter.importValidated && chapterWordCount(chapter) >= 350 && chapter.generationProfile !== selectedProfile);
-  const unreviewedChapters = project.chapters.filter((chapter) => !chapter.importValidated && chapter.pedagogyQuality?.status !== "passed");
+  const staleChapters = project.chapters.filter((chapter) => !chapter.locked && !chapter.importValidated && chapterGenerationState(chapter) !== "Designer handoff" && chapterWordCount(chapter) >= 350 && chapter.generationProfile !== selectedProfile);
+  const unreviewedChapters = project.chapters.filter((chapter) => !chapter.importValidated && chapter.pedagogyQuality?.status !== "passed" && chapterGenerationState(chapter) !== "Designer handoff");
   const printable = useMemo(() => printableChapters(project.chapters), [project.chapters]);
   const worldClass = `world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")}`;
   const pageClass = `page-aesthetic-${normalizedTitle(project.pageAesthetic).replace(/[^a-z]+/g, "-")}`;
