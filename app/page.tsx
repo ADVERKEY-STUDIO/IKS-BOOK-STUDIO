@@ -22,6 +22,19 @@ type GenerationUsage = {
   updatedAt?: string;
 };
 
+type DraftApiResponse = {
+  chapters?: Chapter[];
+  error?: string;
+  usage?: GenerationUsage;
+  code?: string;
+  retryable?: boolean;
+  quota?: boolean;
+  requestCount?: number;
+};
+
+const MAX_CONCURRENT_CHAPTERS = 2;
+const TEMPORARY_RETRY_DELAY_MS = 1800;
+
 type ImportedPage = {
   pageId: string;
   pageNumber: number;
@@ -1523,6 +1536,62 @@ export default function Home() {
     patchProject({ chapters });
   }
 
+  function draftRequestBody(snapshot: Project, chapterId: number) {
+    return JSON.stringify({
+      source: snapshot.source,
+      sourceObjectKey: snapshot.sourceObjectKey,
+      audience: snapshot.audience,
+      readingLevel: snapshot.readingLevel,
+      language: snapshot.language,
+      adaptation: snapshot.adaptation,
+      learningFeatures: snapshot.learningFeatures,
+      aesthetic: snapshot.aesthetic,
+      illustrationStyle: snapshot.illustrationStyle,
+      imageFrequency: snapshot.imageFrequency,
+      sourceTerms: snapshot.sourceTerms,
+      chapters: snapshot.chapters.map(({ id, title, pages, locked, body, sourceStartPage, sourceEndPage, sourcePageCount, sourceWordCount, complexityScore }) => ({ id, title, pages, locked, body, sourceStartPage, sourceEndPage, sourcePageCount, sourceWordCount, complexityScore })),
+      chapterIds: [chapterId],
+    });
+  }
+
+  async function requestDraftChapter(snapshot: Project, chapterId: number, quotaStopped: () => boolean, stopForQuota: () => void) {
+    let providerRequests = 0;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await fetch("/api/draft", {
+          method: "POST",
+          headers: requestHeaders(),
+          body: draftRequestBody(snapshot, chapterId),
+        });
+        const data = await response.json() as DraftApiResponse;
+        providerRequests += data.usage?.requests || data.requestCount || 0;
+        if (response.ok && data.chapters?.length) {
+          return {
+            ok: true as const,
+            data: {
+              ...data,
+              usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, reasoningTokens: 0, ...data.usage, requests: providerRequests },
+            },
+          };
+        }
+        if (data.quota || response.status === 429 || response.status === 402) {
+          stopForQuota();
+          return { ok: false as const, data: { ...data, quota: true, requestCount: providerRequests } };
+        }
+        if (!data.retryable || attempt === 1 || quotaStopped()) {
+          return { ok: false as const, data: { ...data, requestCount: providerRequests } };
+        }
+      } catch {
+        if (attempt === 1 || quotaStopped()) {
+          return { ok: false as const, data: { error: "The website connection failed after one delayed retry. Resume from this chapter.", code: "temporary-network", retryable: true, requestCount: providerRequests } satisfies DraftApiResponse };
+        }
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, TEMPORARY_RETRY_DELAY_MS));
+      if (quotaStopped()) return { ok: false as const, data: { error: "Generation stopped because the quota was exhausted. Resume the book later.", code: "quota-stop", quota: true, requestCount: providerRequests } satisfies DraftApiResponse };
+    }
+    return { ok: false as const, data: { error: "Chapter drafting stopped safely.", requestCount: providerRequests } satisfies DraftApiResponse };
+  }
+
   async function prepareDraft(scope: "sample" | "all" | "active" | "thin") {
     const activeIndex = project.chapters.findIndex((chapter) => chapter.id === activeChapter);
     const selectedProfile = generationProfileKey(project.audience, project.language);
@@ -1537,110 +1606,120 @@ export default function Home() {
     setDraftBusy(true);
     let completed = 0;
     let workingProject = project;
-    let runningChapterId: number | null = null;
+    let quotaPause = false;
+    let failureReason = "";
+    let chapterOneStable = project.chapters.some((chapter) => chapter.id === 1 && chapterGenerationState(chapter) === "Completed" && chapter.generationProfile === selectedProfile);
     const totalUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0, reasoningTokens: 0, requests: 0 };
     try {
       if (!project.sourceObjectKey) {
         notify("Re-upload the original book to build a meaningfully taught chapter with the AI teaching engine.");
         return;
       }
-      for (const chapterId of chapterIds) {
-        const currentChapter = workingProject.chapters.find((chapter) => chapter.id === chapterId);
-        if (!currentChapter) continue;
-        await preserveGenerationVersion(workingProject, currentChapter);
-        workingProject = {
-          ...workingProject,
-          chapters: workingProject.chapters.map((chapter) => chapter.id === chapterId
-            ? { ...chapter, generationStatus: "Generating" as const, generationError: undefined }
-            : chapter),
-        };
-        setProject(workingProject);
-        await persistProject(workingProject);
-        runningChapterId = chapterId;
-        const response = await fetch("/api/draft", {
-          method: "POST",
-          headers: requestHeaders(),
-          body: JSON.stringify({
-            source: workingProject.source,
-            sourceObjectKey: workingProject.sourceObjectKey,
-            audience: workingProject.audience,
-            readingLevel: workingProject.readingLevel,
-            language: workingProject.language,
-            adaptation: workingProject.adaptation,
-            learningFeatures: workingProject.learningFeatures,
-            aesthetic: workingProject.aesthetic,
-            illustrationStyle: workingProject.illustrationStyle,
-            imageFrequency: workingProject.imageFrequency,
-            sourceTerms: workingProject.sourceTerms,
-            chapters: workingProject.chapters.map(({ id, title, pages, locked, body, sourceStartPage, sourceEndPage, sourcePageCount, sourceWordCount, complexityScore }) => ({ id, title, pages, locked, body, sourceStartPage, sourceEndPage, sourcePageCount, sourceWordCount, complexityScore })),
-            chapterIds: [chapterId],
-          }),
-        });
-        const data = await response.json() as { chapters?: Chapter[]; error?: string; usage?: GenerationUsage };
-        if (!response.ok || !data.chapters?.length) {
-          const generationStatus: ChapterGenerationStatus = response.status === 429 || response.status === 402 ? "Paused by quota" : "Needs review";
+      let cursor = 0;
+      while (cursor < chapterIds.length && !failureReason && !quotaPause) {
+        const canRunPair = scope !== "sample" && scope !== "active" && chapterOneStable;
+        const batch = chapterIds.slice(cursor, cursor + (canRunPair ? MAX_CONCURRENT_CHAPTERS : 1));
+
+        for (const chapterId of batch) {
+          const currentChapter = workingProject.chapters.find((chapter) => chapter.id === chapterId);
+          if (!currentChapter) continue;
+          await preserveGenerationVersion(workingProject, currentChapter);
           workingProject = {
             ...workingProject,
             chapters: workingProject.chapters.map((chapter) => chapter.id === chapterId
-              ? { ...chapter, generationStatus, generationError: data.error || "Chapter drafting failed" }
+              ? { ...chapter, generationStatus: "Generating" as const, generationError: undefined }
               : chapter),
           };
           setProject(workingProject);
           await persistProject(workingProject);
-          throw new Error(data.error || "Chapter drafting failed");
         }
-        const replacement = data.chapters[0];
-        const merged = workingProject.chapters.map((chapter) => chapter.id === replacement.id
-          ? {
-              ...chapter,
-              ...replacement,
-              body: authorialReaderHtml(replacement.body),
-              importedPages: undefined,
-              importValidated: false,
-              generationStatus: "Completed" as const,
-              generationError: undefined,
-              generationUsage: {
-                inputTokens: (chapter.generationUsage?.inputTokens || 0) + (data.usage?.inputTokens || 0),
-                outputTokens: (chapter.generationUsage?.outputTokens || 0) + (data.usage?.outputTokens || 0),
-                totalTokens: (chapter.generationUsage?.totalTokens || 0) + (data.usage?.totalTokens || 0),
-                reasoningTokens: (chapter.generationUsage?.reasoningTokens || 0) + (data.usage?.reasoningTokens || 0),
-                requests: (chapter.generationUsage?.requests || 0) + (data.usage?.requests || 0),
-                updatedAt: new Date().toISOString(),
-              },
+
+        const requestSnapshot = workingProject;
+        let saveQueue = Promise.resolve();
+        const outcomes = await Promise.all(batch.map(async (chapterId) => {
+          const result = await requestDraftChapter(requestSnapshot, chapterId, () => quotaPause, () => { quotaPause = true; });
+          saveQueue = saveQueue.then(async () => {
+            if (!result.ok || !result.data.chapters?.length) {
+              const requestCount = result.data.requestCount || 0;
+              const generationStatus: ChapterGenerationStatus = result.data.quota ? "Paused by quota" : "Needs review";
+              workingProject = {
+                ...workingProject,
+                chapters: workingProject.chapters.map((chapter) => chapter.id === chapterId
+                  ? {
+                      ...chapter,
+                      generationStatus,
+                      generationError: result.data.error || "Chapter drafting failed",
+                      generationUsage: requestCount ? {
+                        inputTokens: chapter.generationUsage?.inputTokens || 0,
+                        outputTokens: chapter.generationUsage?.outputTokens || 0,
+                        totalTokens: chapter.generationUsage?.totalTokens || 0,
+                        reasoningTokens: chapter.generationUsage?.reasoningTokens || 0,
+                        requests: (chapter.generationUsage?.requests || 0) + requestCount,
+                        updatedAt: new Date().toISOString(),
+                      } : chapter.generationUsage,
+                    }
+                  : chapter),
+              };
+              failureReason ||= result.data.error || "Chapter drafting failed";
+              setProject(workingProject);
+              await persistProject(workingProject);
+              return;
             }
-          : chapter);
-        workingProject = { ...workingProject, chapters: attachChapterVisuals(workingProject, merged) };
-        setProject(workingProject);
-        await persistProject(workingProject);
-        runningChapterId = null;
-        completed += 1;
-        if (data.usage) {
-          totalUsage.inputTokens += data.usage.inputTokens || 0;
-          totalUsage.outputTokens += data.usage.outputTokens || 0;
-          totalUsage.totalTokens += data.usage.totalTokens || 0;
-          totalUsage.reasoningTokens += data.usage.reasoningTokens || 0;
-          totalUsage.requests += data.usage.requests || 0;
-        }
-        if (chapterIds.length > 1) notify(`Chapter ${completed} of ${chapterIds.length} passed and was saved`);
+
+            const replacement = result.data.chapters[0];
+            const usage = result.data.usage;
+            const merged = workingProject.chapters.map((chapter) => chapter.id === replacement.id
+              ? {
+                  ...chapter,
+                  ...replacement,
+                  body: authorialReaderHtml(replacement.body),
+                  importedPages: undefined,
+                  importValidated: false,
+                  generationStatus: "Completed" as const,
+                  generationError: undefined,
+                  generationUsage: {
+                    inputTokens: (chapter.generationUsage?.inputTokens || 0) + (usage?.inputTokens || 0),
+                    outputTokens: (chapter.generationUsage?.outputTokens || 0) + (usage?.outputTokens || 0),
+                    totalTokens: (chapter.generationUsage?.totalTokens || 0) + (usage?.totalTokens || 0),
+                    reasoningTokens: (chapter.generationUsage?.reasoningTokens || 0) + (usage?.reasoningTokens || 0),
+                    requests: (chapter.generationUsage?.requests || 0) + (usage?.requests || 0),
+                    updatedAt: new Date().toISOString(),
+                  },
+                }
+              : chapter);
+            workingProject = { ...workingProject, chapters: attachChapterVisuals(workingProject, merged) };
+            setProject(workingProject);
+            await persistProject(workingProject);
+            completed += 1;
+            if (chapterId === 1) chapterOneStable = true;
+            if (usage) {
+              totalUsage.inputTokens += usage.inputTokens || 0;
+              totalUsage.outputTokens += usage.outputTokens || 0;
+              totalUsage.totalTokens += usage.totalTokens || 0;
+              totalUsage.reasoningTokens += usage.reasoningTokens || 0;
+              totalUsage.requests += usage.requests || 0;
+            }
+            if (chapterIds.length > 1) notify(`Chapter ${chapterId} passed and was saved`);
+          });
+          await saveQueue;
+          return result;
+        }));
+        await saveQueue;
+        if (outcomes.some((result) => !result.ok)) break;
+        cursor += batch.length;
       }
-      const usageNote = totalUsage.totalTokens ? ` · ${totalUsage.totalTokens.toLocaleString()} tokens in ${totalUsage.requests} request${totalUsage.requests === 1 ? "" : "s"}` : "";
-      notify(`${completed} chapter${completed === 1 ? "" : "s"} prepared and saved${usageNote}`);
+
+      if (quotaPause) {
+        notify(`${completed ? `${completed} chapter${completed === 1 ? "" : "s"} saved. ` : ""}Daily quota reached. Generation stopped—use Resume book after the quota resets.`);
+      } else if (failureReason) {
+        notify(completed ? `${completed} chapter${completed === 1 ? "" : "s"} saved. Resume starts from the first unfinished chapter: ${failureReason}` : failureReason);
+      } else {
+        const usageNote = totalUsage.requests ? ` · ${totalUsage.totalTokens.toLocaleString()} tokens in ${totalUsage.requests} request${totalUsage.requests === 1 ? "" : "s"}` : "";
+        notify(`${completed} chapter${completed === 1 ? "" : "s"} prepared and saved${usageNote}`);
+      }
     } catch (error) {
       const reason = error instanceof Error ? error.message : "Could not prepare the chapters";
-      if (runningChapterId !== null) {
-        const running = workingProject.chapters.find((chapter) => chapter.id === runningChapterId);
-        if (running?.generationStatus === "Generating") {
-          workingProject = {
-            ...workingProject,
-            chapters: workingProject.chapters.map((chapter) => chapter.id === runningChapterId
-              ? { ...chapter, generationStatus: "Needs review" as const, generationError: reason }
-              : chapter),
-          };
-          setProject(workingProject);
-          await persistProject(workingProject).catch(() => undefined);
-        }
-      }
-      notify(completed ? `${completed} chapter${completed === 1 ? "" : "s"} saved. Resume will continue from the first unfinished chapter: ${reason}` : reason);
+      notify(completed ? `${completed} chapter${completed === 1 ? "" : "s"} saved. Resume starts from the first unfinished chapter: ${reason}` : reason);
     } finally {
       setDraftBusy(false);
     }
@@ -1783,13 +1862,14 @@ function Analysis({ project, sourceBusy, onPatch, onBack, onContinue }: { projec
 
 function BookBrief({ project, allocated, draftBusy, onBack, onUpdateChapter, onPrepare, onContinue }: { project: Project; allocated: number; draftBusy: boolean; onBack: () => void; onUpdateChapter: (id: number, patch: Partial<Chapter>) => void; onPrepare: (scope: "sample" | "all" | "active") => void; onContinue: () => void }) {
   const drafted = project.chapters.filter((chapter) => chapterGenerationState(chapter) === "Completed").length;
+  const quotaPaused = project.chapters.some((chapter) => chapterGenerationState(chapter) === "Paused by quota");
   const usage = generationTotals(project.chapters);
   const first = project.chapters[0];
   return <main className="brief-page">
     <button className="text-button" onClick={onBack}>← Back to source analysis</button>
     <header className="brief-hero"><div><p className="eyebrow">CHILDREN’S BOOK BRIEF & PAGE PLAN</p><h1>{project.title}</h1><p className="lead">An illustrated adaptation for {project.audience.toLowerCase()}, written in clear natural language in the {project.aesthetic.toLowerCase()} book world.</p><div className="brief-chips"><span>{project.language}</span><span>{project.readingLevel}</span><span>{project.pageAesthetic} pages</span><span>{project.bookBorder} border</span><span>{project.imageFrequency}</span></div></div><aside><span>PROMISE TO THE CHILD READER</span><p>Keep the source truthful, make every new word understandable, and give each chapter a visual and something worth thinking about.</p></aside></header>
     <div className="brief-layout"><section className="plan-card"><header><div><p className="eyebrow">STRUCTURE</p><h2>Chapter adaptation-page plan</h2></div><div className="budget-pill">{allocated} pages planned</div></header><div className="plan-head"><span>CHAPTER</span><span>ORIGINAL TITLE</span><span>PAGES</span><span>STATE</span></div>{project.chapters.map((chapter, index) => { const state = chapterGenerationState(chapter); return <div className="plan-row" key={chapter.id}><span>{String(index + 1).padStart(2, "0")}</span><strong className="preserved-title">{chapter.title}</strong><input aria-label={`Adaptation pages for ${chapter.title}`} type="number" min="1" max={maximumChapterPages(project.chapters, index)} value={chapter.pages} onChange={(event) => onUpdateChapter(chapter.id, { pages: Number(event.target.value), pagePlanCustom: true })}/><b className={`draft-state generation-${normalizedTitle(state).replace(/[^a-z]+/g, "-")}`}>{state}</b></div>; })}<footer><span>Each recommendation is the shortest comfortable treatment for the selected age. Eight pages are included for front and back matter; 100 pages remains a ceiling only.</span></footer></section>
-      <aside className="generation-card"><p className="eyebrow">RESUMABLE BOOK WORKFLOW</p><h2>Build one protected lesson at a time</h2><p>Before each chapter starts, the website preserves the previous book version. Nemotron writes only the current unfinished chapter, which is saved immediately after it passes.</p><div className="quality-gates"><span>Waiting</span><span>Generating</span><span>Completed</span><span>Needs review</span><span>Quota pause</span></div><div className="draft-progress"><span><b>{drafted}</b> of {project.chapters.length} completed</span><i><b style={{ width: `${project.chapters.length ? drafted / project.chapters.length * 100 : 0}%` }}/></i></div><div className="generation-usage"><span><b>{usage.totalTokens.toLocaleString()}</b> tokens recorded</span><span><b>{usage.requests}</b> Nemotron request{usage.requests === 1 ? "" : "s"}</span></div><button className="secondary full" disabled={draftBusy} onClick={() => onPrepare("sample")}>{draftBusy ? "Teaching engine is reviewing…" : "Build and review sample lesson"}</button><button className="primary full" disabled={draftBusy} onClick={() => onPrepare("all")}>{draftBusy ? "Saving each chapter before continuing…" : drafted ? "Resume unfinished chapters" : "Build all reviewed lessons"}</button><small>If a chapter fails or quota pauses, earlier completed chapters remain saved. Resume starts from the first unfinished chapter without regenerating completed work.</small></aside></div>
+      <aside className="generation-card"><p className="eyebrow">CONTROLLED REQUEST WORKFLOW</p><h2>Six chapters normally use six requests</h2><p>Chapter 1 runs alone. After it passes, the studio may run two chapters at once—never more. Each successful chapter is saved immediately.</p><div className="request-budget"><span><b>1</b> tiny connection test</span><span><b>{project.chapters.length}</b> normal chapter requests</span><span><b>0</b> local validation requests</span><span><b>0</b> page and export requests</span></div><div className="quality-gates"><span>Waiting</span><span>Generating</span><span>Completed</span><span>Needs review</span><span>Quota pause</span></div><div className="draft-progress"><span><b>{drafted}</b> of {project.chapters.length} completed</span><i><b style={{ width: `${project.chapters.length ? drafted / project.chapters.length * 100 : 0}%` }}/></i></div><div className="generation-usage"><span><b>{usage.totalTokens.toLocaleString()}</b> tokens recorded</span><span><b>{usage.requests}</b> Nemotron request{usage.requests === 1 ? "" : "s"}</span></div><button className="secondary full" disabled={draftBusy} onClick={() => onPrepare("sample")}>{draftBusy ? "Teaching engine is reviewing…" : "Build and review sample lesson"}</button><button className="primary full" disabled={draftBusy} onClick={() => onPrepare("all")}>{draftBusy ? "Saving each chapter before continuing…" : quotaPaused ? "Resume book" : drafted ? "Resume unfinished chapters" : "Build all reviewed lessons"}</button><small>Temporary provider failures get one delayed retry. Quota errors never retry. Formatting is repaired locally; only a genuine quality failure may use one targeted repair request.</small></aside></div>
     {first && <section className="sample-spread"><div className="sample-copy"><p className="eyebrow">SAMPLE SPREAD</p><span>CHAPTER 01</span><h2>{first.title}</h2>{first.pedagogyQuality && <div className="sample-quality"><b>✓ Teaching quality passed · {pedagogyAverage(first.pedagogyQuality)}/100</b><span>{first.pedagogyQuality.summary}</span></div>}<p>{first.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 420)}</p><button className="text-button" onClick={() => onPrepare("sample")}>{first.status === "planned" ? "Create this sample" : "Refresh and review sample"} →</button></div>{first.imageUrl ? <figure className="sample-art sample-art-image"><img src={first.imageUrl} alt={first.imageAlt || first.imageCaption || first.title}/><figcaption>{first.imageCaption || first.title}</figcaption></figure> : <div className="sample-art"><span>ILLUSTRATION DIRECTION</span><strong>{project.aesthetic}</strong><p>{first.title} · {project.imageFrequency}</p><b>✦</b></div>}</section>}
     <footer className="brief-actions"><div><b>Ready for editorial review</b><span>{drafted ? `${drafted} chapter draft${drafted === 1 ? "" : "s"} prepared` : "Prepare at least one chapter now, or begin with a blank structure."}</span></div><button className="primary" onClick={onContinue}>Approve brief & open studio →</button></footer>
   </main>;
@@ -1810,7 +1890,7 @@ function Editor({ project, active, activeId, allocated, draftBusy, onSelect, edi
     <aside className="chapters"><header><p className="eyebrow">BOOK STRUCTURE</p><button onClick={onAddChapter} aria-label="Add chapter">＋</button></header><div className="front-matter"><span>FM</span><div><b>Front matter</b><small>Cover · Contents · Preface</small></div></div>{project.chapters.map((chapter) => { const state = chapterGenerationState(chapter); return <button className={chapter.id === activeId ? "chapter active" : "chapter"} onClick={() => onSelect(chapter.id)} key={chapter.id}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small className={`chapter-generation-state generation-${normalizedTitle(state).replace(/[^a-z]+/g, "-")}`}>{state}{chapter.generationUsage?.totalTokens ? ` · ${chapter.generationUsage.totalTokens.toLocaleString()} tokens` : ""}</small></div><i>{chapter.locked ? "◆" : ""}</i></button>; })}<div className="page-budget"><span><b>{allocated}</b> planned pages</span><small>Natural length · 100-page safety ceiling</small></div></aside>
     <section className="canvas"><nav className="editor-tools"><div><button onClick={() => document.execCommand("bold")}><b>B</b></button><button onClick={() => document.execCommand("italic")}><i>I</i></button><button onClick={() => document.execCommand("formatBlock", false, "h2")}>H2</button><button onClick={() => document.execCommand("insertUnorderedList")}>• List</button></div><div className="chapter-meter"><span>{active.pages} target pages</span><i><b style={{ width: active.status === "planned" ? "18%" : "67%" }}/></i><button onClick={onToggleLock}>{active.locked ? "◆ Locked" : "◇ Lock"}</button></div></nav><div className="page-stage"><article className={`paper font-${fontClass} world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")} page-aesthetic-${pageClass} book-border-${borderClass} age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}${active.imageUrl ? " has-chapter-image" : ""}`}><header><span>{project.title}</span><span>{project.audience}</span></header><div className="ornament">✦</div><div key={active.id} ref={editorRef} className="book-copy" contentEditable={!active.locked} suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: authorialReaderHtml(active.body) }}/>{active.imageUrl && <figure className="chapter-image"><img src={active.imageUrl} alt={active.imageAlt || active.imageCaption || active.title}/><figcaption>{active.imageCaption || active.title}</figcaption></figure>}<footer><span>{project.title}</span><span>{active.id}</span></footer></article></div><button className="save-float" onClick={onSaveBody}>✓ Save chapter</button></section>
     <aside className="assistant"><nav><button className={tab === "ai" ? "active" : ""} onClick={() => setTab("ai")}>✦<span>AI EDIT</span></button><button className={tab === "design" ? "active" : ""} onClick={() => setTab("design")}>◈<span>DESIGN</span></button><button className={tab === "sources" ? "active" : ""} onClick={() => setTab("sources")}>⌕<span>SOURCES</span></button></nav><div className="assistant-body">
-      {tab === "ai" && <><div className="assistant-title"><span>✦</span><div><b>Teaching-quality editor</b><small>The complete lesson must pass before publication.</small></div></div><div className={`generation-status-card generation-${normalizedTitle(chapterGenerationState(active)).replace(/[^a-z]+/g, "-")}`}><b>{chapterGenerationState(active)}</b><span>{active.generationUsage?.totalTokens ? `${active.generationUsage.totalTokens.toLocaleString()} tokens · ${active.generationUsage.requests} request${active.generationUsage.requests === 1 ? "" : "s"}` : "No Nemotron usage recorded yet"}</span>{active.generationError && <small>{active.generationError}</small>}</div>{!active.locked && <button className="draft-chapter-button" disabled={draftBusy} onClick={onDraft}>{draftBusy ? "Understanding and reviewing…" : chapterGenerationState(active) === "Completed" ? "↻ Rebuild and review lesson" : chapterGenerationState(active) === "Paused by quota" ? "▶ Resume this chapter" : "✦ Build and review this lesson"}</button>}{active.importValidated ? <div className="package-lock-report"><b>✓ STRUCTURED PACKAGE VERIFIED</b><p>{active.importedPages?.length || active.pages} page IDs are locked to Chapter {active.id}. Its text and images were imported without automatic redistribution.</p>{active.importedPages && <ol>{active.importedPages.map((page) => <li key={page.pageId}><span>{page.pageId}</span><b>{page.purpose}</b><i>{page.imageUrl ? "image linked" : "text"}</i></li>)}</ol>}</div> : active.pedagogyQuality ? <div className="pedagogy-report"><header><div><b>✓ READY FOR CHILDREN</b><span>{pedagogyAverage(active.pedagogyQuality)}/100</span></div><p>{active.pedagogyQuality.summary}</p></header><div className="score-grid">{Object.entries(active.pedagogyQuality.scores).map(([name, score]) => <span key={name}><b>{score}</b>{qualityScoreLabels[name] || name}</span>)}</div><div className="quality-checks">{active.pedagogyQuality.checks.map((check) => <p key={check}>✓ {check}</p>)}</div></div> : <div className="pedagogy-pending"><b>Quality review required</b><p>This older draft has not passed context, coherence, age-fit, teaching, and accuracy checks. Rebuild it before export.</p></div>}<p className="selection-tip">This chapter has <b>{chapterWordCount(active).toLocaleString()} words</b>. Every edit keeps the voice direct and authorial for the selected age.</p><div className="ai-list">{["Simplify language", "Shorten selection", "Expand with examples", "Make age-appropriate", "Improve storytelling", "Check factual accuracy", "Suggest an illustration"].map((action) => <button onClick={() => onAi(action)} key={action}><span>✦</span>{action}<i>→</i></button>)}</div><div className="memory-box"><p className="eyebrow">EDITORIAL MEMORY</p><p>{project.editorialPreferences.length ? project.editorialPreferences.join(" · ") : "No saved preferences yet"}</p><button onClick={() => onRemember("book")}>＋ Remember for this book</button><button onClick={() => onRemember("designer")}>＋ Remember for future books</button></div></>}
+      {tab === "ai" && <><div className="assistant-title"><span>✦</span><div><b>Teaching-quality editor</b><small>The complete lesson must pass before publication.</small></div></div><div className="request-control-card"><b>REQUEST CONTROL</b><span>1 request per chapter · maximum 2 at once after Chapter 1</span><small>One delayed retry only for temporary failures · no quota retry</small></div><div className={`generation-status-card generation-${normalizedTitle(chapterGenerationState(active)).replace(/[^a-z]+/g, "-")}`}><b>{chapterGenerationState(active)}</b><span>{active.generationUsage?.totalTokens ? `${active.generationUsage.totalTokens.toLocaleString()} tokens · ${active.generationUsage.requests} request${active.generationUsage.requests === 1 ? "" : "s"}` : "No Nemotron usage recorded yet"}</span>{active.generationError && <small>{active.generationError}</small>}</div>{!active.locked && <button className="draft-chapter-button" disabled={draftBusy} onClick={onDraft}>{draftBusy ? "Understanding and reviewing…" : chapterGenerationState(active) === "Completed" ? "↻ Rebuild and review lesson" : chapterGenerationState(active) === "Paused by quota" ? "▶ Resume this chapter" : "✦ Build and review this lesson"}</button>}{active.importValidated ? <div className="package-lock-report"><b>✓ STRUCTURED PACKAGE VERIFIED</b><p>{active.importedPages?.length || active.pages} page IDs are locked to Chapter {active.id}. Its text and images were imported without automatic redistribution.</p>{active.importedPages && <ol>{active.importedPages.map((page) => <li key={page.pageId}><span>{page.pageId}</span><b>{page.purpose}</b><i>{page.imageUrl ? "image linked" : "text"}</i></li>)}</ol>}</div> : active.pedagogyQuality ? <div className="pedagogy-report"><header><div><b>✓ READY FOR CHILDREN</b><span>{pedagogyAverage(active.pedagogyQuality)}/100</span></div><p>{active.pedagogyQuality.summary}</p></header><div className="score-grid">{Object.entries(active.pedagogyQuality.scores).map(([name, score]) => <span key={name}><b>{score}</b>{qualityScoreLabels[name] || name}</span>)}</div><div className="quality-checks">{active.pedagogyQuality.checks.map((check) => <p key={check}>✓ {check}</p>)}</div></div> : <div className="pedagogy-pending"><b>Quality review required</b><p>This older draft has not passed context, coherence, age-fit, teaching, and accuracy checks. Rebuild it before export.</p></div>}<p className="selection-tip">This chapter has <b>{chapterWordCount(active).toLocaleString()} words</b>. Every edit keeps the voice direct and authorial for the selected age.</p><div className="ai-list">{["Simplify language", "Shorten selection", "Expand with examples", "Make age-appropriate", "Improve storytelling", "Check factual accuracy", "Suggest an illustration"].map((action) => <button onClick={() => onAi(action)} key={action}><span>✦</span>{action}<i>→</i></button>)}</div><div className="memory-box"><p className="eyebrow">EDITORIAL MEMORY</p><p>{project.editorialPreferences.length ? project.editorialPreferences.join(" · ") : "No saved preferences yet"}</p><button onClick={() => onRemember("book")}>＋ Remember for this book</button><button onClick={() => onRemember("designer")}>＋ Remember for future books</button></div></>}
       {tab === "design" && <><div className="assistant-title"><span>◈</span><div><b>Book design</b><small>Illustration world, page aesthetic, border and watermark apply across the whole adaptation.</small></div></div><div className="design-controls"><div className="visual-status"><b>✓ Chapter visual ready</b><span>{active.visualType === "uploaded" ? "Your uploaded image" : `${active.visualType || "context"} visual generated from this chapter`}</span></div><label>Illustration world<select value={project.aesthetic} onChange={(e) => onPatchProject(designWorldPatch(e.target.value))}>{childDesignWorlds.map((world) => <option key={world.value}>{world.value}</option>)}</select></label><label>Page aesthetic<select value={project.pageAesthetic} onChange={(e) => onPatchProject(pageAestheticPatch(e.target.value))}>{pageAesthetics.map((aesthetic) => <option key={aesthetic.value}>{aesthetic.value}</option>)}</select></label><label>Book border<select value={project.bookBorder} onChange={(e) => onPatchProject(bookBorderPatch(e.target.value))}>{bookBorders.map((border) => <option key={border.value}>{border.value}</option>)}</select></label><label>Page watermark<select value={project.pageWatermark} onChange={(e) => onPatchProject(pageWatermarkPatch(e.target.value))}>{pageWatermarks.map((watermark) => <option key={watermark.value}>{watermark.value}</option>)}</select></label><div className="design-summary"><b>{project.pageAesthetic} · {project.bookBorder} · {project.pageWatermark}</b><span>{project.illustrationStyle} · {project.fontTheme} · {project.imageFrequency}</span></div><label className="image-upload">Replace chapter image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && onUploadImage(e.target.files[0])}/></label>{active.imageUrl && <label>Image caption<input value={active.imageCaption || ""} onChange={(e) => onUpdateChapter(active.id, { imageCaption: e.target.value })}/></label>}</div></>}
       {tab === "sources" && <><div className="assistant-title"><span>⌕</span><div><b>Private fact check</b><small>{active.sourceRefs.length} editor-only reference{active.sourceRefs.length === 1 ? "" : "s"} linked to this chapter · never printed.</small></div></div><div className="source-list">{active.sourceRefs.length ? active.sourceRefs.map((ref, index) => <article key={`${ref.title}-${index}`}><span>PRIVATE · PAGE {ref.page || "—"}</span><b>{ref.title}</b><p>{ref.excerpt}</p></article>) : <p className="empty">No private reference is linked yet. Prepare this chapter to attach the closest fact-checking passage.</p>}</div><div className="source-policy"><b>Editor-only provenance</b><p>Verify important names, dates and quotations before approval. These notes never appear in Preview, PDF or DOCX.</p></div></>}
     </div></aside>

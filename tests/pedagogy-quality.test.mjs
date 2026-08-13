@@ -16,10 +16,11 @@ test("chapter generation uses token-capped Nemotron requests, immediate progress
   assert.match(worker, /material\.length <= 24000/);
   assert.match(worker, /requested\.size > 1/);
   assert.match(worker, /response\.status === 429/);
-  assert.match(page, /for \(const chapterId of chapterIds\)/);
+  assert.match(page, /while \(cursor < chapterIds\.length/);
+  assert.match(page, /batch\.map\(async \(chapterId\)/);
   assert.match(page, /chapterIds: \[chapterId\]/);
   assert.match(page, /await persistProject\(workingProject\)/);
-  assert.match(worker, /Object\.values\(scores\).*score < 85/s);
+  assert.match(worker, /Object\.values\(scores\).*score < 80/s);
   assert.match(worker, /evaluateTeachingChapter\(draft, audience, sourceMaterial, chapter\.pages\)/);
   assert.match(worker, /previous chapter was kept unchanged/i);
   assert.doesNotMatch(worker, /GEMINI_API_KEY|generativelanguage\.googleapis\.com/);

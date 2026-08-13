@@ -347,7 +347,14 @@ function selectChapterPages(pageTexts: string[], chapter: DraftChapterInput, ind
 }
 
 class TeachingEngineError extends Error {
-  constructor(message: string, readonly status = 502) {
+  constructor(
+    message: string,
+    readonly status = 502,
+    readonly code = "chapter-failed",
+    readonly retryable = false,
+    readonly quota = false,
+    readonly requestCount = 0,
+  ) {
     super(message);
   }
 }
@@ -464,35 +471,41 @@ function parseJsonObject<T>(value: string): T {
 
 async function openRouterStructured<T>(env: Env, prompt: string, maxCompletionTokens: number) {
   const key = typeof env.OPENROUTER_API_KEY === "string" ? env.OPENROUTER_API_KEY.trim() : "";
-  if (!key) throw new TeachingEngineError("The OpenRouter teaching engine is not connected yet. Ask the site owner to finish AI setup.", 503);
+  if (!key) throw new TeachingEngineError("The OpenRouter teaching engine is not connected yet. Ask the site owner to finish AI setup.", 503, "missing-key");
   const model = env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL;
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${key}`,
-      "content-type": "application/json",
-      "http-referer": "https://iks-book-studio.gaurav-gupta-6041.chatgpt.site",
-      "x-openrouter-title": "IKS Book Studio",
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: "Return only valid JSON matching the requested schema. Do not include markdown or hidden reasoning." },
-        { role: "user", content: prompt },
-      ],
-      response_format: { type: "json_object" },
-      max_completion_tokens: maxCompletionTokens,
-      temperature: 0.2,
-      reasoning: { effort: "none", exclude: true },
-      stream: false,
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${key}`,
+        "content-type": "application/json",
+        "http-referer": "https://iks-book-studio.gaurav-gupta-6041.chatgpt.site",
+        "x-openrouter-title": "IKS Book Studio",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: "Return only valid JSON matching the requested schema. Do not include markdown or hidden reasoning." },
+          { role: "user", content: prompt },
+        ],
+        response_format: { type: "json_object" },
+        max_completion_tokens: maxCompletionTokens,
+        temperature: 0.2,
+        reasoning: { effort: "none", exclude: true },
+        stream: false,
+      }),
+    });
+  } catch {
+    throw new TeachingEngineError("The provider connection was interrupted. The website may retry this chapter once after a short delay.", 502, "temporary-network", true, false, 1);
+  }
   if (!response.ok) {
     const detail = (await response.text()).slice(0, 500).replace(/sk-or-[\w-]+/gi, "[redacted]");
-    if (response.status === 429) throw new TeachingEngineError("Nemotron reached the current free-model request limit or provider capacity. Every completed chapter is already saved; resume later from the next chapter.", 429);
-    if (response.status === 401 || response.status === 403) throw new TeachingEngineError("The OpenRouter key was rejected. Completed chapters remain saved.", 503);
-    if (response.status === 402) throw new TeachingEngineError("The OpenRouter account or key spending limit needs attention. Completed chapters remain saved.", 402);
-    throw new TeachingEngineError(`Nemotron could not prepare this chapter (${response.status}). ${detail}`, 502);
+    if (response.status === 429) throw new TeachingEngineError("Nemotron reached the current free-model request or daily quota limit. Generation stopped immediately; resume the book after the quota resets.", 429, "quota-exhausted", false, true, 1);
+    if (response.status === 402) throw new TeachingEngineError("The OpenRouter account or key spending limit needs attention. Generation stopped immediately; completed chapters remain saved.", 402, "quota-exhausted", false, true, 1);
+    if (response.status === 401 || response.status === 403) throw new TeachingEngineError("The OpenRouter key was rejected. Completed chapters remain saved.", 503, "authentication", false, false, 1);
+    if (response.status === 408 || response.status >= 500) throw new TeachingEngineError(`Nemotron is temporarily unavailable (${response.status}). The website may retry this chapter once after a short delay.`, 502, "provider-temporary", true, false, 1);
+    throw new TeachingEngineError(`Nemotron could not prepare this chapter (${response.status}). ${detail}`, 502, "provider-rejected", false, false, 1);
   }
   const result = await response.json() as {
     choices?: Array<{ message?: { content?: string } }>;
@@ -503,7 +516,7 @@ async function openRouterStructured<T>(env: Env, prompt: string, maxCompletionTo
   try {
     data = parseJsonObject<T>(content);
   } catch {
-    throw new TeachingEngineError("Nemotron returned an incomplete chapter. The previous chapter was kept unchanged; retry this chapter once.", 502);
+    throw new TeachingEngineError("Nemotron returned malformed chapter data. The previous chapter was kept unchanged; use targeted repair instead of regenerating automatically.", 422, "malformed-output", false, false, 1);
   }
   return {
     data,
@@ -549,18 +562,28 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
   let deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, chapter.pages);
   let revisionPasses = 0;
   let usage = initial.usage;
-  if (!deterministic.passed || Object.values(scores).some((score) => score < 85)) {
+  // Formatting cleanup happens locally in normalizeTeachingChapter. Spend one
+  // additional model request only when the meaningful quality gate truly fails.
+  if (!deterministic.passed || Object.values(scores).some((score) => score < 80)) {
     const blueprint: ChapterBlueprint = { centralQuestion: "Repair the complete chapter", readerHook: "Preserve the strongest child-friendly opening", essentialIdeas: [], conceptOrder: [], requiredVocabulary: [], historicalContext: "Use the supplied material", sensitiveContext: "Keep mature material age-appropriate", avoidRepeating: [] };
-    const repair = await openRouterStructured<{ chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] }>(env, reviewPrompt({
-      title: chapter.title,
-      audience,
-      language,
-      targetPages: chapter.pages,
-      sourceMaterial,
-      blueprint,
-      draft,
-      failures: [...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 85).map(([name, score]) => `${name} score ${score} is below 85`)],
-    }), 3600);
+    let repair;
+    try {
+      repair = await openRouterStructured<{ chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] }>(env, reviewPrompt({
+        title: chapter.title,
+        audience,
+        language,
+        targetPages: chapter.pages,
+        sourceMaterial,
+        blueprint,
+        draft,
+        failures: [...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 80).map(([name, score]) => `${name} score ${score} is below 80`)],
+      }), 3600);
+    } catch (error) {
+      if (error instanceof TeachingEngineError) {
+        throw new TeachingEngineError(error.message, error.status, error.code, error.retryable, error.quota, initial.usage.requests + error.requestCount);
+      }
+      throw error;
+    }
     review = repair.data;
     usage = addUsage(usage, repair.usage);
     draft = normalizeTeachingChapter(review.chapter, chapter.title);
@@ -569,7 +592,7 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
     revisionPasses = 1;
   }
   if (!deterministic.passed || Object.values(scores).some((score) => score < 80)) {
-    throw new TeachingEngineError(`This chapter did not pass the children’s textbook quality gate: ${[...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 80).map(([name]) => `${name} needs improvement`)].join("; ")}. The previous chapter was kept unchanged.`, 422);
+    throw new TeachingEngineError(`This chapter did not pass the children’s textbook quality gate: ${[...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 80).map(([name]) => `${name} needs improvement`)].join("; ")}. The previous chapter was kept unchanged.`, 422, "quality-review", false, false, usage.requests);
   }
   const pedagogyQuality: PedagogyQuality = {
     status: "passed",
@@ -921,7 +944,13 @@ async function draftApi(request: Request, env: Env) {
       usage = addUsage(usage, built.usage);
     }
   } catch (error) {
-    if (error instanceof TeachingEngineError) return json({ error: error.message }, error.status);
+    if (error instanceof TeachingEngineError) return json({
+      error: error.message,
+      code: error.code,
+      retryable: error.retryable,
+      quota: error.quota,
+      requestCount: error.requestCount,
+    }, error.status);
     throw error;
   }
   if (!chapters.length) return json({ error: "No unlocked chapters were selected" }, 400);

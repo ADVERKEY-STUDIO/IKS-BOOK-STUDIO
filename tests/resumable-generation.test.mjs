@@ -16,7 +16,7 @@ test("every chapter exposes the five durable generation states", () => {
 test("the previous project version is preserved before each chapter starts", () => {
   const preserve = page.indexOf("await preserveGenerationVersion(workingProject, currentChapter)");
   const generating = page.indexOf('generationStatus: "Generating" as const', preserve);
-  const draftRequest = page.indexOf('fetch("/api/draft"', generating);
+  const draftRequest = page.indexOf("requestDraftChapter(requestSnapshot, chapterId", generating);
   assert.ok(preserve >= 0);
   assert.ok(generating > preserve);
   assert.ok(draftRequest > generating);
@@ -28,12 +28,12 @@ test("completed chapters save usage immediately and resume skips them", () => {
   assert.match(page, /generationStatus: "Completed" as const/);
   assert.match(page, /generationUsage: \{/);
   assert.match(page, /await persistProject\(workingProject\)/);
-  assert.match(page, /Resume will continue from the first unfinished chapter/);
+  assert.match(page, /Resume starts from the first unfinished chapter/);
 });
 
 test("quota and quality failures keep earlier content and become resumable states", () => {
-  assert.match(page, /response\.status === 429 \|\| response\.status === 402 \? "Paused by quota" : "Needs review"/);
-  assert.match(page, /generationError: data\.error \|\| "Chapter drafting failed"/);
+  assert.match(page, /result\.data\.quota \? "Paused by quota" : "Needs review"/);
+  assert.match(page, /generationError: result\.data\.error \|\| "Chapter drafting failed"/);
   assert.match(css, /generation-paused-by-quota/);
   assert.match(css, /generation-needs-review/);
 });
