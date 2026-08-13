@@ -1473,40 +1473,58 @@ export default function Home() {
     }).map((chapter) => chapter.id);
     if (!chapterIds.length) { notify("All unlocked chapters already passed the teaching-quality review"); return; }
     setDraftBusy(true);
+    let completed = 0;
+    let workingProject = project;
+    const totalUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0, reasoningTokens: 0, requests: 0 };
     try {
       if (!project.sourceObjectKey) {
         notify("Re-upload the original book to build a meaningfully taught chapter with the AI teaching engine.");
         return;
       }
-      const response = await fetch("/api/draft", {
-        method: "POST",
-        headers: requestHeaders(),
-        body: JSON.stringify({
-          source: project.source,
-          sourceObjectKey: project.sourceObjectKey,
-          audience: project.audience,
-          readingLevel: project.readingLevel,
-          language: project.language,
-          adaptation: project.adaptation,
-          learningFeatures: project.learningFeatures,
-          aesthetic: project.aesthetic,
-          illustrationStyle: project.illustrationStyle,
-          imageFrequency: project.imageFrequency,
-          sourceTerms: project.sourceTerms,
-          chapters: project.chapters.map(({ id, title, pages, locked, body, sourceStartPage, sourceEndPage, sourcePageCount, sourceWordCount, complexityScore }) => ({ id, title, pages, locked, body, sourceStartPage, sourceEndPage, sourcePageCount, sourceWordCount, complexityScore })),
-          chapterIds,
-        }),
-      });
-      const data = await response.json() as { chapters?: Chapter[]; error?: string };
-      if (!response.ok || !data.chapters) throw new Error(data.error || "Chapter drafting failed");
-      const replacements = new Map(data.chapters.map((chapter) => [chapter.id, chapter]));
-      const merged = project.chapters.map((chapter) => replacements.has(chapter.id) ? { ...chapter, ...replacements.get(chapter.id)!, body: authorialReaderHtml(replacements.get(chapter.id)!.body), importedPages: undefined, importValidated: false } : chapter);
-      const next = { ...project, chapters: attachChapterVisuals(project, merged) };
-      setProject(next);
-      await persistProject(next);
-      notify(scope === "all" || scope === "thin" ? `${data.chapters.length} full chapters prepared and saved` : "Full chapter prepared and saved");
+      for (const chapterId of chapterIds) {
+        const response = await fetch("/api/draft", {
+          method: "POST",
+          headers: requestHeaders(),
+          body: JSON.stringify({
+            source: workingProject.source,
+            sourceObjectKey: workingProject.sourceObjectKey,
+            audience: workingProject.audience,
+            readingLevel: workingProject.readingLevel,
+            language: workingProject.language,
+            adaptation: workingProject.adaptation,
+            learningFeatures: workingProject.learningFeatures,
+            aesthetic: workingProject.aesthetic,
+            illustrationStyle: workingProject.illustrationStyle,
+            imageFrequency: workingProject.imageFrequency,
+            sourceTerms: workingProject.sourceTerms,
+            chapters: workingProject.chapters.map(({ id, title, pages, locked, body, sourceStartPage, sourceEndPage, sourcePageCount, sourceWordCount, complexityScore }) => ({ id, title, pages, locked, body, sourceStartPage, sourceEndPage, sourcePageCount, sourceWordCount, complexityScore })),
+            chapterIds: [chapterId],
+          }),
+        });
+        const data = await response.json() as { chapters?: Chapter[]; error?: string; usage?: typeof totalUsage };
+        if (!response.ok || !data.chapters?.length) throw new Error(data.error || "Chapter drafting failed");
+        const replacement = data.chapters[0];
+        const merged = workingProject.chapters.map((chapter) => chapter.id === replacement.id
+          ? { ...chapter, ...replacement, body: authorialReaderHtml(replacement.body), importedPages: undefined, importValidated: false }
+          : chapter);
+        workingProject = { ...workingProject, chapters: attachChapterVisuals(workingProject, merged) };
+        setProject(workingProject);
+        await persistProject(workingProject);
+        completed += 1;
+        if (data.usage) {
+          totalUsage.inputTokens += data.usage.inputTokens || 0;
+          totalUsage.outputTokens += data.usage.outputTokens || 0;
+          totalUsage.totalTokens += data.usage.totalTokens || 0;
+          totalUsage.reasoningTokens += data.usage.reasoningTokens || 0;
+          totalUsage.requests += data.usage.requests || 0;
+        }
+        if (chapterIds.length > 1) notify(`Chapter ${completed} of ${chapterIds.length} passed and was saved`);
+      }
+      const usageNote = totalUsage.totalTokens ? ` · ${totalUsage.totalTokens.toLocaleString()} tokens in ${totalUsage.requests} request${totalUsage.requests === 1 ? "" : "s"}` : "";
+      notify(`${completed} chapter${completed === 1 ? "" : "s"} prepared and saved${usageNote}`);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Could not prepare the chapters");
+      const reason = error instanceof Error ? error.message : "Could not prepare the chapters";
+      notify(completed ? `${completed} chapter${completed === 1 ? "" : "s"} saved. Paused before the next chapter: ${reason}` : reason);
     } finally {
       setDraftBusy(false);
     }
@@ -1654,7 +1672,7 @@ function BookBrief({ project, allocated, draftBusy, onBack, onUpdateChapter, onP
     <button className="text-button" onClick={onBack}>← Back to source analysis</button>
     <header className="brief-hero"><div><p className="eyebrow">CHILDREN’S BOOK BRIEF & PAGE PLAN</p><h1>{project.title}</h1><p className="lead">An illustrated adaptation for {project.audience.toLowerCase()}, written in clear natural language in the {project.aesthetic.toLowerCase()} book world.</p><div className="brief-chips"><span>{project.language}</span><span>{project.readingLevel}</span><span>{project.pageAesthetic} pages</span><span>{project.bookBorder} border</span><span>{project.imageFrequency}</span></div></div><aside><span>PROMISE TO THE CHILD READER</span><p>Keep the source truthful, make every new word understandable, and give each chapter a visual and something worth thinking about.</p></aside></header>
     <div className="brief-layout"><section className="plan-card"><header><div><p className="eyebrow">STRUCTURE</p><h2>Chapter adaptation-page plan</h2></div><div className="budget-pill">{allocated} pages planned</div></header><div className="plan-head"><span>CHAPTER</span><span>ORIGINAL TITLE</span><span>PAGES</span><span>STATE</span></div>{project.chapters.map((chapter, index) => <div className="plan-row" key={chapter.id}><span>{String(index + 1).padStart(2, "0")}</span><strong className="preserved-title">{chapter.title}</strong><input aria-label={`Adaptation pages for ${chapter.title}`} type="number" min="1" max={maximumChapterPages(project.chapters, index)} value={chapter.pages} onChange={(event) => onUpdateChapter(chapter.id, { pages: Number(event.target.value), pagePlanCustom: true })}/><b className={`draft-state ${chapter.status}`}>{chapter.status}</b></div>)}<footer><span>Each recommendation is the shortest comfortable treatment for the selected age. Eight pages are included for front and back matter; 100 pages remains a ceiling only.</span></footer></section>
-      <aside className="generation-card"><p className="eyebrow">AI TEACHING WORKFLOW</p><h2>Build a lesson, not a summary</h2><p>Gemini reads the full chapter range, removes front matter, sets learning goals, introduces the topic, teaches ideas in order, explains vocabulary, and adds examples, questions, an activity, and a recap. A second pass reviews and rewrites the lesson before it can enter the book.</p><div className="quality-gates"><span>Context</span><span>Coherence</span><span>Age fit</span><span>Teaching</span><span>Accuracy</span></div><div className="draft-progress"><span><b>{drafted}</b> of {project.chapters.length} drafted</span><i><b style={{ width: `${project.chapters.length ? drafted / project.chapters.length * 100 : 0}%` }}/></i></div><button className="secondary full" disabled={draftBusy} onClick={() => onPrepare("sample")}>{draftBusy ? "Teaching engine is reviewing…" : "Build and review sample lesson"}</button><button className="primary full" disabled={draftBusy} onClick={() => onPrepare("all")}>{draftBusy ? "Building and reviewing lessons…" : "Build all reviewed lessons"}</button><small>A failing chapter is rejected and the previous version stays unchanged. Private references remain available only to the editor.</small></aside></div>
+      <aside className="generation-card"><p className="eyebrow">TOKEN-SMART AI WORKFLOW</p><h2>Build one saved lesson at a time</h2><p>Nemotron reads only the most relevant pages for the current chapter, plans, writes and reviews the complete lesson in one compact request. A second request is used only when the local quality gate finds a real problem.</p><div className="quality-gates"><span>Context</span><span>Coherence</span><span>Age fit</span><span>Teaching</span><span>Accuracy</span></div><div className="draft-progress"><span><b>{drafted}</b> of {project.chapters.length} drafted</span><i><b style={{ width: `${project.chapters.length ? drafted / project.chapters.length * 100 : 0}%` }}/></i></div><button className="secondary full" disabled={draftBusy} onClick={() => onPrepare("sample")}>{draftBusy ? "Teaching engine is reviewing…" : "Build and review sample lesson"}</button><button className="primary full" disabled={draftBusy} onClick={() => onPrepare("all")}>{draftBusy ? "Building and saving chapter by chapter…" : "Build all reviewed lessons"}</button><small>Each passed chapter is saved immediately. If a free-model limit is reached, run this again later and it resumes from the first unfinished chapter.</small></aside></div>
     {first && <section className="sample-spread"><div className="sample-copy"><p className="eyebrow">SAMPLE SPREAD</p><span>CHAPTER 01</span><h2>{first.title}</h2>{first.pedagogyQuality && <div className="sample-quality"><b>✓ Teaching quality passed · {pedagogyAverage(first.pedagogyQuality)}/100</b><span>{first.pedagogyQuality.summary}</span></div>}<p>{first.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 420)}</p><button className="text-button" onClick={() => onPrepare("sample")}>{first.status === "planned" ? "Create this sample" : "Refresh and review sample"} →</button></div>{first.imageUrl ? <figure className="sample-art sample-art-image"><img src={first.imageUrl} alt={first.imageAlt || first.imageCaption || first.title}/><figcaption>{first.imageCaption || first.title}</figcaption></figure> : <div className="sample-art"><span>ILLUSTRATION DIRECTION</span><strong>{project.aesthetic}</strong><p>{first.title} · {project.imageFrequency}</p><b>✦</b></div>}</section>}
     <footer className="brief-actions"><div><b>Ready for editorial review</b><span>{drafted ? `${drafted} chapter draft${drafted === 1 ? "" : "s"} prepared` : "Prepare at least one chapter now, or begin with a blank structure."}</span></div><button className="primary" onClick={onContinue}>Approve brief & open studio →</button></footer>
   </main>;

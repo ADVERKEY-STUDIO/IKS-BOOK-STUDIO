@@ -39,7 +39,7 @@ test("illustrations are assigned after chapter hierarchy repair", () => {
 test("every newly uploaded adaptation receives one contextual visual per chapter", () => {
   assert.match(page, /const chapters = attachChapterVisuals\(\{ \.\.\.project, sourceTerms: source\.terms \}, applyAutomaticAdaptationPlan\(sourceChapters, project\.audience, true\)\)/);
   assert.match(page, /chapters: attachChapterVisuals\(\{ \.\.\.project, sourceTerms: source\.terms \}, reconcileOriginalChapters/);
-  assert.match(page, /const next = \{ \.\.\.project, chapters: attachChapterVisuals\(project, merged\) \}/);
+  assert.match(page, /workingProject = \{ \.\.\.workingProject, chapters: attachChapterVisuals\(workingProject, merged\) \}/);
   assert.match(page, /const usedImages = new Set<string>\(\)/);
   assert.match(page, /usedImages\.add\(visualIdentity\(undefined, visual\.url\)\)/);
 });

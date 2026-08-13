@@ -6,24 +6,39 @@ const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8")
 const worker = await readFile(new URL("../worker/index.ts", import.meta.url), "utf8");
 const pedagogy = await import(new URL("../lib/pedagogy.ts", import.meta.url));
 
-test("chapter generation uses a draft, independent review, and hard quality gate", () => {
-  assert.match(worker, /gemini-3\.5-flash/);
-  assert.match(worker, /blueprintPrompt/);
-  assert.match(worker, /chapterBlueprintSchema/);
-  assert.match(worker, /thinkingLevel: "high" \| "medium"/);
-  assert.match(worker, /attempt === 0 \? "high" : "medium"/);
-  assert.match(worker, /maxOutputTokens: 32768/);
-  assert.match(worker, /retryDelays = \[1000, 4000, 12000, 30000\]/);
+test("chapter generation uses token-capped Nemotron requests, immediate progress saving, and a hard quality gate", () => {
+  assert.match(worker, /nvidia\/nemotron-3-ultra-550b-a55b:free/);
+  assert.match(worker, /openrouter\.ai\/api\/v1\/chat\/completions/);
+  assert.match(worker, /efficientChapterPrompt/);
+  assert.match(worker, /response_format: \{ type: "json_object" \}/);
+  assert.match(worker, /max_completion_tokens: maxCompletionTokens/);
+  assert.match(worker, /reasoning: \{ effort: "none", exclude: true \}/);
+  assert.match(worker, /material\.length <= 24000/);
+  assert.match(worker, /requested\.size > 1/);
   assert.match(worker, /response\.status === 429/);
-  assert.match(worker, /geminiRetryDelay/);
-  assert.match(worker, /response\.status === 503/);
-  assert.match(worker, /temporarily busy after several automatic retries/i);
-  assert.match(worker, /teachingChapterSchema/);
-  assert.match(worker, /reviewedTeachingChapterSchema/);
+  assert.match(page, /for \(const chapterId of chapterIds\)/);
+  assert.match(page, /chapterIds: \[chapterId\]/);
+  assert.match(page, /await persistProject\(workingProject\)/);
   assert.match(worker, /Object\.values\(scores\).*score < 85/s);
   assert.match(worker, /evaluateTeachingChapter\(draft, audience, sourceMaterial, chapter\.pages\)/);
   assert.match(worker, /previous chapter was kept unchanged/i);
-  assert.doesNotMatch(worker, /buildSourceDraft/);
+  assert.doesNotMatch(worker, /GEMINI_API_KEY|generativelanguage\.googleapis\.com/);
+});
+
+test("the efficient prompt plans, writes, and reviews one complete lesson in one pass", () => {
+  const prompt = pedagogy.efficientChapterPrompt({
+    title: "The Council",
+    audience: "Ages 10–12",
+    language: "English",
+    targetPages: 5,
+    sourceMaterial: "The council considers duties, advice, shared responsibility, welfare, resources, and careful judgement.",
+  });
+  assert.match(prompt, /one pass/i);
+  assert.match(prompt, /4–6 essential ideas/);
+  assert.match(prompt, /verify every factual claim/i);
+  assert.match(prompt, /never exceed 945 words/i);
+  assert.match(prompt, /Return one JSON object/i);
+  assert.match(prompt, /Never mention a source/i);
 });
 
 test("the teaching prompt requires context, ordered concepts, examples, vocabulary, checks and recap", () => {

@@ -7,7 +7,7 @@ export function childAgeBand(audience = ""): ChildAgeBand {
 }
 
 export function generationProfileKey(audience = "", language = "English") {
-  return `child-adaptation-v7:gemini-pedagogy:authorial:${childAgeBand(audience)}:${language.toLowerCase()}`;
+  return `child-adaptation-v8:nemotron-efficient:authorial:${childAgeBand(audience)}:${language.toLowerCase()}`;
 }
 
 export const AUTHORIAL_READER_INSTRUCTION = "Write as the author of the children’s book. Present ideas directly and confidently. Never mention an uploaded book, source, original text, adaptation process, citation, reference, evidence page, or page number in reader-facing prose.";

@@ -6,14 +6,12 @@ import { extractText, getDocumentProxy } from "unpdf";
 import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, TextRun } from "docx";
 import { authorialReaderHtml, generationProfileKey } from "../lib/child-summary";
 import { allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET, recommendedAdaptationPages } from "../lib/adaptation-pages";
-import { blueprintPrompt, chapterBlueprintSchema, evaluateTeachingChapter, normalizeTeachingChapter, renderTeachingChapter, reviewedTeachingChapterSchema, reviewPrompt, teachingChapterSchema, teachingPrompt, type ChapterBlueprint, type PedagogyQuality, type PedagogyScores, type TeachingChapter } from "../lib/pedagogy";
+import { efficientChapterPrompt, evaluateTeachingChapter, normalizeTeachingChapter, renderTeachingChapter, reviewPrompt, type ChapterBlueprint, type PedagogyQuality, type PedagogyScores, type TeachingChapter } from "../lib/pedagogy";
 
 interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
   BUCKET: R2Bucket;
-  GEMINI_API_KEY?: string;
-  GEMINI_MODEL?: string;
   OPENROUTER_API_KEY?: string;
   OPENROUTER_MODEL?: string;
   IMAGES: {
@@ -431,101 +429,93 @@ async function openRouterStatusApi(request: Request, env: Env) {
   });
 }
 
-function chapterSourceMaterial(pageTexts: string[], chapter: DraftChapterInput) {
-  const start = chapter.sourceStartPage ? Math.max(0, chapter.sourceStartPage - 1) : 0;
-  const end = chapter.sourceEndPage ? Math.min(pageTexts.length - 1, chapter.sourceEndPage - 1) : pageTexts.length - 1;
-  const selected = pageTexts.slice(start, end + 1).map((page, offset) => {
-    const cleaned = cleanSourceText(page).slice(0, 5200);
-    return cleaned ? `[PRIVATE PAGE ${start + offset + 1}]\n${cleaned}` : "";
-  }).filter(Boolean);
-  const joined = selected.join("\n\n");
-  if (joined.length <= 145000) return joined;
-  const head = joined.slice(0, 72000);
-  const tail = joined.slice(-72000);
-  return `${head}\n\n[PRIVATE MATERIAL CONTINUES]\n\n${tail}`;
+type AiUsage = { inputTokens: number; outputTokens: number; totalTokens: number; reasoningTokens: number; requests: number };
+
+function addUsage(left: AiUsage, right: AiUsage): AiUsage {
+  return {
+    inputTokens: left.inputTokens + right.inputTokens,
+    outputTokens: left.outputTokens + right.outputTokens,
+    totalTokens: left.totalTokens + right.totalTokens,
+    reasoningTokens: left.reasoningTokens + right.reasoningTokens,
+    requests: left.requests + right.requests,
+  };
 }
 
-function geminiText(data: unknown) {
-  const response = data as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-  return response.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("").trim() ?? "";
+function chapterSourceMaterial(pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput) {
+  const { selected } = selectChapterPages(pageTexts, chapter, index, total, project.sourceTerms ?? []);
+  const material = selected.map((entry) => {
+    const cleaned = cleanSourceText(entry.page).slice(0, 3000);
+    return cleaned ? `[PRIVATE PAGE ${entry.pageIndex + 1}]\n${cleaned}` : "";
+  }).filter(Boolean).join("\n\n");
+  return material.length <= 24000 ? material : `${material.slice(0, 12000)}\n\n[PRIVATE MATERIAL CONTINUES]\n\n${material.slice(-11500)}`;
 }
 
-function geminiResponseIssue(data: unknown) {
-  const response = data as { candidates?: Array<{ finishReason?: string }>; promptFeedback?: { blockReason?: string } };
-  return response.promptFeedback?.blockReason || response.candidates?.[0]?.finishReason || "empty response";
+function parseJsonObject<T>(value: string): T {
+  const cleaned = value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch {
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1)) as T;
+    throw new Error("invalid JSON");
+  }
 }
 
-function geminiRetryDelay(response: Response, detail: string, fallbackMs: number) {
-  const headerSeconds = Number(response.headers.get("retry-after"));
-  const bodySeconds = Number(detail.match(/"retryDelay"\s*:\s*"([\d.]+)s"/i)?.[1]);
-  const suggestedMs = Number.isFinite(headerSeconds) && headerSeconds > 0
-    ? headerSeconds * 1000
-    : Number.isFinite(bodySeconds) && bodySeconds > 0
-      ? bodySeconds * 1000
-      : fallbackMs;
-  return Math.max(500, Math.min(30000, Math.round(suggestedMs)));
-}
-
-async function geminiStructured<T>(env: Env, prompt: string, responseSchema: object): Promise<T> {
-  if (!env.GEMINI_API_KEY) throw new TeachingEngineError("The Gemini teaching engine is not connected yet. Ask the site owner to finish AI setup.", 503);
-  const model = env.GEMINI_MODEL || "gemini-3.5-flash";
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-  const requestBody = (thinkingLevel: "high" | "medium") => JSON.stringify({
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema,
-      maxOutputTokens: 32768,
-      thinkingConfig: { thinkingLevel },
+async function openRouterStructured<T>(env: Env, prompt: string, maxCompletionTokens: number) {
+  const key = typeof env.OPENROUTER_API_KEY === "string" ? env.OPENROUTER_API_KEY.trim() : "";
+  if (!key) throw new TeachingEngineError("The OpenRouter teaching engine is not connected yet. Ask the site owner to finish AI setup.", 503);
+  const model = env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL;
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${key}`,
+      "content-type": "application/json",
+      "http-referer": "https://iks-book-studio.gaurav-gupta-6041.chatgpt.site",
+      "x-openrouter-title": "IKS Book Studio",
     },
-    safetySettings: [
-      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
-      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
-      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
-      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
-    ],
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: "Return only valid JSON matching the requested schema. Do not include markdown or hidden reasoning." },
+        { role: "user", content: prompt },
+      ],
+      response_format: { type: "json_object" },
+      max_completion_tokens: maxCompletionTokens,
+      temperature: 0.2,
+      reasoning: { effort: "none", exclude: true },
+      stream: false,
+    }),
   });
-  const retryDelays = [1000, 4000, 12000, 30000];
-  let response: Response | undefined;
-  let detail = "";
-
-  for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
-    response = await fetch(endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
-      body: requestBody(attempt === 0 ? "high" : "medium"),
-    });
-    if (response.ok) {
-      const data = await response.json();
-      const text = geminiText(data);
-      if (text) {
-        try {
-          return JSON.parse(text) as T;
-        } catch {
-          detail = "incomplete structured response";
-        }
-      } else {
-        detail = geminiResponseIssue(data);
-      }
-      if (attempt === retryDelays.length) break;
-      await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
-      continue;
-    }
-    detail = (await response.text()).slice(0, 600);
-    const temporaryFailure = response.status === 429 || response.status === 500 || response.status === 502 || response.status === 503 || response.status === 504;
-    if (!temporaryFailure || attempt === retryDelays.length) break;
-    await new Promise((resolve) => setTimeout(resolve, geminiRetryDelay(response, detail, retryDelays[attempt])));
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 500).replace(/sk-or-[\w-]+/gi, "[redacted]");
+    if (response.status === 429) throw new TeachingEngineError("Nemotron reached the current free-model request limit or provider capacity. Every completed chapter is already saved; resume later from the next chapter.", 429);
+    if (response.status === 401 || response.status === 403) throw new TeachingEngineError("The OpenRouter key was rejected. Completed chapters remain saved.", 503);
+    if (response.status === 402) throw new TeachingEngineError("The OpenRouter account or key spending limit needs attention. Completed chapters remain saved.", 402);
+    throw new TeachingEngineError(`Nemotron could not prepare this chapter (${response.status}). ${detail}`, 502);
   }
-
-  if (response?.ok) {
-    throw new TeachingEngineError(`Gemini could not complete the structured lesson after several automatic retries (${detail}). The existing chapter was kept unchanged.`, 502);
-  } else {
-    const status = response?.status ?? 502;
-    if (status === 429) throw new TeachingEngineError("Gemini is still rate-limited after several automatic retries. Your saved chapters are unchanged; try again after the Google quota resets.", 429);
-    if (status === 401 || status === 403) throw new TeachingEngineError("The Gemini teaching connection needs attention from the site owner.", 503);
-    if (status === 503) throw new TeachingEngineError("Gemini is temporarily busy after several automatic retries. Your saved chapters are unchanged; try again in a few minutes.", 503);
-    throw new TeachingEngineError(`Gemini could not prepare this lesson (${status}). ${detail}`, 502);
+  const result = await response.json() as {
+    choices?: Array<{ message?: { content?: string } }>;
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; reasoning_tokens?: number };
+  };
+  const content = result.choices?.[0]?.message?.content ?? "";
+  let data: T;
+  try {
+    data = parseJsonObject<T>(content);
+  } catch {
+    throw new TeachingEngineError("Nemotron returned an incomplete chapter. The previous chapter was kept unchanged; retry this chapter once.", 502);
   }
+  return {
+    data,
+    model,
+    usage: {
+      inputTokens: result.usage?.prompt_tokens ?? 0,
+      outputTokens: result.usage?.completion_tokens ?? 0,
+      totalTokens: result.usage?.total_tokens ?? 0,
+      reasoningTokens: result.usage?.reasoning_tokens ?? 0,
+      requests: 1,
+    } satisfies AiUsage,
+  };
 }
 
 function normalizedScores(value: unknown): PedagogyScores {
@@ -544,21 +534,24 @@ function privateChapterRefs(pageTexts: string[], chapter: DraftChapterInput, ind
 }
 
 async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput) {
-  const sourceMaterial = chapterSourceMaterial(pageTexts, chapter);
+  const sourceMaterial = chapterSourceMaterial(pageTexts, chapter, index, total, project);
   if (contentWords(sourceMaterial).length < 120) throw new TeachingEngineError("This chapter does not contain enough readable text. OCR or a clearer source file may be required.", 422);
   const audience = project.audience || "Ages 10–12";
   const language = project.language || "English";
-  const blueprint = await geminiStructured<ChapterBlueprint>(env, blueprintPrompt({ title: chapter.title, audience, language, targetPages: chapter.pages, sourceMaterial }), chapterBlueprintSchema);
-  const first = await geminiStructured<TeachingChapter>(env, teachingPrompt({ title: chapter.title, audience, language, targetPages: chapter.pages, sourceMaterial, blueprint }), teachingChapterSchema);
-  let draft = normalizeTeachingChapter(first, chapter.title);
-  let deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, chapter.pages);
-  let review = await geminiStructured<{ chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] }>(env, reviewPrompt({ title: chapter.title, audience, language, targetPages: chapter.pages, sourceMaterial, blueprint, draft, failures: deterministic.failures }), reviewedTeachingChapterSchema);
-  draft = normalizeTeachingChapter(review.chapter, chapter.title);
+  const initial = await openRouterStructured<{ chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] }>(
+    env,
+    efficientChapterPrompt({ title: chapter.title, audience, language, targetPages: chapter.pages, sourceMaterial }),
+    3600,
+  );
+  let review = initial.data;
+  let draft = normalizeTeachingChapter(review.chapter, chapter.title);
   let scores = normalizedScores(review.scores);
-  deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, chapter.pages);
-  let revisionPasses = 1;
+  let deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, chapter.pages);
+  let revisionPasses = 0;
+  let usage = initial.usage;
   if (!deterministic.passed || Object.values(scores).some((score) => score < 85)) {
-    review = await geminiStructured<{ chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] }>(env, reviewPrompt({
+    const blueprint: ChapterBlueprint = { centralQuestion: "Repair the complete chapter", readerHook: "Preserve the strongest child-friendly opening", essentialIdeas: [], conceptOrder: [], requiredVocabulary: [], historicalContext: "Use the supplied material", sensitiveContext: "Keep mature material age-appropriate", avoidRepeating: [] };
+    const repair = await openRouterStructured<{ chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] }>(env, reviewPrompt({
       title: chapter.title,
       audience,
       language,
@@ -567,19 +560,20 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
       blueprint,
       draft,
       failures: [...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 85).map(([name, score]) => `${name} score ${score} is below 85`)],
-    }), reviewedTeachingChapterSchema);
+    }), 3600);
+    review = repair.data;
+    usage = addUsage(usage, repair.usage);
     draft = normalizeTeachingChapter(review.chapter, chapter.title);
     scores = normalizedScores(review.scores);
     deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, chapter.pages);
-    revisionPasses = 2;
+    revisionPasses = 1;
   }
   if (!deterministic.passed || Object.values(scores).some((score) => score < 80)) {
     throw new TeachingEngineError(`This chapter did not pass the children’s textbook quality gate: ${[...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 80).map(([name]) => `${name} needs improvement`)].join("; ")}. The previous chapter was kept unchanged.`, 422);
   }
-  const model = env.GEMINI_MODEL || "gemini-3.5-flash";
   const pedagogyQuality: PedagogyQuality = {
     status: "passed",
-    engine: model,
+    engine: initial.model,
     scores,
     revisionPasses,
     summary: typeof review.summary === "string" ? review.summary : "This chapter passed the teaching-quality review.",
@@ -587,15 +581,15 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
     learningGoals: draft.learningGoals,
   };
   const body = authorialReaderHtml(renderTeachingChapter(draft, index + 1, escapeHtml));
-  return {
-    ...chapter,
-    status: "draft" as const,
-    body,
-    sourceRefs: privateChapterRefs(pageTexts, chapter, index, total, project),
-    wordCount: contentWords(body.replace(/<[^>]+>/g, " ")).length,
-    generationProfile: generationProfileKey(project.audience, project.language),
-    pedagogyQuality,
-  };
+  return { chapter: {
+      ...chapter,
+      status: "draft" as const,
+      body,
+      sourceRefs: privateChapterRefs(pageTexts, chapter, index, total, project),
+      wordCount: contentWords(body.replace(/<[^>]+>/g, " ")).length,
+      generationProfile: generationProfileKey(project.audience, project.language),
+      pedagogyQuality,
+    }, usage };
 }
 
 function analyseText(text: string) {
@@ -915,19 +909,23 @@ async function draftApi(request: Request, env: Env) {
   if (!allowedExtensions.has(extension)) return json({ error: "This source format cannot be drafted" }, 415);
   const extracted = await extractSourcePages(bytes, extension);
   const requested = new Set(project.chapterIds.map(Number));
+  if (requested.size > 1) return json({ error: "For safe progress saving, request exactly one chapter at a time." }, 400);
   const chapters = [];
+  let usage: AiUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0, reasoningTokens: 0, requests: 0 };
   try {
     for (let index = 0; index < project.chapters.length; index += 1) {
       const chapter = project.chapters[index];
       if (!requested.has(chapter.id) || chapter.locked) continue;
-      chapters.push(await buildPedagogicalDraft(env, extracted.pageTexts, chapter, index, project.chapters.length, project));
+      const built = await buildPedagogicalDraft(env, extracted.pageTexts, chapter, index, project.chapters.length, project);
+      chapters.push(built.chapter);
+      usage = addUsage(usage, built.usage);
     }
   } catch (error) {
     if (error instanceof TeachingEngineError) return json({ error: error.message }, error.status);
     throw error;
   }
   if (!chapters.length) return json({ error: "No unlocked chapters were selected" }, 400);
-  return json({ chapters, sourcePages: extracted.pages });
+  return json({ chapters, sourcePages: extracted.pages, usage });
 }
 
 // Image security config. SVG sources with .svg extension auto-skip the
