@@ -490,7 +490,7 @@ async function openRouterStructured<T>(env: Env, prompt: string, maxCompletionTo
       body: JSON.stringify({
         model,
         messages: [
-          { role: "system", content: "Return only valid JSON matching the requested schema. Do not include markdown or hidden reasoning." },
+          { role: "system", content: "Return one compact valid JSON object. Begin with {, end with }, and finish the JSON before the token limit. Do not include markdown, commentary, or hidden reasoning." },
           { role: "user", content: prompt },
         ],
         response_format: { type: "json_object" },
@@ -559,7 +559,7 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
   const initial = await openRouterStructured<{ chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] }>(
     env,
     efficientChapterPrompt({ title: chapter.title, audience, language, targetPages: chapter.pages, sourceMaterial, strictChapterOneTrial: !allowAutomaticRepair }),
-    allowAutomaticRepair ? 3600 : 3200,
+    allowAutomaticRepair ? 3600 : 2900,
   );
   let review = initial.data;
   let draft = normalizeTeachingChapter(review.chapter, chapter.title);
