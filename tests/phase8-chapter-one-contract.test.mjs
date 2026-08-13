@@ -4,7 +4,7 @@ import test from "node:test";
 
 const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 const worker = await readFile(new URL("../worker/index.ts", import.meta.url), "utf8");
-const { efficientChapterPrompt, evaluateChapterOneGate, localPedagogyScores } = await import(new URL("../lib/pedagogy.ts", import.meta.url));
+const { chapterWordBudget, efficientChapterPrompt, evaluateChapterOneGate, fitTeachingChapterLocally, localPedagogyScores } = await import(new URL("../lib/pedagogy.ts", import.meta.url));
 
 test("Phase 8 gives Nemotron a hard, complete one-pass Chapter 1 contract", () => {
   const prompt = efficientChapterPrompt({
@@ -15,8 +15,9 @@ test("Phase 8 gives Nemotron a hard, complete one-pass Chapter 1 contract", () =
     sourceMaterial: "Artha, śāstra, governance, responsibility, welfare, counsel, and learning.",
     strictChapterOneTrial: true,
   });
-  assert.match(prompt, /500–900 words/);
+  assert.match(prompt, /500–945 words/);
   assert.match(prompt, /below 500 words is incomplete/i);
+  assert.match(prompt, /Aim for 813–869 words/);
   assert.match(prompt, /exactly four logically ordered teaching sections/i);
   assert.match(prompt, /exactly three essential Sanskrit or specialist terms/i);
   assert.match(prompt, /exactly two concrete examples or analogies/i);
@@ -32,8 +33,40 @@ test("Phase 8 gives Nemotron a hard, complete one-pass Chapter 1 contract", () =
 test("Phase 8 Chapter 1 gate rejects both summaries and overlong drafts", () => {
   const quality = { status: "passed", scores: { context: 92, coherence: 92, ageFit: 92, pedagogy: 92, sourceFidelity: 92 } };
   assert.equal(evaluateChapterOneGate({ usage: { requests: 1, totalTokens: 5000 }, durationMs: 60000, wordCount: 499, quality }).checks.length, false);
-  assert.equal(evaluateChapterOneGate({ usage: { requests: 1, totalTokens: 5000 }, durationMs: 60000, wordCount: 901, quality }).checks.length, false);
+  assert.equal(evaluateChapterOneGate({ usage: { requests: 1, totalTokens: 5000 }, durationMs: 60000, wordCount: 946, quality }).checks.length, false);
   assert.equal(evaluateChapterOneGate({ usage: { requests: 1, totalTokens: 5000 }, durationMs: 60000, wordCount: 700, quality }).checks.length, true);
+});
+
+test("the prompt, validator, and Chapter 1 gate share one age-and-page budget", () => {
+  assert.deepEqual(chapterWordBudget("Ages 7–9", 4), { minimum: 500, comfortable: 450, aimMinimum: 559, aimMaximum: 598, maximum: 650 });
+  const prompt = efficientChapterPrompt({ title: "Rasa", audience: "Ages 7–9", language: "English", targetPages: 4, sourceMaterial: "rasa bhava theatre expression audience", strictChapterOneTrial: true });
+  assert.match(prompt, /500–650 words/);
+  assert.match(prompt, /Aim for 559–598 words/);
+  const quality = { status: "passed", scores: { context: 92, coherence: 94, ageFit: 93, pedagogy: 95, sourceFidelity: 96 } };
+  assert.equal(evaluateChapterOneGate({ usage: { requests: 1, totalTokens: 4735 }, durationMs: 103900, wordCount: 734, quality, audience: "Ages 7–9", targetPages: 4 }).checks.length, false);
+  assert.equal(evaluateChapterOneGate({ usage: { requests: 1, totalTokens: 4735 }, durationMs: 103900, wordCount: 600, quality, audience: "Ages 7–9", targetPages: 4 }).checks.length, true);
+});
+
+test("local fitting preserves overlong prose and adds layout space without an AI request", () => {
+  let serial = 0;
+  const sentence = () => `Rasa helps an attentive audience understand how expression, gesture, movement, music, and dramatic context work together in performance example ${++serial}.`;
+  const chapter = {
+    title: "The Basis of Rasa Theory in Drama",
+    chapterPromise: sentence(),
+    learningGoals: [sentence(), sentence(), sentence()],
+    introduction: `${sentence()} ${sentence()} ${sentence()}`,
+    sections: ["Expression", "Gesture", "Performance", "Audience"].map((heading) => ({ heading, paragraphs: [`${sentence()} ${sentence()} ${sentence()} ${sentence()}`], exampleTitle: "A clear example", example: sentence(), vocabulary: [] })),
+    quickCheck: [sentence(), sentence()],
+    activity: { title: "Notice expression", prompt: sentence(), steps: [sentence(), sentence()] },
+    recap: [sentence(), sentence(), sentence()],
+  };
+  const fitted = fitTeachingChapterLocally(chapter, "Ages 7–9", 4);
+  assert.ok(fitted.compactedWords > chapterWordBudget("Ages 7–9", 4).maximum);
+  assert.ok(fitted.fittedPages > fitted.requestedPages);
+  assert.ok(fitted.fittedPages <= fitted.requestedPages + 2);
+  assert.ok(fitted.compactedWords <= chapterWordBudget("Ages 7–9", fitted.fittedPages).maximum);
+  assert.equal(fitted.chapter.sections.length, chapter.sections.length);
+  assert.equal(fitted.chapter.learningGoals.length, chapter.learningGoals.length);
 });
 
 test("the gated Chapter 1 browser flow never performs a hidden retry", () => {

@@ -6,7 +6,7 @@ import { extractText, getDocumentProxy } from "unpdf";
 import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, TextRun } from "docx";
 import { authorialReaderHtml, generationProfileKey } from "../lib/child-summary";
 import { allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET, recommendedAdaptationPages } from "../lib/adaptation-pages";
-import { efficientChapterPrompt, evaluateChapterOneGate, evaluateTeachingChapter, localPedagogyScores, normalizeTeachingChapter, renderTeachingChapter, reviewPrompt, type ChapterBlueprint, type ChapterOneGate, type PedagogyQuality, type PedagogyScores, type TeachingChapter } from "../lib/pedagogy";
+import { efficientChapterPrompt, evaluateChapterOneGate, evaluateTeachingChapter, fitTeachingChapterLocally, localPedagogyScores, normalizeTeachingChapter, renderTeachingChapter, reviewPrompt, type ChapterBlueprint, type ChapterOneGate, type PedagogyQuality, type PedagogyScores, type TeachingChapter } from "../lib/pedagogy";
 
 interface Env {
   ASSETS: Fetcher;
@@ -357,7 +357,7 @@ class TeachingEngineError extends Error {
     readonly quota = false,
     readonly requestCount = 0,
     readonly usage?: AiUsage,
-    readonly diagnostic?: { wordCount: number; scores: PedagogyScores; summary: string },
+    readonly diagnostic?: { wordCount: number; scores: PedagogyScores; summary: string; targetPages?: number },
   ) {
     super(message);
   }
@@ -568,20 +568,23 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
     checks: [],
   };
   let draft = normalizeTeachingChapter(review.chapter, chapter.title);
-  let deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, chapter.pages);
+  let localFit = fitTeachingChapterLocally(draft, audience, chapter.pages);
+  draft = localFit.chapter;
+  let fittedPages = localFit.fittedPages;
+  let deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, fittedPages);
   let scores = localPedagogyScores(deterministic);
   let revisionPasses = 0;
   let usage = initial.usage;
   if (!allowAutomaticRepair && (!deterministic.passed || Object.values(scores).some((score) => score < 80))) {
     throw new TeachingEngineError(
-      `Chapter 1 stopped after its single Phase 8 request: ${[...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 80).map(([name]) => `${name} needs improvement`)].join("; ")}. Chapters 2–6 remain locked.`,
+      `Chapter 1 completed its single request, but needs review: ${[...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 80).map(([name]) => `${name} needs improvement`)].join("; ")}. Accuracy and teaching checks were preserved; no automatic AI retry was used.`,
       422,
       "quality-review",
       false,
       false,
       usage.requests,
       usage,
-      { wordCount: deterministic.totalWords, scores, summary: typeof review.summary === "string" ? review.summary : "The single response needs review." },
+      { wordCount: deterministic.totalWords, scores, summary: typeof review.summary === "string" ? review.summary : "The single response needs review.", targetPages: fittedPages },
     );
   }
   // Formatting cleanup happens locally in normalizeTeachingChapter. Spend one
@@ -594,7 +597,7 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
         title: chapter.title,
         audience,
         language,
-        targetPages: chapter.pages,
+        targetPages: fittedPages,
         sourceMaterial,
         blueprint,
         draft,
@@ -609,7 +612,10 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
     review = repair.data;
     usage = addUsage(usage, repair.usage);
     draft = normalizeTeachingChapter(review.chapter, chapter.title);
-    deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, chapter.pages);
+    localFit = fitTeachingChapterLocally(draft, audience, chapter.pages);
+    draft = localFit.chapter;
+    fittedPages = localFit.fittedPages;
+    deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, fittedPages);
     scores = localPedagogyScores(deterministic);
     revisionPasses = 1;
   }
@@ -622,12 +628,13 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
     scores,
     revisionPasses,
     summary: revisionPasses ? (typeof review.summary === "string" ? review.summary : "The targeted repair passed local teaching checks.") : "Local checks passed for structure, age fit, teaching completeness, length, and source grounding.",
-    checks: [...new Set([...(Array.isArray(review.checks) ? review.checks.filter((item): item is string => typeof item === "string") : []), `Readable lesson: ${deterministic.totalWords} words`, `Age-fit sentence average: ${deterministic.averageSentenceWords} words`, `Chapter concepts used: ${deterministic.sourceTermOverlap.slice(0, 6).join(", ")}`])].slice(0, 9),
+    checks: [...new Set([...(Array.isArray(review.checks) ? review.checks.filter((item): item is string => typeof item === "string") : []), localFit.originalWords > localFit.compactedWords ? `Local safe compaction removed ${localFit.originalWords - localFit.compactedWords} repeated or boilerplate words without an AI request` : "No local text trimming was needed", fittedPages > chapter.pages ? `Preserved the complete lesson by expanding the layout from ${chapter.pages} to ${fittedPages} pages` : `Fits the planned ${fittedPages} pages`, `Readable lesson: ${deterministic.totalWords} words`, `Age-fit sentence average: ${deterministic.averageSentenceWords} words`, `Chapter concepts used: ${deterministic.sourceTermOverlap.slice(0, 6).join(", ")}`])].slice(0, 9),
     learningGoals: draft.learningGoals,
   };
   const body = authorialReaderHtml(renderTeachingChapter(draft, index + 1, escapeHtml));
   return { chapter: {
       ...chapter,
+      pages: fittedPages,
       status: "draft" as const,
       body,
       sourceRefs: privateChapterRefs(pageTexts, chapter, index, total, project),
@@ -655,9 +662,11 @@ ${currentText}
 
 PRIVATE FACTUAL MATERIAL:
 ${sourceMaterial}`, 3600);
-  const draft = normalizeTeachingChapter(repair.data.chapter, chapter.title);
+  let draft = normalizeTeachingChapter(repair.data.chapter, chapter.title);
+  const localFit = fitTeachingChapterLocally(draft, audience, chapter.pages);
+  draft = localFit.chapter;
   const scores = normalizedScores(repair.data.scores);
-  const deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, chapter.pages);
+  const deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, localFit.fittedPages);
   if (!deterministic.passed || Object.values(scores).some((score) => score < 80)) {
     throw new TeachingEngineError(`The one targeted repair still needs review: ${[...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 80).map(([name]) => `${name} needs improvement`)].join("; ")}. The original remains available.`, 422, "repair-review", false, false, repair.usage.requests);
   }
@@ -673,6 +682,7 @@ ${sourceMaterial}`, 3600);
   const body = authorialReaderHtml(renderTeachingChapter(draft, index + 1, escapeHtml));
   return { chapter: {
     ...chapter,
+    pages: localFit.fittedPages,
     status: "draft" as const,
     body,
     sourceRefs: privateChapterRefs(pageTexts, chapter, index, total, project),
@@ -1031,7 +1041,8 @@ async function draftApi(request: Request, env: Env) {
         checks: ["Stopped after the single Phase 8 request"],
         learningGoals: [],
       } : undefined;
-      const phase7Evaluation = project.phase7ChapterOneOnly ? evaluateChapterOneGate({ usage: error.usage || { requests: error.requestCount, totalTokens: 0 }, durationMs, wordCount: error.diagnostic?.wordCount || 0, quality }) : undefined;
+      const failedChapter = project.chapters.find((chapter) => chapter.id === 1);
+      const phase7Evaluation = project.phase7ChapterOneOnly ? evaluateChapterOneGate({ usage: error.usage || { requests: error.requestCount, totalTokens: 0 }, durationMs, wordCount: error.diagnostic?.wordCount || 0, quality, audience: project.audience, targetPages: error.diagnostic?.targetPages || failedChapter?.pages || 5 }) : undefined;
       return json({
         error: error.message,
         code: error.code,
@@ -1055,6 +1066,8 @@ async function draftApi(request: Request, env: Env) {
       durationMs,
       wordCount: chapter.wordCount || contentWords(chapter.body?.replace(/<[^>]+>/g, " ") || "").length,
       quality: chapter.pedagogyQuality,
+      audience: project.audience,
+      targetPages: chapter.pages,
     });
   }
   return json({ chapters, sourcePages: extracted.pages, usage, durationMs, phase7Evaluation });

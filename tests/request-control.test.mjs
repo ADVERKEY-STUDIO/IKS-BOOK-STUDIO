@@ -10,7 +10,7 @@ test("the normal six-chapter path uses one tiny test and one request per chapter
   assert.match(worker, /max_tokens: 12/);
   assert.match(worker, /request exactly one chapter at a time/);
   assert.match(page, /chapterIds: \[chapterId\]/);
-  assert.match(page, /Six chapters normally use six requests/);
+  assert.match(page, /project\.chapters\.length} chapters normally use \{project\.chapters\.length} requests/);
   assert.match(page, /0<\/b> local validation requests/);
   assert.match(page, /0<\/b> page and export requests/);
 });

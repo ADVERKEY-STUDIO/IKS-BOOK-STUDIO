@@ -264,6 +264,53 @@ function comfortableWordTarget(audience: string, targetPages: number) {
   return Math.max(450, Math.min(1200, Math.round(Math.max(1, targetPages) * wordsPerPage)));
 }
 
+export function chapterWordBudget(audience: string, targetPages: number) {
+  const comfortable = comfortableWordTarget(audience, targetPages);
+  const maximum = comfortable + Math.max(200, Math.round(comfortable * .35));
+  const minimum = Math.max(380, Math.min(500, maximum - 60));
+  return {
+    minimum,
+    comfortable,
+    aimMinimum: Math.max(minimum, Math.round(maximum * .86)),
+    aimMaximum: Math.max(minimum, Math.round(maximum * .92)),
+    maximum,
+  };
+}
+
+function compactReaderSentence(value: string) {
+  const sentences = value.split(/(?<=[.!?])\s+/).map((sentence) => sentence.trim()).filter(Boolean);
+  const withoutConsecutiveDuplicates = sentences.filter((sentence, index) => index === 0 || sentence.toLocaleLowerCase() !== sentences[index - 1].toLocaleLowerCase());
+  return withoutConsecutiveDuplicates.join(" ")
+    .replace(/\bIn order to\b/gi, "To")
+    .replace(/\bAt this point in time\b/gi, "Now")
+    .replace(/\bIt is important to (?:understand|remember|note) that\s*/gi, "")
+    .replace(/\bIn other words,\s*/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function fitTeachingChapterLocally(chapter: TeachingChapter, audience: string, requestedPages: number) {
+  const compacted: TeachingChapter = {
+    ...chapter,
+    chapterPromise: compactReaderSentence(chapter.chapterPromise),
+    introduction: compactReaderSentence(chapter.introduction),
+    sections: chapter.sections.map((section) => ({
+      ...section,
+      paragraphs: section.paragraphs.map(compactReaderSentence),
+      example: compactReaderSentence(section.example),
+      vocabulary: section.vocabulary.map((item) => ({ ...item, meaning: compactReaderSentence(item.meaning) })),
+    })),
+    activity: { ...chapter.activity, prompt: compactReaderSentence(chapter.activity.prompt), steps: chapter.activity.steps.map(compactReaderSentence) },
+    recap: chapter.recap.map(compactReaderSentence),
+  };
+  const originalWords = words(plainChapterText(chapter)).length;
+  const compactedWords = words(plainChapterText(compacted)).length;
+  const firstPageCount = Math.max(1, requestedPages);
+  let fittedPages = firstPageCount;
+  while (compactedWords > chapterWordBudget(audience, fittedPages).maximum && fittedPages < Math.min(100, firstPageCount + 2)) fittedPages += 1;
+  return { chapter: compacted, requestedPages: firstPageCount, fittedPages, originalWords, compactedWords };
+}
+
 function significantSourceTerms(sourceText: string) {
   const ignored = new Set("about after again also among and are because been before being between book can chapter could did does each for from had has have into its may more most not other our out over page pages part should some such than that the their them then there these they this through under use used using very was were what when where which while who will with would your introduction conclusion source text".split(" "));
   const counts = new Map<string, number>();
@@ -284,8 +331,7 @@ export function evaluateTeachingChapter(chapter: TeachingChapter, audience: stri
   const exampleCount = chapter.sections.filter((section) => words(section.example).length >= 18).length;
   const vocabularyCount = chapter.sections.reduce((sum, section) => sum + section.vocabulary.length, 0);
   const maximumAverage = age === "7-9" ? 20 : age === "10-12" ? 29 : 38;
-  const comfortableWords = comfortableWordTarget(audience, targetPages);
-  const maximumWords = comfortableWords + Math.max(200, Math.round(comfortableWords * .35));
+  const maximumWords = chapterWordBudget(audience, targetPages).maximum;
 
   if (chapter.learningGoals.length < 3) failures.push("Fewer than three clear learning goals");
   if (introductionWords < (age === "7-9" ? 45 : age === "10-12" ? 65 : 80)) failures.push("Introduction does not give enough context");
@@ -323,20 +369,23 @@ export function localPedagogyScores(evaluation: ChapterEvaluation): PedagogyScor
   };
 }
 
-export function evaluateChapterOneGate({ usage, durationMs, wordCount, quality }: {
+export function evaluateChapterOneGate({ usage, durationMs, wordCount, quality, audience = "Ages 10–12", targetPages = 5 }: {
   usage: { requests?: number; totalTokens?: number };
   durationMs: number;
   wordCount: number;
   quality?: PedagogyQuality;
+  audience?: string;
+  targetPages?: number;
 }): ChapterOneGate {
   const limits = { maxRequests: 1, maxTokens: 7500, maxDurationMs: 180000 };
+  const wordBudget = chapterWordBudget(audience, targetPages);
   const scores = quality?.scores;
   const qualityAverage = scores ? Math.round(Object.values(scores).reduce((sum, score) => sum + score, 0) / 5) : 0;
   const checks = {
     requests: (usage.requests || 0) === 1,
     tokenBudget: (usage.totalTokens || 0) > 0 && (usage.totalTokens || 0) <= limits.maxTokens,
     speed: durationMs > 0 && durationMs <= limits.maxDurationMs,
-    length: wordCount >= 500 && wordCount <= 900,
+    length: wordCount >= wordBudget.minimum && wordCount <= wordBudget.maximum,
     accuracy: (scores?.sourceFidelity || 0) >= 85,
     ageSuitability: (scores?.ageFit || 0) >= 85,
     overallQuality: quality?.status === "passed" && qualityAverage >= 85,
@@ -418,13 +467,13 @@ ${sourceMaterial}`;
 }
 
 export function efficientChapterPrompt({ title, audience, language, targetPages = 5, sourceMaterial, strictChapterOneTrial = false }: { title: string; audience: string; language: string; targetPages?: number; sourceMaterial: string; strictChapterOneTrial?: boolean }) {
-  const targetWords = comfortableWordTarget(audience, targetPages);
-  const minimumWords = strictChapterOneTrial ? 500 : Math.max(380, Math.round(targetWords * .72));
-  const maximumWords = strictChapterOneTrial ? 900 : targetWords + Math.max(200, Math.round(targetWords * .35));
+  const budget = chapterWordBudget(audience, targetPages);
+  const minimumWords = budget.minimum;
+  const maximumWords = budget.maximum;
   return `You are both the senior author and final quality editor for one chapter of a children’s textbook for ${audience} in ${language}.
 
 CHAPTER: ${title}
-HARD LENGTH CONTRACT: The complete reader-facing chapter must contain ${minimumWords}–${maximumWords} words across ${targetPages} comfortable illustrated pages. Aim for about ${Math.min(targetWords, maximumWords)} words and never exceed ${maximumWords} words. A response below ${minimumWords} words is incomplete and will be rejected. Develop explanations instead of padding or repeating ideas.
+HARD LENGTH CONTRACT: The complete reader-facing chapter must contain ${minimumWords}–${maximumWords} words across ${targetPages} comfortable illustrated pages. Aim for ${budget.aimMinimum}–${budget.aimMaximum} words and never exceed ${maximumWords} words. A response below ${minimumWords} words is incomplete and will be rejected. Develop explanations instead of padding or repeating ideas.${strictChapterOneTrial ? " This is the measured single-request trial, so obey the length contract exactly." : ""}
 
 Work efficiently in one pass. Silently identify the central question, choose only 4–6 essential ideas, arrange them in prerequisite order, verify every factual claim against the private chapter material, write the complete lesson, and quality-review it before returning JSON. Do not output your hidden plan.
 

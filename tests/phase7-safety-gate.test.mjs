@@ -12,7 +12,7 @@ test("Phase 7 sends and accepts only Chapter 1 before the measured gate passes",
   assert.match(worker, /phase7ChapterOneOnly && \(requested\.size !== 1 \|\| !requested\.has\(1\)\)/);
   assert.match(worker, /code: "chapter-one-gate"/);
   assert.match(worker, /!project\.phase7ChapterOneOnly/);
-  assert.match(worker, /Chapter 1 stopped after its single Phase 8 request/);
+  assert.match(worker, /Chapter 1 completed its single request, but needs review/);
   assert.match(worker, /usage: error\.usage/);
 });
 
@@ -21,5 +21,5 @@ test("the live response measures speed, requests, tokens, length, accuracy and a
   assert.match(worker, /const durationMs = Date\.now\(\) - startedAt/);
   assert.match(worker, /evaluateChapterOneGate/);
   for (const metric of ["requests", "totalTokens", "durationMs", "words", "accuracyScore", "ageFitScore", "qualityAverage"]) assert.match(page, new RegExp(metric));
-  assert.match(page, /Chapters 2–6 remain locked/);
+  assert.match(page, /Chapters 2–\$\{project\.chapters\.length\} remain locked/);
 });

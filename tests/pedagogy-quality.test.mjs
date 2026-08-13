@@ -21,7 +21,8 @@ test("chapter generation uses token-capped Nemotron requests, immediate progress
   assert.match(page, /chapterIds: \[chapterId\]/);
   assert.match(page, /await persistProject\(workingProject\)/);
   assert.match(worker, /Object\.values\(scores\).*score < 80/s);
-  assert.match(worker, /evaluateTeachingChapter\(draft, audience, sourceMaterial, chapter\.pages\)/);
+  assert.match(worker, /fitTeachingChapterLocally\(draft, audience, chapter\.pages\)/);
+  assert.match(worker, /evaluateTeachingChapter\(draft, audience, sourceMaterial, fittedPages\)/);
   assert.match(worker, /previous chapter was kept unchanged/i);
   assert.doesNotMatch(worker, /GEMINI_API_KEY|generativelanguage\.googleapis\.com/);
 });
