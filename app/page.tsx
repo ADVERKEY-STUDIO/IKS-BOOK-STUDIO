@@ -1616,13 +1616,14 @@ export default function Home() {
     return { ok: false as const, data: { error: "Chapter drafting stopped safely.", requestCount: providerRequests } satisfies DraftApiResponse };
   }
 
-  async function prepareDraft(scope: "sample" | "all" | "active" | "thin", options: { repairOnly?: boolean } = {}) {
+  async function prepareDraft(scope: "sample" | "all" | "active" | "thin", options: { repairOnly?: boolean; chapterId?: number } = {}) {
     pauseAfterCurrentRef.current = false;
     setBookPaused(false);
     const activeIndex = project.chapters.findIndex((chapter) => chapter.id === activeChapter);
     const selectedProfile = generationProfileKey(project.audience, project.language);
     const requestedChapterIds = project.chapters.filter((chapter, index) => {
       if (chapter.locked) return false;
+      if (typeof options.chapterId === "number") return chapter.id === options.chapterId;
       if (scope === "all") return chapter.generationStatus !== "Completed" || chapter.generationProfile !== selectedProfile;
       if (scope === "sample") return index === 0;
       if (scope === "active") return index === activeIndex;
@@ -1862,10 +1863,7 @@ export default function Home() {
         <div className="current-project"><i /> <span><strong>{project.title}</strong><small>{project.source}</small></span></div>
         <div className="top-actions">
           {view === "editor" && <button onClick={() => setView("brief")}>☷ <span>Book plan</span></button>}
-          {(view === "editor" || view === "brief") && <details className="advanced-tools"><summary>Advanced tools</summary><div><button className="package-import-button" onClick={() => setShowPackageImport(true)}>ChatGPT ZIP workflow</button><small>Manual request and completed-book import</small></div></details>}
-          {(view === "editor" || view === "brief") && <label className="top-upload">{sourceBusy ? "Reading…" : "↥ Source"}<input type="file" accept=".pdf,.docx,.txt,.md" disabled={sourceBusy || draftBusy} onChange={(event) => event.target.files?.[0] && refreshSource(event.target.files[0])}/></label>}
-          <button onClick={openVersions}>↺ <span>Versions</span></button>
-          <button onClick={saveProject}>✓ <span>Save</span></button>
+          {(view === "editor" || view === "brief") && <details className="advanced-tools"><summary>Advanced tools</summary><div><label className="advanced-upload">{sourceBusy ? "Reading source…" : "Replace source book"}<input type="file" accept=".pdf,.docx,.txt,.md" disabled={sourceBusy || draftBusy} onChange={(event) => event.target.files?.[0] && refreshSource(event.target.files[0])}/></label><button onClick={openVersions}>Version history</button><button onClick={saveProject}>Save project now</button><button className="package-import-button" onClick={() => setShowPackageImport(true)}>ChatGPT ZIP workflow</button><small>Source, versions, manual save, and ZIP import</small></div></details>}
           <button onClick={() => setShowPreview(true)}>Preview</button>
           <button className="export-button" onClick={exportDoc} disabled={exportBusy}>{exportBusy ? "Preparing…" : "↓ DOCX"}</button>
         </div>
@@ -1879,8 +1877,8 @@ export default function Home() {
         connection={connection}
         hasComparison={Boolean(comparison)}
         onTest={() => void testNemotronConnection()}
-        onImprove={() => void improveActiveChapter()}
-        onBuild={() => void prepareDraft("all")}
+        onSelectChapter={setActiveChapter}
+        onGenerateChapter={(chapterId) => { setActiveChapter(chapterId); void prepareDraft("active", { chapterId }); }}
         onPause={pauseAfterCurrentChapter}
         onResume={() => void prepareDraft("all")}
         onCompare={() => comparison ? setShowComparison(true) : notify("Improve a chapter first to compare both versions")}
@@ -1905,7 +1903,7 @@ export default function Home() {
   );
 }
 
-function SimpleWorkflowBar({ project, active, busy, paused, connection, hasComparison, onTest, onImprove, onBuild, onPause, onResume, onCompare, onAccept, onKeep, onRepair, onRestore }: {
+function SimpleWorkflowBar({ project, active, busy, paused, connection, hasComparison, onTest, onSelectChapter, onGenerateChapter, onPause, onResume, onCompare, onAccept, onKeep, onRepair, onRestore }: {
   project: Project;
   active: Chapter;
   busy: boolean;
@@ -1913,8 +1911,8 @@ function SimpleWorkflowBar({ project, active, busy, paused, connection, hasCompa
   connection: NemotronConnection;
   hasComparison: boolean;
   onTest: () => void;
-  onImprove: () => void;
-  onBuild: () => void;
+  onSelectChapter: (chapterId: number) => void;
+  onGenerateChapter: (chapterId: number) => void;
   onPause: () => void;
   onResume: () => void;
   onCompare: () => void;
@@ -1926,23 +1924,22 @@ function SimpleWorkflowBar({ project, active, busy, paused, connection, hasCompa
   const quotaPaused = project.chapters.some((chapter) => chapter.generationStatus === "Paused by quota");
   const unfinished = project.chapters.some((chapter) => chapter.generationStatus !== "Completed" && !chapter.locked);
   const chapterOneGate = project.chapters.find((chapter) => chapter.id === 1)?.phase7Evaluation;
+  const chapterOnePassed = Boolean(chapterOneGate?.passed);
   return <section className="simple-workflow-bar" aria-label="Book improvement controls">
-    <div className={`connection-pill ${connection.state}`}><span /> <b>Nemotron</b><small>{connection.message}</small></div>
-    <div className="workflow-actions primary-actions">
-      <button onClick={onTest} disabled={busy || connection.state === "testing"}>{connection.state === "testing" ? "Testing…" : "Test Nemotron connection"}</button>
-      <button className="main-action" onClick={onImprove} disabled={busy || active.locked}>Improve this chapter</button>
-      <button className="main-action" onClick={onBuild} disabled={busy || (Boolean(chapterOneGate?.passed) && !unfinished)}>{chapterOneGate?.passed ? "Build remaining chapters" : "Generate Chapter 1 test"}</button>
-      <button onClick={onPause} disabled={!busy || paused}>Pause after current chapter</button>
-      <button onClick={onResume} disabled={busy || (!paused && !quotaPaused && !unfinished)}>Resume book</button>
+    <div className="workflow-heading"><div><b>Generate chapter by chapter</b><span>Choose one chapter. It saves before you continue.</span></div><div className={`connection-pill ${connection.state}`}><span /><b>Nemotron</b><small>{connection.message}</small><button onClick={onTest} disabled={busy || connection.state === "testing"}>{connection.state === "testing" ? "Testing…" : "Test"}</button></div></div>
+    <div className="chapter-generation-grid">
+      {project.chapters.map((chapter) => {
+        const status = chapterGenerationState(chapter);
+        const gateLocked = chapter.id > 1 && !chapterOnePassed;
+        const disabled = busy || chapter.locked || gateLocked;
+        const action = status === "Completed" ? "View" : status === "Needs review" ? "Try again" : status === "Paused by quota" ? "Resume" : status === "Generating" ? "Generating…" : "Generate";
+        return <article className={`chapter-generation-card ${active.id === chapter.id ? "active" : ""} ${normalizedTitle(status).replace(/[^a-z]+/g, "-")} ${gateLocked ? "gate-locked" : ""}`} key={chapter.id}><button className="chapter-card-select" onClick={() => onSelectChapter(chapter.id)}><span>CH {String(chapter.id).padStart(2, "0")}</span><b>{chapter.title}</b></button><button className="chapter-card-action" disabled={disabled} onClick={() => status === "Completed" ? onSelectChapter(chapter.id) : onGenerateChapter(chapter.id)}>{gateLocked ? "Locked" : action}</button></article>;
+      })}
     </div>
-    <div className="workflow-actions review-actions">
-      <button onClick={onCompare} disabled={!hasComparison}>Compare original and improved</button>
-      <button onClick={onAccept} disabled={!hasComparison}>Accept improvement</button>
-      <button onClick={onKeep} disabled={!hasComparison}>Keep original</button>
-      <button onClick={onRepair} disabled={busy || active.locked || (active.repairAttempts || 0) >= 1}>Repair once</button>
-      <button onClick={onRestore} disabled={busy}>Restore previous version</button>
+    <div className="workflow-lower-row">
+      <Phase7Report evaluation={chapterOneGate}/>
+      <div className="workflow-context-actions">{busy && <button onClick={onPause} disabled={paused}>Pause after this chapter</button>}{(paused || quotaPaused) && <button onClick={onResume} disabled={busy || !unfinished}>Resume book</button>}<details><summary>More actions</summary><div><button onClick={onCompare} disabled={!hasComparison}>Compare versions</button><button onClick={onAccept} disabled={!hasComparison}>Accept improvement</button><button onClick={onKeep} disabled={!hasComparison}>Keep original</button><button onClick={onRepair} disabled={busy || active.locked || (active.repairAttempts || 0) >= 1}>Repair once</button><button onClick={onRestore} disabled={busy}>Restore previous version</button></div></details></div>
     </div>
-    <Phase7Report evaluation={chapterOneGate}/>
   </section>;
 }
 

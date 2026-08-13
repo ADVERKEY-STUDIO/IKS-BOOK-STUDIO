@@ -5,19 +5,19 @@ import { readFile } from "node:fs/promises";
 const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 const worker = await readFile(new URL("../worker/index.ts", import.meta.url), "utf8");
 
-test("the editor exposes the complete simplified Phase 6 workflow", () => {
+test("the editor keeps the complete Phase 6 actions without crowding the main workflow", () => {
   for (const label of [
-    "Test Nemotron connection",
-    "Improve this chapter",
-    "Build remaining chapters",
-    "Pause after current chapter",
+    "Generate chapter by chapter",
+    "Testing…",
+    "Pause after this chapter",
     "Resume book",
-    "Compare original and improved",
+    "Compare versions",
     "Accept improvement",
     "Keep original",
     "Repair once",
     "Restore previous version",
   ]) assert.match(page, new RegExp(label));
+  assert.match(page, /<summary>More actions<\/summary>/);
 });
 
 test("the ChatGPT ZIP workflow is tucked under Advanced tools", () => {
@@ -39,4 +39,14 @@ test("Nemotron connection testing only runs on an explicit button action", () =>
   assert.match(page, /async function testNemotronConnection\(\)/);
   assert.match(page, /fetch\("\/api\/ai\/status"/);
   assert.match(page, /onTest=\{\(\) => void testNemotronConnection\(\)\}/);
+});
+
+test("the main workflow is chapter-wise instead of a wall of global buttons", () => {
+  assert.match(page, /Generate chapter by chapter/);
+  assert.match(page, /project\.chapters\.map\(\(chapter\) =>/);
+  assert.match(page, /onGenerateChapter\(chapter\.id\)/);
+  assert.match(page, /chapter\.id > 1 && !chapterOnePassed/);
+  assert.match(page, /status === "Completed" \? "View"/);
+  assert.match(page, /<summary>More actions<\/summary>/);
+  assert.match(page, /prepareDraft\("active", \{ chapterId \}\)/);
 });
