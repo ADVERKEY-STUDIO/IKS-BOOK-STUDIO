@@ -65,6 +65,7 @@ type DraftProjectInput = {
   sourceTerms?: string[];
   chapters: DraftChapterInput[];
   chapterIds: number[];
+  repairOnly?: boolean;
 };
 
 interface ExecutionContext {
@@ -612,7 +613,52 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
       wordCount: contentWords(body.replace(/<[^>]+>/g, " ")).length,
       generationProfile: generationProfileKey(project.audience, project.language),
       pedagogyQuality,
-    }, usage };
+  }, usage };
+}
+
+async function buildTargetedRepair(env: Env, pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput) {
+  const sourceMaterial = chapterSourceMaterial(pageTexts, chapter, index, total, project);
+  const currentText = authorialReaderHtml(chapter.body || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 22000);
+  if (contentWords(currentText).length < 80) throw new TeachingEngineError("There is not enough chapter text to repair. Improve the chapter first.", 422, "repair-unavailable");
+  const audience = project.audience || "Ages 10–12";
+  const language = project.language || "English";
+  const repair = await openRouterStructured<{ chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] }>(env, `You are making one targeted repair to an existing children’s textbook chapter for ${audience} in ${language}.
+
+CHAPTER: ${chapter.title}
+TARGET PAGES: ${chapter.pages}
+
+Repair only genuine teaching, coherence, age-fit, or factual weaknesses. Preserve sound wording and the chapter’s meaning. Fix formatting locally in the returned structure; do not invent facts, add padding, mention AI, or discuss this instruction. This is the single permitted repair request, so return the complete corrected lesson as valid JSON with exactly: chapter, scores, summary, checks. The chapter object must contain title, chapterPromise, learningGoals, introduction, sections, quickCheck, activity, and recap.
+
+CURRENT CHAPTER:
+${currentText}
+
+PRIVATE FACTUAL MATERIAL:
+${sourceMaterial}`, 3600);
+  const draft = normalizeTeachingChapter(repair.data.chapter, chapter.title);
+  const scores = normalizedScores(repair.data.scores);
+  const deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, chapter.pages);
+  if (!deterministic.passed || Object.values(scores).some((score) => score < 80)) {
+    throw new TeachingEngineError(`The one targeted repair still needs review: ${[...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 80).map(([name]) => `${name} needs improvement`)].join("; ")}. The original remains available.`, 422, "repair-review", false, false, repair.usage.requests);
+  }
+  const pedagogyQuality: PedagogyQuality = {
+    status: "passed",
+    engine: repair.model,
+    scores,
+    revisionPasses: 1,
+    summary: typeof repair.data.summary === "string" ? repair.data.summary : "The targeted repair passed the teaching-quality review.",
+    checks: [...new Set([...(Array.isArray(repair.data.checks) ? repair.data.checks.filter((item): item is string => typeof item === "string") : []), `Readable lesson: ${deterministic.totalWords} words`, `Age-fit sentence average: ${deterministic.averageSentenceWords} words`])].slice(0, 9),
+    learningGoals: draft.learningGoals,
+  };
+  const body = authorialReaderHtml(renderTeachingChapter(draft, index + 1, escapeHtml));
+  return { chapter: {
+    ...chapter,
+    status: "draft" as const,
+    body,
+    sourceRefs: privateChapterRefs(pageTexts, chapter, index, total, project),
+    wordCount: contentWords(body.replace(/<[^>]+>/g, " ")).length,
+    generationProfile: generationProfileKey(project.audience, project.language),
+    pedagogyQuality,
+  }, usage: repair.usage };
 }
 
 function analyseText(text: string) {
@@ -939,7 +985,9 @@ async function draftApi(request: Request, env: Env) {
     for (let index = 0; index < project.chapters.length; index += 1) {
       const chapter = project.chapters[index];
       if (!requested.has(chapter.id) || chapter.locked) continue;
-      const built = await buildPedagogicalDraft(env, extracted.pageTexts, chapter, index, project.chapters.length, project);
+      const built = project.repairOnly
+        ? await buildTargetedRepair(env, extracted.pageTexts, chapter, index, project.chapters.length, project)
+        : await buildPedagogicalDraft(env, extracted.pageTexts, chapter, index, project.chapters.length, project);
       chapters.push(built.chapter);
       usage = addUsage(usage, built.usage);
     }

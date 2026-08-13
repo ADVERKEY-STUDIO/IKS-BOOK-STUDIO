@@ -78,7 +78,16 @@ type Chapter = {
   generationStatus?: ChapterGenerationStatus;
   generationUsage?: GenerationUsage;
   generationError?: string;
+  repairAttempts?: number;
 };
+
+type NemotronConnection = {
+  state: "idle" | "testing" | "connected" | "error";
+  message: string;
+  usage?: GenerationUsage;
+};
+
+type ChapterComparison = { chapterId: number; original: Chapter };
 
 type ChapterContextPlan = Required<Pick<Chapter, "sourceStartPage" | "sourceEndPage" | "sourcePageCount" | "sourceWordCount" | "complexityScore" | "complexity" | "keyTerms" | "context" | "recommendedPages" | "pageReason">> & { title: string };
 
@@ -1052,6 +1061,7 @@ export default function Home() {
   const [showPreview, setShowPreview] = useState(false);
   const [showVersions, setShowVersions] = useState(false);
   const [showPackageImport, setShowPackageImport] = useState(false);
+  const [showComparison, setShowComparison] = useState(false);
   const [packageBusy, setPackageBusy] = useState(false);
   const [versions, setVersions] = useState<{ label: string; date: string; snapshot: Project }[]>([]);
   const [sourceBusy, setSourceBusy] = useState(false);
@@ -1059,6 +1069,10 @@ export default function Home() {
   const [exportBusy, setExportBusy] = useState(false);
   const [designerPreferences, setDesignerPreferences] = useState<string[]>([]);
   const [aiRequest, setAiRequest] = useState<{ action: string; prompt: string; selection: string; result: string } | null>(null);
+  const [connection, setConnection] = useState<NemotronConnection>({ state: "idle", message: "Not tested" });
+  const [comparison, setComparison] = useState<ChapterComparison | null>(null);
+  const [bookPaused, setBookPaused] = useState(false);
+  const pauseAfterCurrentRef = useRef(false);
   const editorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1536,7 +1550,7 @@ export default function Home() {
     patchProject({ chapters });
   }
 
-  function draftRequestBody(snapshot: Project, chapterId: number) {
+  function draftRequestBody(snapshot: Project, chapterId: number, repairOnly = false) {
     return JSON.stringify({
       source: snapshot.source,
       sourceObjectKey: snapshot.sourceObjectKey,
@@ -1549,19 +1563,20 @@ export default function Home() {
       illustrationStyle: snapshot.illustrationStyle,
       imageFrequency: snapshot.imageFrequency,
       sourceTerms: snapshot.sourceTerms,
-      chapters: snapshot.chapters.map(({ id, title, pages, locked, body, sourceStartPage, sourceEndPage, sourcePageCount, sourceWordCount, complexityScore }) => ({ id, title, pages, locked, body, sourceStartPage, sourceEndPage, sourcePageCount, sourceWordCount, complexityScore })),
+      chapters: snapshot.chapters.map(({ id, title, pages, locked, body, sourceStartPage, sourceEndPage, sourcePageCount, sourceWordCount, complexityScore, pedagogyQuality }) => ({ id, title, pages, locked, body, sourceStartPage, sourceEndPage, sourcePageCount, sourceWordCount, complexityScore, pedagogyQuality })),
       chapterIds: [chapterId],
+      repairOnly,
     });
   }
 
-  async function requestDraftChapter(snapshot: Project, chapterId: number, quotaStopped: () => boolean, stopForQuota: () => void) {
+  async function requestDraftChapter(snapshot: Project, chapterId: number, quotaStopped: () => boolean, stopForQuota: () => void, repairOnly = false) {
     let providerRequests = 0;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         const response = await fetch("/api/draft", {
           method: "POST",
           headers: requestHeaders(),
-          body: draftRequestBody(snapshot, chapterId),
+          body: draftRequestBody(snapshot, chapterId, repairOnly),
         });
         const data = await response.json() as DraftApiResponse;
         providerRequests += data.usage?.requests || data.requestCount || 0;
@@ -1592,7 +1607,9 @@ export default function Home() {
     return { ok: false as const, data: { error: "Chapter drafting stopped safely.", requestCount: providerRequests } satisfies DraftApiResponse };
   }
 
-  async function prepareDraft(scope: "sample" | "all" | "active" | "thin") {
+  async function prepareDraft(scope: "sample" | "all" | "active" | "thin", options: { repairOnly?: boolean } = {}) {
+    pauseAfterCurrentRef.current = false;
+    setBookPaused(false);
     const activeIndex = project.chapters.findIndex((chapter) => chapter.id === activeChapter);
     const selectedProfile = generationProfileKey(project.audience, project.language);
     const chapterIds = project.chapters.filter((chapter, index) => {
@@ -1617,6 +1634,7 @@ export default function Home() {
       }
       let cursor = 0;
       while (cursor < chapterIds.length && !failureReason && !quotaPause) {
+        if (pauseAfterCurrentRef.current) break;
         const canRunPair = scope !== "sample" && scope !== "active" && chapterOneStable;
         const batch = chapterIds.slice(cursor, cursor + (canRunPair ? MAX_CONCURRENT_CHAPTERS : 1));
 
@@ -1637,7 +1655,7 @@ export default function Home() {
         const requestSnapshot = workingProject;
         let saveQueue = Promise.resolve();
         const outcomes = await Promise.all(batch.map(async (chapterId) => {
-          const result = await requestDraftChapter(requestSnapshot, chapterId, () => quotaPause, () => { quotaPause = true; });
+          const result = await requestDraftChapter(requestSnapshot, chapterId, () => quotaPause, () => { quotaPause = true; }, Boolean(options.repairOnly));
           saveQueue = saveQueue.then(async () => {
             if (!result.ok || !result.data.chapters?.length) {
               const requestCount = result.data.requestCount || 0;
@@ -1649,6 +1667,7 @@ export default function Home() {
                       ...chapter,
                       generationStatus,
                       generationError: result.data.error || "Chapter drafting failed",
+                      repairAttempts: options.repairOnly || result.data.code === "quality-review" ? 1 : chapter.repairAttempts || 0,
                       generationUsage: requestCount ? {
                         inputTokens: chapter.generationUsage?.inputTokens || 0,
                         outputTokens: chapter.generationUsage?.outputTokens || 0,
@@ -1677,6 +1696,7 @@ export default function Home() {
                   importValidated: false,
                   generationStatus: "Completed" as const,
                   generationError: undefined,
+                  repairAttempts: options.repairOnly || (replacement.pedagogyQuality?.revisionPasses || 0) > 0 ? 1 : 0,
                   generationUsage: {
                     inputTokens: (chapter.generationUsage?.inputTokens || 0) + (usage?.inputTokens || 0),
                     outputTokens: (chapter.generationUsage?.outputTokens || 0) + (usage?.outputTokens || 0),
@@ -1707,10 +1727,16 @@ export default function Home() {
         await saveQueue;
         if (outcomes.some((result) => !result.ok)) break;
         cursor += batch.length;
+        if (pauseAfterCurrentRef.current) {
+          setBookPaused(true);
+          break;
+        }
       }
 
       if (quotaPause) {
         notify(`${completed ? `${completed} chapter${completed === 1 ? "" : "s"} saved. ` : ""}Daily quota reached. Generation stopped—use Resume book after the quota resets.`);
+      } else if (pauseAfterCurrentRef.current) {
+        notify(`${completed ? `${completed} chapter${completed === 1 ? "" : "s"} saved. ` : ""}Book paused. Use Resume book when you are ready.`);
       } else if (failureReason) {
         notify(completed ? `${completed} chapter${completed === 1 ? "" : "s"} saved. Resume starts from the first unfinished chapter: ${failureReason}` : failureReason);
       } else {
@@ -1723,6 +1749,89 @@ export default function Home() {
     } finally {
       setDraftBusy(false);
     }
+    return completed > 0;
+  }
+
+  async function testNemotronConnection() {
+    setConnection({ state: "testing", message: "Testing a tiny request…" });
+    try {
+      const response = await fetch("/api/ai/status", { method: "POST", headers: requestHeaders() });
+      const data = await response.json() as { connected?: boolean; error?: string; model?: string; usage?: GenerationUsage };
+      if (!response.ok || !data.connected) throw new Error(data.error || "Nemotron could not connect");
+      setConnection({ state: "connected", message: `Connected · ${data.model || "Nemotron 3 Ultra"}`, usage: data.usage });
+      notify("Nemotron connection is working");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Nemotron connection failed";
+      setConnection({ state: "error", message });
+      notify(message);
+    }
+  }
+
+  async function improveActiveChapter() {
+    if (!active || draftBusy) return;
+    setComparison({ chapterId: active.id, original: structuredClone(active) });
+    const improved = await prepareDraft("active");
+    if (improved) setShowComparison(true);
+    else setComparison(null);
+  }
+
+  async function repairActiveOnce() {
+    if (!active || draftBusy) return;
+    if ((active.repairAttempts || 0) >= 1) {
+      notify("This chapter has already used its one targeted repair");
+      return;
+    }
+    setComparison({ chapterId: active.id, original: structuredClone(active) });
+    const repaired = await prepareDraft("active", { repairOnly: true });
+    if (repaired) setShowComparison(true);
+    else setComparison(null);
+  }
+
+  function pauseAfterCurrentChapter() {
+    pauseAfterCurrentRef.current = true;
+    setBookPaused(true);
+    notify("The book will pause after the current chapter finishes");
+  }
+
+  function acceptImprovement() {
+    setComparison(null);
+    setShowComparison(false);
+    notify("Improvement accepted");
+  }
+
+  async function keepOriginal() {
+    if (!comparison) return;
+    const improved = project.chapters.find((chapter) => chapter.id === comparison.chapterId);
+    const restored = {
+      ...comparison.original,
+      generationUsage: improved?.generationUsage || comparison.original.generationUsage,
+      repairAttempts: Math.max(comparison.original.repairAttempts || 0, improved?.repairAttempts || 0),
+    };
+    const next = { ...project, chapters: project.chapters.map((chapter) => chapter.id === restored.id ? restored : chapter) };
+    setProject(next);
+    await persistProject(next).catch(() => undefined);
+    setComparison(null);
+    setShowComparison(false);
+    notify("Original chapter kept");
+  }
+
+  async function restorePreviousVersion() {
+    try {
+      const response = await fetch(`/api/versions?projectId=${encodeURIComponent(project.id)}`, { headers: requestHeaders() });
+      if (!response.ok) throw new Error("Version history could not be loaded");
+      const data = await response.json() as { versions: { label: string; date: string; snapshot: Project }[] };
+      const previous = data.versions[0];
+      if (!previous) { notify("No previous version is available yet"); return; }
+      await fetch("/api/versions", { method: "POST", headers: requestHeaders(), body: JSON.stringify({ projectId: project.id, label: "Before restoring previous version", snapshot: project }) });
+      const restored = normalizeProject(previous.snapshot);
+      setProject(restored);
+      await persistProject(restored);
+      setComparison(null);
+      setShowComparison(false);
+      notify(`Restored: ${previous.label}`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Previous version could not be restored");
+    }
   }
 
   if (view === "dashboard") return <Dashboard projects={projects} onNew={startNewBook} onOpen={openProject} onDuplicate={duplicateProject} onDelete={deleteProject} />;
@@ -1734,7 +1843,7 @@ export default function Home() {
         <div className="current-project"><i /> <span><strong>{project.title}</strong><small>{project.source}</small></span></div>
         <div className="top-actions">
           {view === "editor" && <button onClick={() => setView("brief")}>☷ <span>Book plan</span></button>}
-          {(view === "editor" || view === "brief") && <button className="package-import-button" onClick={() => setShowPackageImport(true)}>✦ <span>ChatGPT Book</span></button>}
+          {(view === "editor" || view === "brief") && <details className="advanced-tools"><summary>Advanced tools</summary><div><button className="package-import-button" onClick={() => setShowPackageImport(true)}>ChatGPT ZIP workflow</button><small>Manual request and completed-book import</small></div></details>}
           {(view === "editor" || view === "brief") && <label className="top-upload">{sourceBusy ? "Reading…" : "↥ Source"}<input type="file" accept=".pdf,.docx,.txt,.md" disabled={sourceBusy || draftBusy} onChange={(event) => event.target.files?.[0] && refreshSource(event.target.files[0])}/></label>}
           <button onClick={openVersions}>↺ <span>Versions</span></button>
           <button onClick={saveProject}>✓ <span>Save</span></button>
@@ -1742,6 +1851,25 @@ export default function Home() {
           <button className="export-button" onClick={exportDoc} disabled={exportBusy}>{exportBusy ? "Preparing…" : "↓ DOCX"}</button>
         </div>
       </header>
+
+      {view === "editor" && active && <SimpleWorkflowBar
+        project={project}
+        active={active}
+        busy={draftBusy}
+        paused={bookPaused}
+        connection={connection}
+        hasComparison={Boolean(comparison)}
+        onTest={() => void testNemotronConnection()}
+        onImprove={() => void improveActiveChapter()}
+        onBuild={() => void prepareDraft("all")}
+        onPause={pauseAfterCurrentChapter}
+        onResume={() => void prepareDraft("all")}
+        onCompare={() => comparison ? setShowComparison(true) : notify("Improve a chapter first to compare both versions")}
+        onAccept={acceptImprovement}
+        onKeep={() => void keepOriginal()}
+        onRepair={() => void repairActiveOnce()}
+        onRestore={() => void restorePreviousVersion()}
+      />}
 
       {view === "wizard" && <Wizard step={wizardStep} project={project} sourceBusy={sourceBusy} onPatch={patchProject} onFile={handleFile} onBack={() => wizardStep === 0 ? setView("dashboard") : setWizardStep((step) => step - 1)} onNext={() => wizardStep < 3 ? setWizardStep((step) => step + 1) : setView("analysis")} />}
       {view === "analysis" && <Analysis project={project} sourceBusy={sourceBusy} onPatch={patchProject} onBack={() => { setView("wizard"); setWizardStep(4); }} onContinue={confirmAdaptationPlan} />}
@@ -1751,10 +1879,54 @@ export default function Home() {
       {showPreview && <Preview project={project} draftBusy={draftBusy} onFill={() => prepareDraft("thin")} onRefresh={() => prepareDraft("all")} onClose={() => setShowPreview(false)} onPrint={() => window.print()} />}
       {showVersions && <Versions versions={versions} onCreate={createVersion} onRestore={(snapshot) => { setProject(normalizeProject(snapshot)); setShowVersions(false); notify("Version restored"); }} onClose={() => setShowVersions(false)} />}
       {showPackageImport && <BookPackageImporter project={project} busy={packageBusy} onClose={() => setShowPackageImport(false)} onDownloadRequest={downloadChatGptBookRequest} onImport={importBookPackage} />}
+      {showComparison && comparison && <ChapterComparison original={comparison.original} improved={project.chapters.find((chapter) => chapter.id === comparison.chapterId) || comparison.original} onAccept={acceptImprovement} onKeep={() => void keepOriginal()} onClose={() => setShowComparison(false)} />}
       {aiRequest && <AiRoundTrip request={aiRequest} onChange={(result) => setAiRequest({ ...aiRequest, result })} onClose={() => setAiRequest(null)} onApply={applyAiResult} />}
       {toast && <div className="toast">✓ {toast}</div>}
     </div>
   );
+}
+
+function SimpleWorkflowBar({ project, active, busy, paused, connection, hasComparison, onTest, onImprove, onBuild, onPause, onResume, onCompare, onAccept, onKeep, onRepair, onRestore }: {
+  project: Project;
+  active: Chapter;
+  busy: boolean;
+  paused: boolean;
+  connection: NemotronConnection;
+  hasComparison: boolean;
+  onTest: () => void;
+  onImprove: () => void;
+  onBuild: () => void;
+  onPause: () => void;
+  onResume: () => void;
+  onCompare: () => void;
+  onAccept: () => void;
+  onKeep: () => void;
+  onRepair: () => void;
+  onRestore: () => void;
+}) {
+  const quotaPaused = project.chapters.some((chapter) => chapter.generationStatus === "Paused by quota");
+  const unfinished = project.chapters.some((chapter) => chapter.generationStatus !== "Completed" && !chapter.locked);
+  return <section className="simple-workflow-bar" aria-label="Book improvement controls">
+    <div className={`connection-pill ${connection.state}`}><span /> <b>Nemotron</b><small>{connection.message}</small></div>
+    <div className="workflow-actions primary-actions">
+      <button onClick={onTest} disabled={busy || connection.state === "testing"}>{connection.state === "testing" ? "Testing…" : "Test Nemotron connection"}</button>
+      <button className="main-action" onClick={onImprove} disabled={busy || active.locked}>Improve this chapter</button>
+      <button className="main-action" onClick={onBuild} disabled={busy || !unfinished}>Build remaining chapters</button>
+      <button onClick={onPause} disabled={!busy || paused}>Pause after current chapter</button>
+      <button onClick={onResume} disabled={busy || (!paused && !quotaPaused && !unfinished)}>Resume book</button>
+    </div>
+    <div className="workflow-actions review-actions">
+      <button onClick={onCompare} disabled={!hasComparison}>Compare original and improved</button>
+      <button onClick={onAccept} disabled={!hasComparison}>Accept improvement</button>
+      <button onClick={onKeep} disabled={!hasComparison}>Keep original</button>
+      <button onClick={onRepair} disabled={busy || active.locked || (active.repairAttempts || 0) >= 1}>Repair once</button>
+      <button onClick={onRestore} disabled={busy}>Restore previous version</button>
+    </div>
+  </section>;
+}
+
+function ChapterComparison({ original, improved, onAccept, onKeep, onClose }: { original: Chapter; improved: Chapter; onAccept: () => void; onKeep: () => void; onClose: () => void }) {
+  return <div className="modal-backdrop"><section className="comparison-modal"><header><div><p className="eyebrow">CHAPTER DECISION</p><h2>Compare original and improved</h2><p>{improved.title}</p></div><button onClick={onClose}>×</button></header><div className="comparison-grid"><article><span>ORIGINAL</span><div className="book-copy" dangerouslySetInnerHTML={{ __html: authorialReaderHtml(original.body) }}/></article><article className="improved"><span>IMPROVED</span><div className="book-copy" dangerouslySetInnerHTML={{ __html: authorialReaderHtml(improved.body) }}/></article></div><footer><button className="secondary" onClick={onKeep}>Keep original</button><button className="primary" onClick={onAccept}>Accept improvement</button></footer></section></div>;
 }
 
 function Dashboard({ projects, onNew, onOpen, onDuplicate, onDelete }: { projects: Project[]; onNew: () => void; onOpen: (project: Project) => void; onDuplicate: (project: Project) => void; onDelete: (project: Project) => void }) {
