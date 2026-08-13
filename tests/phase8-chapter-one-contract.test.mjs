@@ -20,6 +20,7 @@ test("Phase 8 gives Nemotron a hard, complete one-pass Chapter 1 contract", () =
   assert.match(prompt, /exactly four logically ordered teaching sections/i);
   assert.match(prompt, /exactly three essential Sanskrit or specialist terms/i);
   assert.match(prompt, /exactly two concrete examples or analogies/i);
+  assert.match(prompt, /Section 1 must contain the first and Section 3 must contain the second/i);
   assert.match(prompt, /exactly three distinct recap points/i);
   assert.match(prompt, /finish and close the JSON object before the token limit/i);
   assert.match(prompt, /empty paragraphs array is invalid/i);

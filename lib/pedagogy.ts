@@ -418,7 +418,7 @@ THE COMPLETE LESSON MUST:
 2. Include exactly three observable learning goals and exactly four logically ordered teaching sections.
 3. Every section must have exactly one non-empty paragraph of roughly 65–85 words. An empty paragraphs array is invalid and will be rejected.
 4. Explain exactly three essential Sanskrit or specialist terms in simple language. Use no more than one vocabulary entry per section and leave the fourth section's vocabulary array empty.
-5. Include exactly two concrete examples or analogies of 25–45 words each, placed in the two sections where they teach most. Use an empty example string in the other sections. Clearly label imagined examples and never present them as history.
+5. Include exactly two concrete examples or analogies of 25–45 words each: Section 1 must contain the first and Section 3 must contain the second. Sections 2 and 4 must use empty example strings. Clearly label imagined examples and never present them as history.
 6. Include exactly two comprehension questions, one purposeful activity with exactly two short steps, and exactly three distinct recap points.
 7. Preserve nuance while removing repetition, long lists, secondary scholarly detail, and vague filler.
 8. Fit ${audience}: short concrete sentences for ages 7–9, connected explanations for ages 10–12, and precise causes, tensions, and consequences for ages 13–15.
