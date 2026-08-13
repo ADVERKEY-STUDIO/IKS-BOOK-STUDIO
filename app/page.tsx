@@ -2248,10 +2248,13 @@ function paginateReaderHtml(html: string, audience: string) {
   const flattened = clean.replace(/<\/?(?:section|div)\b[^>]*>/gi, "");
   const rawBlocks = flattened.match(/<(h2|h3|p|blockquote|ul|ol|b)\b[^>]*>[\s\S]*?<\/\1>/gi) ?? [flattened];
   const age = childAgeBand(audience);
-  const pageCapacity = age === "7-9" ? 1180 : age === "13-15" ? 1580 : 1380;
+  // Calibrated to the usable A4 text area. The opening sheet reserves room for
+  // the chapter title; continuation sheets use more of the page.
+  const pageCapacity = age === "7-9" ? 2050 : age === "13-15" ? 2400 : 2225;
+  const firstPageCapacity = Math.round(pageCapacity * .78);
   const textLength = (block: string) => block.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().length;
   const splitLongBlock = (block: string) => {
-    if (textLength(block) <= pageCapacity * .62) return [block];
+    if (textLength(block) <= pageCapacity * .76) return [block];
     const listMatch = block.match(/^<(ul|ol)\b[^>]*>([\s\S]*)<\/\1>$/i);
     if (listMatch) {
       const items = listMatch[2].match(/<li\b[^>]*>[\s\S]*?<\/li>/gi) ?? [];
@@ -2260,7 +2263,7 @@ function paginateReaderHtml(html: string, audience: string) {
       let length = 0;
       for (const item of items) {
         const itemLength = textLength(item);
-        if (current.length && length + itemLength > pageCapacity * .52) {
+        if (current.length && length + itemLength > pageCapacity * .66) {
           groups.push(`<${listMatch[1]}>${current.join("")}</${listMatch[1]}>`);
           current = [];
           length = 0;
@@ -2277,7 +2280,7 @@ function paginateReaderHtml(html: string, audience: string) {
     const chunks: string[] = [];
     let current = "";
     for (const sentence of sentences) {
-      if (current && current.length + sentence.length > pageCapacity * .5) {
+      if (current && current.length + sentence.length > pageCapacity * .64) {
         chunks.push(`<${paragraphMatch[1]}>${escapeHtml(current.trim())}</${paragraphMatch[1]}>`);
         current = "";
       }
@@ -2293,19 +2296,20 @@ function paginateReaderHtml(html: string, audience: string) {
 
   for (const block of blocks) {
     const isHeading = /^<h[23]/i.test(block);
-    const blockWeight = textLength(block) + (isHeading ? 260 : 0) + (/^<(?:ul|ol|blockquote)/i.test(block) ? 150 : 0);
-    if (isHeading && current.length && weight > pageCapacity * .72) {
+    const activeCapacity = pages.length === 0 ? firstPageCapacity : pageCapacity;
+    const blockWeight = textLength(block) + (isHeading ? 145 : 0) + (/^<(?:ul|ol|blockquote)/i.test(block) ? 100 : 0);
+    if (isHeading && current.length && weight > activeCapacity * .84) {
       pages.push(current.join(""));
       current = [];
       weight = 0;
     }
-    if (current.length && weight + blockWeight > pageCapacity) {
+    if (current.length && weight + blockWeight > activeCapacity) {
       const trailingHeading = current.length > 1 && /^<h[23]/i.test(current[current.length - 1]);
       if (trailingHeading) {
         const heading = current.pop()!;
         pages.push(current.join(""));
         current = [heading];
-        weight = textLength(heading) + 260;
+        weight = textLength(heading) + 145;
       } else {
         pages.push(current.join(""));
         current = [];
