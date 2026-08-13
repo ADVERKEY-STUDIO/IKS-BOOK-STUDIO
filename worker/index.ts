@@ -358,12 +358,15 @@ const DEFAULT_OPENROUTER_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
 
 async function openRouterStatusApi(request: Request, env: Env) {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  if (!env.OPENROUTER_API_KEY) {
+  const openRouterApiKey = typeof env.OPENROUTER_API_KEY === "string"
+    ? env.OPENROUTER_API_KEY.trim()
+    : "";
+  if (!openRouterApiKey) {
     return json({ connected: false, error: "OPENROUTER_API_KEY is not configured as a server secret." }, 503);
   }
 
   const authHeaders = {
-    authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+    authorization: `Bearer ${openRouterApiKey}`,
     "content-type": "application/json",
     "http-referer": "https://iks-book-studio.gaurav-gupta-6041.chatgpt.site",
     "x-openrouter-title": "IKS Book Studio",
