@@ -23,11 +23,12 @@ test("chapter one proves stability before concurrency can increase to two", () =
 });
 
 test("temporary failures get one delayed retry and quota never enters a retry loop", () => {
-  assert.match(page, /for \(let attempt = 0; attempt < 2; attempt \+= 1\)/);
+  assert.match(page, /const maximumAttempts = singleShotChapterOneTrial \? 1 : 2/);
+  assert.match(page, /for \(let attempt = 0; attempt < maximumAttempts; attempt \+= 1\)/);
   assert.match(page, /TEMPORARY_RETRY_DELAY_MS = 1800/);
   assert.match(page, /if \(data\.quota \|\| response\.status === 429 \|\| response\.status === 402\)/);
   assert.match(page, /stopForQuota\(\)/);
-  assert.match(page, /if \(!data\.retryable \|\| attempt === 1 \|\| quotaStopped\(\)\)/);
+  assert.match(page, /if \(!data\.retryable \|\| attempt === maximumAttempts - 1 \|\| quotaStopped\(\)\)/);
   assert.doesNotMatch(page, /while\s*\([^)]*retry/i);
 });
 

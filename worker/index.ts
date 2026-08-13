@@ -516,22 +516,23 @@ async function openRouterStructured<T>(env: Env, prompt: string, maxCompletionTo
     usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; reasoning_tokens?: number };
   };
   const content = result.choices?.[0]?.message?.content ?? "";
+  const usage = {
+    inputTokens: result.usage?.prompt_tokens ?? 0,
+    outputTokens: result.usage?.completion_tokens ?? 0,
+    totalTokens: result.usage?.total_tokens ?? 0,
+    reasoningTokens: result.usage?.reasoning_tokens ?? 0,
+    requests: 1,
+  } satisfies AiUsage;
   let data: T;
   try {
     data = parseJsonObject<T>(content);
   } catch {
-    throw new TeachingEngineError("Nemotron returned malformed chapter data. The previous chapter was kept unchanged; use targeted repair instead of regenerating automatically.", 422, "malformed-output", false, false, 1);
+    throw new TeachingEngineError("Nemotron returned malformed chapter data. The previous chapter was kept unchanged; use targeted repair instead of regenerating automatically.", 422, "malformed-output", false, false, 1, usage);
   }
   return {
     data,
     model,
-    usage: {
-      inputTokens: result.usage?.prompt_tokens ?? 0,
-      outputTokens: result.usage?.completion_tokens ?? 0,
-      totalTokens: result.usage?.total_tokens ?? 0,
-      reasoningTokens: result.usage?.reasoning_tokens ?? 0,
-      requests: 1,
-    } satisfies AiUsage,
+    usage,
   };
 }
 
@@ -557,8 +558,8 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
   const language = project.language || "English";
   const initial = await openRouterStructured<{ chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] }>(
     env,
-    efficientChapterPrompt({ title: chapter.title, audience, language, targetPages: chapter.pages, sourceMaterial }),
-    3600,
+    efficientChapterPrompt({ title: chapter.title, audience, language, targetPages: chapter.pages, sourceMaterial, strictChapterOneTrial: !allowAutomaticRepair }),
+    allowAutomaticRepair ? 3600 : 3200,
   );
   let review = initial.data;
   let draft = normalizeTeachingChapter(review.chapter, chapter.title);
@@ -568,7 +569,7 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
   let usage = initial.usage;
   if (!allowAutomaticRepair && (!deterministic.passed || Object.values(scores).some((score) => score < 80))) {
     throw new TeachingEngineError(
-      `Chapter 1 stopped after its single Phase 7 request: ${[...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 80).map(([name]) => `${name} needs improvement`)].join("; ")}. Chapters 2–6 remain locked.`,
+      `Chapter 1 stopped after its single Phase 8 request: ${[...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 80).map(([name]) => `${name} needs improvement`)].join("; ")}. Chapters 2–6 remain locked.`,
       422,
       "quality-review",
       false,
@@ -995,7 +996,7 @@ async function draftApi(request: Request, env: Env) {
   const requested = new Set(project.chapterIds.map(Number));
   if (requested.size > 1) return json({ error: "For safe progress saving, request exactly one chapter at a time." }, 400);
   if (project.phase7ChapterOneOnly && (requested.size !== 1 || !requested.has(1))) {
-    return json({ error: "Phase 7 is locked to Chapter 1 until its measured evaluation passes.", code: "chapter-one-gate" }, 423);
+    return json({ error: "Phase 8 is locked to Chapter 1 until its measured evaluation passes.", code: "chapter-one-gate" }, 423);
   }
   const chapters = [];
   let usage: AiUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0, reasoningTokens: 0, requests: 0 };
@@ -1019,7 +1020,7 @@ async function draftApi(request: Request, env: Env) {
         scores: error.diagnostic.scores,
         revisionPasses: 0,
         summary: error.diagnostic.summary,
-        checks: ["Stopped after the single Phase 7 request"],
+        checks: ["Stopped after the single Phase 8 request"],
         learningGoals: [],
       } : undefined;
       const phase7Evaluation = project.phase7ChapterOneOnly ? evaluateChapterOneGate({ usage: error.usage || { requests: error.requestCount, totalTokens: 0 }, durationMs, wordCount: error.diagnostic?.wordCount || 0, quality }) : undefined;
