@@ -193,17 +193,19 @@ function visualKeywords(title: string, body: string, sourceTerms: string[]) {
   return [...frequency.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([word]) => word);
 }
 
-function chooseVisualType(title: string, body: string, index: number) {
+function chooseSceneDirection(title: string, body: string, index: number) {
   const context = normalizedTitle(`${title} ${body.replace(/<[^>]+>/g, " ")}`).slice(0, 7000);
-  if (/\b(?:map|geograph\w*|territor\w*|region\w*|route\w*|trade|border\w*|foreign|countr\w*|kingdom\w*|empire\w*|statecraft|rajya|rājya|coast\w*|ocean\w*|current\w*)\b/.test(context)) return "map";
-  if (/\b(?:compar\w*|contrast\w*|relationship\w*|balance\w*|intersection\w*|overlap\w*|dual\w*|between|constituent\w*|element\w*)\b/.test(context)) return "venn";
-  if (/\b(?:structure\w*|hierarch\w*|system\w*|govern\w*|administr\w*|branch\w*|classification\w*|organisation\w*|organization\w*|design\w*|network\w*|webs?)\b/.test(context)) return "tree";
-  if (/\b(?:origin\w*|histor\w*|develop\w*|evolution\w*|period\w*|ancient|introduction\w*|chronolog\w*|journey\w*)\b/.test(context)) return "timeline";
-  if (/\b(?:cycle\w*|process\w*|strateg\w*|econom\w*|agricultur\w*|production\w*|stage\w*|sequence\w*|method\w*)\b/.test(context)) return "cycle";
-  return ["concept", "tree", "venn", "timeline"][Math.abs(index) % 4];
+  if (/\b(?:govern\w*|minister\w*|king\w*|ruler\w*|strateg\w*|foreign|diploma\w*|statecraft|rajya|rājya|kingdom\w*|empire\w*)\b/.test(context)) return "A lived council scene: two or three advisers actively weighing choices with tactile objects, messengers, manuscripts and a richly rendered kingdom visible around them";
+  if (/\b(?:science|nature|animal\w*|plant\w*|river\w*|ocean\w*|climate|space|planet\w*|medicine|body|energy)\b/.test(context)) return "An immersive discovery scene: young learners and a knowledgeable guide observing the real phenomenon in its natural setting, using authentic tools and visible evidence";
+  if (/\b(?:art|music|dance|theatre|poet\w*|story|craft\w*|design\w*|architecture|performance)\b/.test(context)) return "A vibrant creative scene: artists, learners or performers making and discussing the chapter idea in an authentic workshop, stage or architectural setting";
+  if (/\b(?:econom\w*|trade|agricultur\w*|production\w*|work\w*|market\w*|craft\w*|process\w*|method\w*)\b/.test(context)) return "A detailed working scene: people carrying out the chapter’s process in a real place, with tools, materials, cause and effect all visible through action";
+  if (/\b(?:histor\w*|ancient|origin\w*|period\w*|tradition\w*|culture|civilisation|civilization)\b/.test(context)) return "A historically grounded lived moment: children can understand the period through people, architecture, clothing, everyday objects and one meaningful action";
+  return [
+    "A cinematic teaching moment with a guide and young learners discovering the chapter idea through objects, place and action",
+    "A wide environmental story scene where several small actions reveal the chapter’s central idea without labels",
+    "An intimate workshop or courtyard scene where people solve a chapter-specific problem together",
+  ][Math.abs(index) % 3];
 }
-
-const visualTypeOrder = ["concept", "map", "venn", "tree", "timeline", "cycle"];
 
 function visualIdentity(imageKey?: string, imageUrl?: string) {
   if (imageKey) return `asset:${imageKey}`;
@@ -220,35 +222,15 @@ function contextualIllustration(
   const curated = curatedIllustration(chapter.title, chapter.body);
   if (curated && !usedImages.has(visualIdentity(undefined, curated.url))) return { ...curated, type: "illustration" };
   const terms = visualKeywords(chapter.title, chapter.body, project.sourceTerms);
-  const preferredType = chooseVisualType(chapter.title, chapter.body, index);
-  const preferredIndex = Math.max(0, visualTypeOrder.indexOf(preferredType));
-
-  for (let offset = 0; offset < visualTypeOrder.length; offset += 1) {
-    const type = visualTypeOrder[(preferredIndex + offset) % visualTypeOrder.length];
-    const params = new URLSearchParams({
-      title: chapter.title.slice(0, 180),
-      terms: terms.join("|"),
-      type,
-      style: project.illustrationStyle.slice(0, 80),
-      aesthetic: project.aesthetic.slice(0, 80),
-      chapter: String(index + 1),
-      variant: String(index + 1),
-    });
-    const url = `/api/visual?${params.toString()}`;
-    if (usedImages.has(visualIdentity(undefined, url))) continue;
-    const readableType = type === "venn" ? "relationship diagram" : type === "tree" ? "concept tree" : `${type} visual`;
-    return {
-      url,
-      caption: `${chapter.title}: a ${readableType} built from ${terms.slice(0, 3).join(", ") || "the chapter’s central ideas"}.`,
-      alt: `${readableType} for ${chapter.title}, showing ${terms.slice(0, 4).join(", ") || "the main chapter concepts"}.`,
-      type,
-    };
-  }
-
-  // The chapter index and title make this final URL unique even when a very
-  // long book exhausts every diagram family above.
-  const params = new URLSearchParams({ title: chapter.title, terms: terms.join("|"), type: "concept", chapter: String(index + 1), variant: `chapter-${index + 1}` });
-  return { url: `/api/visual?${params.toString()}`, caption: `${chapter.title}: a concept visual built from the chapter’s central ideas.`, alt: `Unique concept visual for ${chapter.title}.`, type: "concept" };
+  const scene = chooseSceneDirection(chapter.title, chapter.body, index);
+  const params = new URLSearchParams({ title: chapter.title.slice(0, 180), terms: terms.join("|"), type: "scene", scene: scene.slice(0, 360), style: project.illustrationStyle.slice(0, 80), aesthetic: project.aesthetic.slice(0, 80), chapter: String(index + 1), variant: String(index + 1) });
+  const url = `/api/visual?${params.toString()}`;
+  return {
+    url,
+    caption: `${chapter.title}: a chapter-specific narrative scene based on ${terms.slice(0, 3).join(", ") || "the chapter’s central ideas"}.`,
+    alt: `Narrative scene direction for ${chapter.title}, showing people, place and action related to ${terms.slice(0, 4).join(", ") || "the chapter context"}.`,
+    type: "scene-plan",
+  };
 }
 
 function attachChapterVisuals(project: Pick<Project, "aesthetic" | "illustrationStyle" | "sourceTerms">, chapters: Chapter[]) {
@@ -1304,9 +1286,10 @@ export default function Home() {
   async function aiAction(action: string) {
     const selected = window.getSelection()?.toString().trim();
     const chapterText = authorialReaderHtml(active?.body || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    const visualType = active ? chooseVisualType(active.title, active.body, active.id - 1) : "concept";
+    const sceneDirection = active ? chooseSceneDirection(active.title, active.body, active.id - 1) : "A chapter-specific narrative scene";
     const visualTerms = active ? visualKeywords(active.title, active.body, project.sourceTerms) : project.sourceTerms.slice(0, 5);
-    const prompt = action === "Suggest an illustration" && active
+    const illustrationAction = action === "Suggest an illustration" || action === "Create chapter illustration";
+    const prompt = illustrationAction && active
       ? `Create one original, print-ready illustration for a children’s educational book.
 
 BOOK AND CHAPTER CONTEXT
@@ -1318,21 +1301,24 @@ BOOK AND CHAPTER CONTEXT
 - Chapter focus: ${active.context || chapterText.slice(0, 1700)}
 - Essential concepts to represent: ${visualTerms.join(", ") || "the central idea of the chapter"}
 
-VISUAL DIRECTION
-- Recommended visual form: ${visualType}
+NARRATIVE SCENE DIRECTION
+- Scene concept: ${sceneDirection}
 - Illustration world: ${project.aesthetic}
-- Art style: ${project.illustrationStyle}
-- Composition: one clear focal idea, strong visual hierarchy, generous breathing room, landscape 4:3 crop suitable for an A4 children’s textbook page
+- Art style: richly detailed hand-painted editorial watercolour and gouache, warm natural light, tactile paper texture, expressive but realistic people, lush environmental detail, polished children’s publishing quality
+- Composition: cinematic wide scene with foreground characters actively demonstrating the idea, a meaningful midground action, and a deep contextual background; landscape 4:3 crop suitable for an A4 children’s textbook page
 - Make this image visibly different from every other chapter illustration
-- Show the meaning of this specific chapter rather than a generic ancient-India scene
+- Show the meaning of this specific chapter through people, place, objects and action—not a generic decorative scene
+- If the topic is historical, use the correct period and region. If it is modern, scientific or imaginary, build the world from that chapter instead of forcing an ancient-India setting
+- Match the visual richness and immersive storytelling of a premium illustrated textbook spread
 
 ACCURACY AND CHILD SAFETY
 - Keep clothing, architecture, objects and social setting historically and culturally respectful
 - Use age-appropriate expressions and avoid frightening violence, stereotypes, caricature or invented religious symbolism
-- Do not invent a portrait of a real historical person; use a respectful representative scene or diagram when identity is uncertain
+- Do not invent a portrait of a real historical person; use respectful representative characters when identity is uncertain
 
 OUTPUT REQUIREMENTS
 - Return one finished illustration only
+- Absolutely no map, Venn diagram, timeline, flowchart, concept tree, cycle, infographic, labelled diagram or worksheet layout
 - No title, labels, captions, letters, numbers, logos, watermarks, UI, mockup, border or page frame inside the image
 - No repeated characters or copied composition from another chapter
 - High detail, clean edges, balanced colour, print-safe contrast, 2048 × 1536 pixels or higher`
@@ -2161,7 +2147,7 @@ function Editor({ project, active, activeId, allocated, draftBusy, onSelect, edi
     <section className="canvas"><nav className="editor-tools"><div><button onClick={() => document.execCommand("bold")}><b>B</b></button><button onClick={() => document.execCommand("italic")}><i>I</i></button><button onClick={() => document.execCommand("formatBlock", false, "h2")}>H2</button><button onClick={() => document.execCommand("insertUnorderedList")}>• List</button></div><div className="chapter-meter"><span>{active.pages} target pages</span><i><b style={{ width: active.status === "planned" ? "18%" : "67%" }}/></i><button onClick={onToggleLock}>{active.locked ? "◆ Locked" : "◇ Lock"}</button></div></nav><div className="page-stage"><article className={`paper font-${fontClass} world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")} page-aesthetic-${pageClass} book-border-${borderClass} age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}${active.imageUrl ? " has-chapter-image" : ""}`}><header><span>{project.title}</span><span>{project.audience}</span></header><div className="ornament">✦</div><div key={active.id} ref={editorRef} className="book-copy" contentEditable={!active.locked} suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: authorialReaderHtml(active.body) }}/>{active.imageUrl && <figure className="chapter-image"><img src={active.imageUrl} alt={active.imageAlt || active.imageCaption || active.title}/><figcaption>{active.imageCaption || active.title}</figcaption></figure>}<footer><span>{project.title}</span><span>{active.id}</span></footer></article></div><button className="save-float" onClick={onSaveBody}>✓ Save chapter</button></section>
     <aside className="assistant"><nav><button className={tab === "ai" ? "active" : ""} onClick={() => setTab("ai")}>✦<span>AI EDIT</span></button><button className={tab === "design" ? "active" : ""} onClick={() => setTab("design")}>◈<span>DESIGN</span></button><button className={tab === "sources" ? "active" : ""} onClick={() => setTab("sources")}>⌕<span>SOURCES</span></button></nav><div className="assistant-body">
       {tab === "ai" && <><div className="assistant-title"><span>✦</span><div><b>Teaching-quality editor</b><small>The complete lesson must pass before publication.</small></div></div><div className="request-control-card"><b>REQUEST CONTROL</b><span>1 request per chapter · maximum 2 at once after Chapter 1</span><small>{project.chapters.find((chapter) => chapter.id === 1)?.phase7Evaluation?.passed ? "One delayed retry only for temporary failures · no quota retry" : "Phase 8 Chapter 1 trial · exactly one request · no retry or repair"}</small></div><div className={`generation-status-card generation-${normalizedTitle(chapterGenerationState(active)).replace(/[^a-z]+/g, "-")}`}><b>{chapterGenerationState(active)}</b><span>{active.generationUsage?.totalTokens ? `${active.generationUsage.totalTokens.toLocaleString()} tokens · ${active.generationUsage.requests} request${active.generationUsage.requests === 1 ? "" : "s"}` : "No Nemotron usage recorded yet"}</span>{active.generationError && <small>{active.generationError}</small>}</div>{!active.locked && <button className="draft-chapter-button" disabled={draftBusy} onClick={onDraft}>{draftBusy ? "Understanding and reviewing…" : chapterGenerationState(active) === "Completed" ? "↻ Rebuild and review lesson" : chapterGenerationState(active) === "Paused by quota" ? "▶ Resume this chapter" : "✦ Build and review this lesson"}</button>}{active.importValidated ? <div className="package-lock-report"><b>✓ STRUCTURED PACKAGE VERIFIED</b><p>{active.importedPages?.length || active.pages} page IDs are locked to Chapter {active.id}. Its text and images were imported without automatic redistribution.</p>{active.importedPages && <ol>{active.importedPages.map((page) => <li key={page.pageId}><span>{page.pageId}</span><b>{page.purpose}</b><i>{page.imageUrl ? "image linked" : "text"}</i></li>)}</ol>}</div> : active.pedagogyQuality ? <div className="pedagogy-report"><header><div><b>✓ READY FOR CHILDREN</b><span>{pedagogyAverage(active.pedagogyQuality)}/100</span></div><p>{active.pedagogyQuality.summary}</p></header><div className="score-grid">{Object.entries(active.pedagogyQuality.scores).map(([name, score]) => <span key={name}><b>{score}</b>{qualityScoreLabels[name] || name}</span>)}</div><div className="quality-checks">{active.pedagogyQuality.checks.map((check) => <p key={check}>✓ {check}</p>)}</div></div> : <div className="pedagogy-pending"><b>Quality review required</b><p>This older draft has not passed context, coherence, age-fit, teaching, and accuracy checks. Rebuild it before export.</p></div>}<p className="selection-tip">This chapter has <b>{chapterWordCount(active).toLocaleString()} words</b>. Every edit keeps the voice direct and authorial for the selected age.</p><div className="ai-list">{["Simplify language", "Shorten selection", "Expand with examples", "Make age-appropriate", "Improve storytelling", "Check factual accuracy", "Suggest an illustration"].map((action) => <button onClick={() => onAi(action)} key={action}><span>✦</span>{action}<i>→</i></button>)}</div><div className="memory-box"><p className="eyebrow">EDITORIAL MEMORY</p><p>{project.editorialPreferences.length ? project.editorialPreferences.join(" · ") : "No saved preferences yet"}</p><button onClick={() => onRemember("book")}>＋ Remember for this book</button><button onClick={() => onRemember("designer")}>＋ Remember for future books</button></div></>}
-      {tab === "design" && <><div className="assistant-title"><span>◈</span><div><b>Book design</b><small>Illustration world, page aesthetic, border and watermark apply across the whole adaptation.</small></div></div><div className="design-controls"><div className="visual-status"><b>✓ Chapter visual ready</b><span>{active.visualType === "uploaded" ? "Your uploaded image" : `${active.visualType || "context"} visual generated from this chapter`}</span></div><label>Illustration world<select value={project.aesthetic} onChange={(e) => onPatchProject(designWorldPatch(e.target.value))}>{childDesignWorlds.map((world) => <option key={world.value}>{world.value}</option>)}</select></label><label>Page aesthetic<select value={project.pageAesthetic} onChange={(e) => onPatchProject(pageAestheticPatch(e.target.value))}>{pageAesthetics.map((aesthetic) => <option key={aesthetic.value}>{aesthetic.value}</option>)}</select></label><label>Book border<select value={project.bookBorder} onChange={(e) => onPatchProject(bookBorderPatch(e.target.value))}>{bookBorders.map((border) => <option key={border.value}>{border.value}</option>)}</select></label><label>Page watermark<select value={project.pageWatermark} onChange={(e) => onPatchProject(pageWatermarkPatch(e.target.value))}>{pageWatermarks.map((watermark) => <option key={watermark.value}>{watermark.value}</option>)}</select></label><div className="design-summary"><b>{project.pageAesthetic} · {project.bookBorder} · {project.pageWatermark}</b><span>{project.illustrationStyle} · {project.fontTheme} · {project.imageFrequency}</span></div><label className="image-upload">Replace chapter image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && onUploadImage(e.target.files[0])}/></label>{active.imageUrl && <label>Image caption<input value={active.imageCaption || ""} onChange={(e) => onUpdateChapter(active.id, { imageCaption: e.target.value })}/></label>}</div></>}
+      {tab === "design" && <><div className="assistant-title"><span>◈</span><div><b>Book design</b><small>Every chapter receives a context-read narrative scene—not a diagram.</small></div></div><div className="design-controls"><div className="visual-status"><b>{active.visualType === "uploaded" ? "✓ Finished chapter illustration" : "Scene direction ready"}</b><span>{active.visualType === "uploaded" ? "Your uploaded image will be used in the book" : "Built from this chapter’s people, place, objects and central action"}</span></div><button className="primary full scene-prompt-button" onClick={() => onAi("Suggest an illustration")}>✦ Create this chapter illustration</button><small className="scene-workflow-help">The studio prepares a complete narrative-scene prompt. Generate it in ChatGPT, then upload the finished image below.</small><label>Illustration world<select value={project.aesthetic} onChange={(e) => onPatchProject(designWorldPatch(e.target.value))}>{childDesignWorlds.map((world) => <option key={world.value}>{world.value}</option>)}</select></label><label>Page aesthetic<select value={project.pageAesthetic} onChange={(e) => onPatchProject(pageAestheticPatch(e.target.value))}>{pageAesthetics.map((aesthetic) => <option key={aesthetic.value}>{aesthetic.value}</option>)}</select></label><label>Book border<select value={project.bookBorder} onChange={(e) => onPatchProject(bookBorderPatch(e.target.value))}>{bookBorders.map((border) => <option key={border.value}>{border.value}</option>)}</select></label><label>Page watermark<select value={project.pageWatermark} onChange={(e) => onPatchProject(pageWatermarkPatch(e.target.value))}>{pageWatermarks.map((watermark) => <option key={watermark.value}>{watermark.value}</option>)}</select></label><div className="design-summary"><b>{project.pageAesthetic} · {project.bookBorder} · {project.pageWatermark}</b><span>{project.illustrationStyle} · {project.fontTheme} · {project.imageFrequency}</span></div><label className="image-upload">Upload finished chapter scene<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && onUploadImage(e.target.files[0])}/></label>{active.imageUrl && <label>Image caption<input value={active.imageCaption || ""} onChange={(e) => onUpdateChapter(active.id, { imageCaption: e.target.value })}/></label>}</div></>}
       {tab === "sources" && <><div className="assistant-title"><span>⌕</span><div><b>Private fact check</b><small>{active.sourceRefs.length} editor-only reference{active.sourceRefs.length === 1 ? "" : "s"} linked to this chapter · never printed.</small></div></div><div className="source-list">{active.sourceRefs.length ? active.sourceRefs.map((ref, index) => <article key={`${ref.title}-${index}`}><span>PRIVATE · PAGE {ref.page || "—"}</span><b>{ref.title}</b><p>{ref.excerpt}</p></article>) : <p className="empty">No private reference is linked yet. Prepare this chapter to attach the closest fact-checking passage.</p>}</div><div className="source-policy"><b>Editor-only provenance</b><p>Verify important names, dates and quotations before approval. These notes never appear in Preview, PDF or DOCX.</p></div></>}
     </div></aside>
   </main>;
@@ -2232,7 +2218,7 @@ function BookPackageImporter({ project, busy, onClose, onDownloadRequest, onImpo
 }
 
 function AiRoundTrip({ request, onChange, onClose, onApply }: { request: { action: string; prompt: string; selection: string; result: string }; onChange: (value: string) => void; onClose: () => void; onApply: () => void }) {
-  const illustrationRequest = request.action === "Suggest an illustration";
+  const illustrationRequest = request.action === "Suggest an illustration" || request.action === "Create chapter illustration";
   const openChatGPT = async () => {
     try { await navigator.clipboard.writeText(request.prompt); } catch { /* clipboard permission can be unavailable */ }
     window.open(`https://chatgpt.com/?q=${encodeURIComponent(request.prompt)}`, "_blank", "noopener,noreferrer");

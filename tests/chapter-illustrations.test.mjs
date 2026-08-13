@@ -50,13 +50,14 @@ test("the same image cannot be assigned to two chapters", () => {
   assert.match(page, /variant: String\(index \+ 1\)/);
 });
 
-test("generic books use chapter-aware visual fallbacks instead of Arthashastra art", () => {
-  for (const visualType of ["map", "venn", "tree", "timeline", "cycle", "concept"]) {
-    assert.match(worker, new RegExp(`\\"${visualType}\\"`));
-  }
+test("generic books receive chapter-aware narrative scene plans", () => {
   assert.match(worker, /url\.pathname === "\/api\/visual"/);
-  assert.match(worker, /GENERATED FROM THE CHAPTER CONTEXT/);
+  assert.match(worker, /const type = "scene"/);
+  assert.match(worker, /function narrativeScenePlan/);
+  assert.match(worker, /people, place, objects and action\. No map or diagram/);
   assert.match(page, /visualKeywords\(chapter\.title, chapter\.body, project\.sourceTerms\)/);
+  assert.match(page, /chooseSceneDirection\(chapter\.title, chapter\.body, index\)/);
+  assert.match(page, /type: "scene-plan"/);
   assert.doesNotMatch(page, /return fallback\[/);
 });
 
@@ -65,9 +66,19 @@ test("illustration suggestion includes chapter context and print constraints", (
   assert.match(page, /BOOK AND CHAPTER CONTEXT/);
   assert.match(page, /Chapter focus:/);
   assert.match(page, /Essential concepts to represent:/);
-  assert.match(page, /Recommended visual form:/);
+  assert.match(page, /NARRATIVE SCENE DIRECTION/);
+  assert.match(page, /Scene concept:/);
+  assert.match(page, /richly detailed hand-painted editorial watercolour and gouache/);
+  assert.match(page, /Absolutely no map, Venn diagram, timeline, flowchart, concept tree, cycle, infographic/);
   assert.match(page, /No title, labels, captions, letters, numbers, logos, watermarks/);
   assert.match(page, /2048 × 1536 pixels or higher/);
   assert.match(page, /CHAPTER-CONTEXT IMAGE PROMPT/);
   assert.match(page, /Generate in ChatGPT/);
+});
+
+test("the design workflow exposes scene generation and finished-image upload per chapter", () => {
+  assert.match(page, /Every chapter receives a context-read narrative scene—not a diagram/);
+  assert.match(page, /Create this chapter illustration/);
+  assert.match(page, /Upload finished chapter scene/);
+  assert.match(css, /\.scene-workflow-help/);
 });
