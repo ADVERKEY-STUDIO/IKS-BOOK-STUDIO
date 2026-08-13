@@ -5,18 +5,20 @@ import { readFile } from "node:fs/promises";
 const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 const worker = await readFile(new URL("../worker/index.ts", import.meta.url), "utf8");
 
-test("the editor keeps the complete Phase 6 actions without crowding the main workflow", () => {
+test("the editor exposes one automated publishing action without a manual repair button", () => {
   for (const label of [
-    "Generate chapter by chapter",
+    "Automated publishing workflow",
+    "Build this book",
     "Testing…",
     "Pause after this chapter",
     "Resume book",
     "Compare versions",
     "Accept improvement",
     "Keep original",
-    "Repair once",
     "Restore previous version",
   ]) assert.match(page, new RegExp(label));
+  assert.doesNotMatch(page, /Repair once/);
+  assert.doesNotMatch(page, /Build and review this lesson/);
   assert.match(page, /<summary>More actions<\/summary>/);
 });
 
@@ -26,13 +28,12 @@ test("the ChatGPT ZIP workflow is tucked under Advanced tools", () => {
   assert.doesNotMatch(page, />✦ <span>ChatGPT Book<\/span>/);
 });
 
-test("pause, compare, restore, and one-shot repair are durable explicit actions", () => {
+test("pause, restore, and the bounded feedback loop are durable", () => {
   assert.match(page, /pauseAfterCurrentRef\.current = true/);
-  assert.match(page, /setComparison\(\{ chapterId: active\.id, original: structuredClone\(active\) \}\)/);
   assert.match(page, /Before restoring previous version/);
-  assert.match(page, /repairAttempts: options\.repairOnly/);
-  assert.match(worker, /project\.repairOnly\s*\?\s*await buildTargetedRepair/);
-  assert.match(worker, /one targeted repair to an existing children’s textbook chapter/);
+  assert.match(worker, /feedbackRevisionPrompt/);
+  assert.match(worker, /for \(const attempt of \[2, 3\] as const\)/);
+  assert.doesNotMatch(worker, /project\.repairOnly/);
 });
 
 test("Nemotron connection testing only runs on an explicit button action", () => {
@@ -42,10 +43,10 @@ test("Nemotron connection testing only runs on an explicit button action", () =>
 });
 
 test("the main workflow is chapter-wise instead of a wall of global buttons", () => {
-  assert.match(page, /Generate chapter by chapter/);
+  assert.match(page, /Automated publishing workflow/);
   assert.match(page, /project\.chapters\.map\(\(chapter\) =>/);
   assert.match(page, /onGenerateChapter\(chapter\.id\)/);
-  assert.match(page, /chapter\.id > 1 && !chapterOnePassed/);
+  assert.doesNotMatch(page, /chapter\.id > 1 && !chapterOnePassed/);
   assert.match(page, /status === "Completed" \|\| status === "Designer handoff" \? "View"/);
   assert.match(page, /<summary>More actions<\/summary>/);
   assert.match(page, /prepareDraft\("active", \{ chapterId \}\)/);
@@ -54,7 +55,7 @@ test("the main workflow is chapter-wise instead of a wall of global buttons", ()
 test("failed chapters can be handed to a designer without blocking PDF export", () => {
   assert.match(page, /\| "Designer handoff"/);
   assert.match(page, /async function leaveActiveForDesigner\(\)/);
-  assert.match(page, /Leave Chapter \{active\.id\} for designer/);
+  assert.match(page, /Send Chapter \{active\.id\} to designer/);
   assert.match(page, /chapterGenerationState\(chapter\) !== "Designer handoff"/);
   assert.match(page, /function exportPdf\(\)/);
   assert.match(page, /window\.setTimeout\(\(\) => window\.print\(\), 450\)/);

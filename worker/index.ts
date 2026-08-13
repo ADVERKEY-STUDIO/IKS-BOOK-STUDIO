@@ -6,7 +6,7 @@ import { extractText, getDocumentProxy } from "unpdf";
 import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, TextRun } from "docx";
 import { authorialReaderHtml, generationProfileKey } from "../lib/child-summary";
 import { allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET, recommendedAdaptationPages } from "../lib/adaptation-pages";
-import { efficientChapterPrompt, evaluateChapterOneGate, evaluateTeachingChapter, fitTeachingChapterLocally, localPedagogyScores, normalizeTeachingChapter, renderTeachingChapter, reviewPrompt, type ChapterBlueprint, type ChapterOneGate, type PedagogyQuality, type PedagogyScores, type TeachingChapter } from "../lib/pedagogy";
+import { efficientChapterPrompt, evaluateChapterOneGate, evaluateTeachingChapter, feedbackRevisionPrompt, fitTeachingChapterLocally, localPedagogyScores, normalizeTeachingChapter, renderTeachingChapter, type ChapterOneGate, type PedagogyQuality, type PedagogyScores, type TeachingChapter } from "../lib/pedagogy";
 
 interface Env {
   ASSETS: Fetcher;
@@ -65,7 +65,6 @@ type DraftProjectInput = {
   sourceTerms?: string[];
   chapters: DraftChapterInput[];
   chapterIds: number[];
-  repairOnly?: boolean;
   phase7ChapterOneOnly?: boolean;
 };
 
@@ -357,7 +356,7 @@ class TeachingEngineError extends Error {
     readonly quota = false,
     readonly requestCount = 0,
     readonly usage?: AiUsage,
-    readonly diagnostic?: { wordCount: number; scores: PedagogyScores; summary: string; targetPages?: number },
+    readonly diagnostic?: { wordCount: number; scores: PedagogyScores; summary: string; targetPages?: number; candidateChapter?: DraftChapterInput },
   ) {
     super(message);
   }
@@ -461,6 +460,18 @@ function chapterSourceMaterial(pageTexts: string[], chapter: DraftChapterInput, 
   return material.length <= 24000 ? material : `${material.slice(0, 12000)}\n\n[PRIVATE MATERIAL CONTINUES]\n\n${material.slice(-11500)}`;
 }
 
+function focusedRepairMaterial(sourceMaterial: string, chapterTitle: string, failures: string[]) {
+  const feedbackTerms = contentWords(failures.join(" ")).filter((word) => word.length > 4 && !stopWords.has(word)).slice(0, 12);
+  const keywords = [...new Set([...chapterKeywords(chapterTitle, []), ...feedbackTerms])];
+  const evidence = usefulSentences(sourceMaterial)
+    .map((sentence) => ({ sentence, score: sentenceScore(sentence, keywords) }))
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 12)
+    .map((entry) => entry.sentence)
+    .join(" ");
+  return (evidence || sourceMaterial).slice(0, 10000);
+}
+
 function parseJsonObject<T>(value: string): T {
   const cleaned = value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
   try {
@@ -508,7 +519,7 @@ async function openRouterStructured<T>(env: Env, prompt: string, maxCompletionTo
     if (response.status === 429) throw new TeachingEngineError("Nemotron reached the current free-model request or daily quota limit. Generation stopped immediately; resume the book after the quota resets.", 429, "quota-exhausted", false, true, 1);
     if (response.status === 402) throw new TeachingEngineError("The OpenRouter account or key spending limit needs attention. Generation stopped immediately; completed chapters remain saved.", 402, "quota-exhausted", false, true, 1);
     if (response.status === 401 || response.status === 403) throw new TeachingEngineError("The OpenRouter key was rejected. Completed chapters remain saved.", 503, "authentication", false, false, 1);
-    if (response.status === 408 || response.status >= 500) throw new TeachingEngineError(`Nemotron is temporarily unavailable (${response.status}). The website may retry this chapter once after a short delay.`, 502, "provider-temporary", true, false, 1);
+    if (response.status === 408 || response.status >= 500) throw new TeachingEngineError(`Nemotron is temporarily unavailable (${response.status}). This chapter stopped safely; use Resume book when the provider is available.`, 502, "provider-temporary", true, false, 1);
     throw new TeachingEngineError(`Nemotron could not prepare this chapter (${response.status}). ${detail}`, 502, "provider-rejected", false, false, 1);
   }
   const result = await response.json() as {
@@ -527,19 +538,13 @@ async function openRouterStructured<T>(env: Env, prompt: string, maxCompletionTo
   try {
     data = parseJsonObject<T>(content);
   } catch {
-    throw new TeachingEngineError("Nemotron returned malformed chapter data. The previous chapter was kept unchanged; use targeted repair instead of regenerating automatically.", 422, "malformed-output", false, false, 1, usage);
+    throw new TeachingEngineError("Nemotron returned malformed chapter data. The previous chapter was kept unchanged and no hidden retry was made.", 422, "malformed-output", false, false, 1, usage);
   }
   return {
     data,
     model,
     usage,
   };
-}
-
-function normalizedScores(value: unknown): PedagogyScores {
-  const raw = (value && typeof value === "object" ? value : {}) as Partial<PedagogyScores>;
-  const score = (item: unknown) => Math.max(0, Math.min(100, Number(item) || 0));
-  return { context: score(raw.context), coherence: score(raw.coherence), ageFit: score(raw.ageFit), pedagogy: score(raw.pedagogy), sourceFidelity: score(raw.sourceFidelity) };
 }
 
 function privateChapterRefs(pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput) {
@@ -551,23 +556,17 @@ function privateChapterRefs(pageTexts: string[], chapter: DraftChapterInput, ind
     .map((item) => ({ title: chapter.title, page: entry.pageIndex + 1, excerpt: item.sentence.slice(0, 520) }))).slice(0, 8);
 }
 
-async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput, allowAutomaticRepair = true) {
+async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput) {
   const sourceMaterial = chapterSourceMaterial(pageTexts, chapter, index, total, project);
   if (contentWords(sourceMaterial).length < 120) throw new TeachingEngineError("This chapter does not contain enough readable text. OCR or a clearer source file may be required.", 422);
   const audience = project.audience || "Ages 10–12";
   const language = project.language || "English";
   const initial = await openRouterStructured<{ chapter: TeachingChapter }>(
     env,
-    efficientChapterPrompt({ title: chapter.title, audience, language, targetPages: chapter.pages, sourceMaterial, strictChapterOneTrial: !allowAutomaticRepair }),
-    allowAutomaticRepair ? 3200 : 2300,
+    efficientChapterPrompt({ title: chapter.title, audience, language, targetPages: chapter.pages, sourceMaterial }),
+    2800,
   );
-  let review: { chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] } = {
-    chapter: initial.data.chapter,
-    scores: { context: 0, coherence: 0, ageFit: 0, pedagogy: 0, sourceFidelity: 0 },
-    summary: "The chapter was scored by deterministic local teaching checks.",
-    checks: [],
-  };
-  let draft = normalizeTeachingChapter(review.chapter, chapter.title);
+  let draft = normalizeTeachingChapter(initial.data.chapter, chapter.title);
   let localFit = fitTeachingChapterLocally(draft, audience, chapter.pages);
   draft = localFit.chapter;
   let fittedPages = localFit.fittedPages;
@@ -575,60 +574,61 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
   let scores = localPedagogyScores(deterministic);
   let revisionPasses = 0;
   let usage = initial.usage;
-  if (!allowAutomaticRepair && (!deterministic.passed || Object.values(scores).some((score) => score < 80))) {
-    throw new TeachingEngineError(
-      `Chapter 1 completed its single request, but needs review: ${[...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 80).map(([name]) => `${name} needs improvement`)].join("; ")}. Accuracy and teaching checks were preserved; no automatic AI retry was used.`,
-      422,
-      "quality-review",
-      false,
-      false,
-      usage.requests,
-      usage,
-      { wordCount: deterministic.totalWords, scores, summary: typeof review.summary === "string" ? review.summary : "The single response needs review.", targetPages: fittedPages },
-    );
-  }
-  // Formatting cleanup happens locally in normalizeTeachingChapter. Spend one
-  // additional model request only when the meaningful quality gate truly fails.
-  if (!deterministic.passed || Object.values(scores).some((score) => score < 80)) {
-    const blueprint: ChapterBlueprint = { centralQuestion: "Repair the complete chapter", readerHook: "Preserve the strongest child-friendly opening", essentialIdeas: [], conceptOrder: [], requiredVocabulary: [], historicalContext: "Use the supplied material", sensitiveContext: "Keep mature material age-appropriate", avoidRepeating: [] };
-    let repair;
+  const feedbackHistory: string[] = [];
+  const candidateRank = (result: ReturnType<typeof evaluateTeachingChapter>, candidateScores: PedagogyScores) => Object.values(candidateScores).reduce((sum, score) => sum + score, 0) - result.failures.length * 8;
+  let best = { draft, localFit, fittedPages, deterministic, scores, rank: candidateRank(deterministic, scores) };
+  for (const attempt of [2, 3] as const) {
+    const meaningfulFailures = [...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 80).map(([name, score]) => `${name} score ${score} is below 80`)];
+    if (!meaningfulFailures.length) break;
+    feedbackHistory.push(`Pass ${attempt - 1}: ${meaningfulFailures.join("; ")}`);
+    let repair: Awaited<ReturnType<typeof openRouterStructured<{ chapter: TeachingChapter }>>>;
     try {
-      repair = await openRouterStructured<{ chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] }>(env, reviewPrompt({
+      repair = await openRouterStructured<{ chapter: TeachingChapter }>(env, feedbackRevisionPrompt({
         title: chapter.title,
         audience,
         language,
         targetPages: fittedPages,
-        sourceMaterial,
-        blueprint,
+        sourceMaterial: focusedRepairMaterial(sourceMaterial, chapter.title, meaningfulFailures),
         draft,
-        failures: [...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 80).map(([name, score]) => `${name} score ${score} is below 80`)],
-      }), 3600);
+        failures: meaningfulFailures,
+        attempt,
+      }), attempt === 2 ? 2400 : 2000);
     } catch (error) {
       if (error instanceof TeachingEngineError) {
-        throw new TeachingEngineError(error.message, error.status, error.code, error.retryable, error.quota, initial.usage.requests + error.requestCount);
+        throw new TeachingEngineError(error.message, error.status, error.code, error.retryable, error.quota, usage.requests + error.requestCount, addUsage(usage, error.usage || { inputTokens: 0, outputTokens: 0, totalTokens: 0, reasoningTokens: 0, requests: error.requestCount }));
       }
       throw error;
     }
-    review = repair.data;
     usage = addUsage(usage, repair.usage);
-    draft = normalizeTeachingChapter(review.chapter, chapter.title);
+    draft = normalizeTeachingChapter(repair.data.chapter, chapter.title);
     localFit = fitTeachingChapterLocally(draft, audience, chapter.pages);
     draft = localFit.chapter;
     fittedPages = localFit.fittedPages;
     deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, fittedPages);
     scores = localPedagogyScores(deterministic);
-    revisionPasses = 1;
+    revisionPasses = attempt - 1;
+    const rank = candidateRank(deterministic, scores);
+    if (rank > best.rank) best = { draft, localFit, fittedPages, deterministic, scores, rank };
   }
   if (!deterministic.passed || Object.values(scores).some((score) => score < 80)) {
-    throw new TeachingEngineError(`This chapter did not pass the children’s textbook quality gate: ${[...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 80).map(([name]) => `${name} needs improvement`)].join("; ")}. The previous chapter was kept unchanged.`, 422, "quality-review", false, false, usage.requests);
+    ({ draft, localFit, fittedPages, deterministic, scores } = best);
+    const failures = [...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 80).map(([name]) => `${name} needs improvement`)];
+    const candidateBody = authorialReaderHtml(renderTeachingChapter(draft, index + 1, escapeHtml));
+    throw new TeachingEngineError(`Human review required after ${usage.requests} of 3 permitted Nemotron passes: ${failures.join("; ")}. The best candidate was saved and no fourth request was made.`, 422, "human-review", false, false, usage.requests, usage, {
+      wordCount: deterministic.totalWords,
+      scores,
+      summary: `Automatic feedback loop used ${usage.requests} pass${usage.requests === 1 ? "" : "es"}. ${feedbackHistory.join(" | ")}`,
+      targetPages: fittedPages,
+      candidateChapter: { ...chapter, pages: fittedPages, status: "draft" as const, body: candidateBody, sourceRefs: privateChapterRefs(pageTexts, chapter, index, total, project), wordCount: deterministic.totalWords, generationProfile: generationProfileKey(project.audience, project.language), pedagogyQuality: { status: "needs-review", engine: initial.model, scores, revisionPasses, summary: `Best candidate preserved after ${usage.requests} automatic passes.`, checks: [...localFit.fixes, ...failures].slice(0, 9), learningGoals: draft.learningGoals } },
+    });
   }
   const pedagogyQuality: PedagogyQuality = {
     status: "passed",
     engine: initial.model,
     scores,
     revisionPasses,
-    summary: revisionPasses ? (typeof review.summary === "string" ? review.summary : "The targeted repair passed local teaching checks.") : "Local checks passed for structure, age fit, teaching completeness, length, and source grounding.",
-    checks: [...new Set([...(Array.isArray(review.checks) ? review.checks.filter((item): item is string => typeof item === "string") : []), localFit.originalWords > localFit.compactedWords ? `Local safe compaction removed ${localFit.originalWords - localFit.compactedWords} repeated or boilerplate words without an AI request` : "No local text trimming was needed", fittedPages > chapter.pages ? `Preserved the complete lesson by expanding the layout from ${chapter.pages} to ${fittedPages} pages` : `Fits the planned ${fittedPages} pages`, `Readable lesson: ${deterministic.totalWords} words`, `Age-fit sentence average: ${deterministic.averageSentenceWords} words`, `Chapter concepts used: ${deterministic.sourceTermOverlap.slice(0, 6).join(", ")}`])].slice(0, 9),
+    summary: revisionPasses ? `Passed after ${revisionPasses + 1} carefully targeted Nemotron passes. Earlier feedback was applied without exceeding the three-request limit.` : "The first Nemotron draft passed after zero-request local checking and formatting.",
+    checks: [...new Set([...localFit.fixes, `Nemotron passes used: ${usage.requests} of 3`, fittedPages > chapter.pages ? `Preserved the complete lesson by expanding the layout from ${chapter.pages} to ${fittedPages} pages` : `Fits the planned ${fittedPages} pages`, `Readable lesson: ${deterministic.totalWords} words`, `Age-fit sentence average: ${deterministic.averageSentenceWords} words`, `Chapter concepts used: ${deterministic.sourceTermOverlap.slice(0, 6).join(", ")}`])].slice(0, 9),
     learningGoals: draft.learningGoals,
   };
   const body = authorialReaderHtml(renderTeachingChapter(draft, index + 1, escapeHtml));
@@ -642,54 +642,6 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
       generationProfile: generationProfileKey(project.audience, project.language),
       pedagogyQuality,
   }, usage };
-}
-
-async function buildTargetedRepair(env: Env, pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput) {
-  const sourceMaterial = chapterSourceMaterial(pageTexts, chapter, index, total, project);
-  const currentText = authorialReaderHtml(chapter.body || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 22000);
-  if (contentWords(currentText).length < 80) throw new TeachingEngineError("There is not enough chapter text to repair. Improve the chapter first.", 422, "repair-unavailable");
-  const audience = project.audience || "Ages 10–12";
-  const language = project.language || "English";
-  const repair = await openRouterStructured<{ chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] }>(env, `You are making one targeted repair to an existing children’s textbook chapter for ${audience} in ${language}.
-
-CHAPTER: ${chapter.title}
-TARGET PAGES: ${chapter.pages}
-
-Repair only genuine teaching, coherence, age-fit, or factual weaknesses. Preserve sound wording and the chapter’s meaning. Fix formatting locally in the returned structure; do not invent facts, add padding, mention AI, or discuss this instruction. This is the single permitted repair request, so return the complete corrected lesson as valid JSON with exactly: chapter, scores, summary, checks. The chapter object must contain title, chapterPromise, learningGoals, introduction, sections, quickCheck, activity, and recap.
-
-CURRENT CHAPTER:
-${currentText}
-
-PRIVATE FACTUAL MATERIAL:
-${sourceMaterial}`, 3600);
-  let draft = normalizeTeachingChapter(repair.data.chapter, chapter.title);
-  const localFit = fitTeachingChapterLocally(draft, audience, chapter.pages);
-  draft = localFit.chapter;
-  const scores = normalizedScores(repair.data.scores);
-  const deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, localFit.fittedPages);
-  if (!deterministic.passed || Object.values(scores).some((score) => score < 80)) {
-    throw new TeachingEngineError(`The one targeted repair still needs review: ${[...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 80).map(([name]) => `${name} needs improvement`)].join("; ")}. The original remains available.`, 422, "repair-review", false, false, repair.usage.requests);
-  }
-  const pedagogyQuality: PedagogyQuality = {
-    status: "passed",
-    engine: repair.model,
-    scores,
-    revisionPasses: 1,
-    summary: typeof repair.data.summary === "string" ? repair.data.summary : "The targeted repair passed the teaching-quality review.",
-    checks: [...new Set([...(Array.isArray(repair.data.checks) ? repair.data.checks.filter((item): item is string => typeof item === "string") : []), `Readable lesson: ${deterministic.totalWords} words`, `Age-fit sentence average: ${deterministic.averageSentenceWords} words`])].slice(0, 9),
-    learningGoals: draft.learningGoals,
-  };
-  const body = authorialReaderHtml(renderTeachingChapter(draft, index + 1, escapeHtml));
-  return { chapter: {
-    ...chapter,
-    pages: localFit.fittedPages,
-    status: "draft" as const,
-    body,
-    sourceRefs: privateChapterRefs(pageTexts, chapter, index, total, project),
-    wordCount: contentWords(body.replace(/<[^>]+>/g, " ")).length,
-    generationProfile: generationProfileKey(project.audience, project.language),
-    pedagogyQuality,
-  }, usage: repair.usage };
 }
 
 function analyseText(text: string) {
@@ -1023,9 +975,7 @@ async function draftApi(request: Request, env: Env) {
     for (let index = 0; index < project.chapters.length; index += 1) {
       const chapter = project.chapters[index];
       if (!requested.has(chapter.id) || chapter.locked) continue;
-      const built = project.repairOnly
-        ? await buildTargetedRepair(env, extracted.pageTexts, chapter, index, project.chapters.length, project)
-        : await buildPedagogicalDraft(env, extracted.pageTexts, chapter, index, project.chapters.length, project, !project.phase7ChapterOneOnly);
+      const built = await buildPedagogicalDraft(env, extracted.pageTexts, chapter, index, project.chapters.length, project);
       chapters.push(built.chapter);
       usage = addUsage(usage, built.usage);
     }
@@ -1036,9 +986,9 @@ async function draftApi(request: Request, env: Env) {
         status: "needs-review",
         engine: env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL,
         scores: error.diagnostic.scores,
-        revisionPasses: 0,
+        revisionPasses: Math.max(0, Math.min(2, (error.usage?.requests || error.requestCount) - 1)),
         summary: error.diagnostic.summary,
-        checks: ["Stopped after the single Phase 8 request"],
+        checks: [`Automatic feedback loop stopped safely after ${error.usage?.requests || error.requestCount} of 3 permitted passes`],
         learningGoals: [],
       } : undefined;
       const failedChapter = project.chapters.find((chapter) => chapter.id === 1);
@@ -1052,6 +1002,7 @@ async function draftApi(request: Request, env: Env) {
         usage: error.usage,
         durationMs,
         phase7Evaluation,
+        candidateChapter: error.diagnostic?.candidateChapter,
       }, error.status);
     }
     throw error;

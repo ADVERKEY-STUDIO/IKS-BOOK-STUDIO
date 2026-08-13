@@ -31,8 +31,9 @@ test("completed chapters save usage immediately and resume skips them", () => {
   assert.match(page, /Resume starts from the first unfinished chapter/);
 });
 
-test("quota and quality failures keep earlier content and become resumable states", () => {
-  assert.match(page, /result\.data\.quota \? "Paused by quota" : "Needs review"/);
+test("quota and quality failures keep earlier content and become durable states", () => {
+  assert.match(page, /result\.data\.code === "human-review" \? "Human review" : "Needs review"/);
+  assert.match(page, /candidateChapter/);
   assert.match(page, /generationError: result\.data\.error \|\| "Chapter drafting failed"/);
   assert.match(css, /generation-paused-by-quota/);
   assert.match(css, /generation-needs-review/);

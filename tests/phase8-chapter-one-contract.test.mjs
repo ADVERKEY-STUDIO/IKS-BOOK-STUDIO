@@ -69,12 +69,12 @@ test("local fitting preserves overlong prose and adds layout space without an AI
   assert.equal(fitted.chapter.learningGoals.length, chapter.learningGoals.length);
 });
 
-test("the gated Chapter 1 browser flow never performs a hidden retry", () => {
-  assert.match(page, /const singleShotChapterOneTrial/);
-  assert.match(page, /const maximumAttempts = singleShotChapterOneTrial \? 1 : 2/);
-  assert.match(page, /PHASE 8 · CHAPTER 1 GATE/);
-  assert.match(worker, /strictChapterOneTrial: !allowAutomaticRepair/);
-  assert.match(worker, /allowAutomaticRepair \? 3200 : 2300/);
+test("the Chapter 1 pilot uses the same bounded feedback loop without browser retries", () => {
+  assert.match(page, /phase7ChapterOneOnly: chapterId === 1/);
+  assert.doesNotMatch(page, /maximumAttempts/);
+  assert.match(page, /PUBLISHING PILOT · CHAPTER 1/);
+  assert.match(worker, /for \(const attempt of \[2, 3\] as const\)/);
+  assert.match(worker, /attempt === 2 \? 2400 : 2000/);
   assert.match(worker, /finish the JSON before the token limit/);
   assert.match(worker, /openRouterStructured<\{ chapter: TeachingChapter \}>/);
   assert.match(worker, /localPedagogyScores\(deterministic\)/);

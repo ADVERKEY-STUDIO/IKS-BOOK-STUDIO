@@ -40,14 +40,14 @@ test("simulated Chapter 1 success passes deterministic teaching and Phase 7 gate
   assert.ok(Object.values(gate.checks).every(Boolean));
 });
 
-test("simulated excess requests or tokens keep Chapters 2–6 locked", () => {
-  const gate = evaluateChapterOneGate({ usage: { requests: 2, totalTokens: 8800 }, durationMs: 50000, wordCount: 780, quality: passedQuality });
+test("simulated requests or tokens beyond the three-pass budget fail the pilot", () => {
+  const gate = evaluateChapterOneGate({ usage: { requests: 4, totalTokens: 19000 }, durationMs: 50000, wordCount: 780, quality: passedQuality });
   assert.equal(gate.passed, false);
   assert.equal(gate.checks.requests, false);
   assert.equal(gate.checks.tokenBudget, false);
 });
 
-test("simulated weak accuracy and age-fit response fails without unlocking the book", () => {
+test("simulated weak accuracy and age-fit response requires human review", () => {
   const gate = evaluateChapterOneGate({ usage: { requests: 1, totalTokens: 3900 }, durationMs: 41000, wordCount: 760, quality: { ...passedQuality, status: "needs-review", scores: { ...passedQuality.scores, ageFit: 72, sourceFidelity: 68 } } });
   assert.equal(gate.passed, false);
   assert.equal(gate.checks.accuracy, false);

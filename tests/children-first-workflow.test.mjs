@@ -37,7 +37,8 @@ test("reader and design choices show a live book glimpse", () => {
 test("one pedagogy pipeline changes prose requirements only by age band", () => {
   assert.match(worker, /buildPedagogicalDraft/);
   assert.match(worker, /efficientChapterPrompt/);
-  assert.match(worker, /reviewPrompt/);
+  assert.match(worker, /feedbackRevisionPrompt/);
+  assert.match(worker, /localPedagogyScores/);
   assert.match(worker, /generationProfileKey/);
   assert.doesNotMatch(worker, /childWritingMode|modeParagraphParts|modeEvidenceOrder/);
 
