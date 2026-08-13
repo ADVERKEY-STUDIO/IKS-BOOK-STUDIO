@@ -11,6 +11,17 @@ type View = "dashboard" | "wizard" | "analysis" | "brief" | "editor";
 
 type SourceSection = { title: string; page: number; excerpt: string };
 
+type ChapterGenerationStatus = "Waiting" | "Generating" | "Completed" | "Needs review" | "Paused by quota";
+
+type GenerationUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  reasoningTokens: number;
+  requests: number;
+  updatedAt?: string;
+};
+
 type ImportedPage = {
   pageId: string;
   pageNumber: number;
@@ -51,6 +62,9 @@ type Chapter = {
   pedagogyQuality?: PedagogyQuality;
   importedPages?: ImportedPage[];
   importValidated?: boolean;
+  generationStatus?: ChapterGenerationStatus;
+  generationUsage?: GenerationUsage;
+  generationError?: string;
 };
 
 type ChapterContextPlan = Required<Pick<Chapter, "sourceStartPage" | "sourceEndPage" | "sourcePageCount" | "sourceWordCount" | "complexityScore" | "complexity" | "keyTerms" | "context" | "recommendedPages" | "pageReason">> & { title: string };
@@ -280,6 +294,7 @@ let seedProject: Project = {
       title: "The Thinker and His World",
       pages: 12,
       status: "approved",
+      generationStatus: "Completed",
       locked: true,
       sourceRefs: [{ title: "Foundations and Context", page: 13, excerpt: "The source connects knowledge, discipline, public welfare and administration as practical responsibilities." }],
       body: `<p class="chapter-kicker">CHAPTER ONE</p><h1>The Thinker<br/>and His World</h1><p class="chapter-deck">Before the Arthashastra became a guide to governance, it was a response to a changing world—one in which knowledge, discipline and public welfare had to work together.</p><blockquote>Good governance begins with understanding people, place and purpose.</blockquote><h2>A landscape of new ideas</h2><p>Ancient India was home to many schools of thought. Teachers, rulers and communities debated how prosperity could be created and protected. The Arthashastra brought these conversations into a practical framework for leadership.</p><div class="illustration"><span>ILLUSTRATION 01</span><strong>A learning hall at dawn</strong><small>Suggested visual: a teacher, students, manuscripts and a map of the subcontinent.</small></div><h2>Why the text still matters</h2><p>The work asks questions that remain familiar today: What makes an institution trustworthy? How should leaders balance strength and compassion? How can public resources be used wisely?</p><div class="takeaway"><b>KEY IDEA</b><p>Knowledge is valuable when it improves decisions and serves the wider community.</p></div>`,
@@ -289,6 +304,7 @@ let seedProject: Project = {
       title: "Knowledge, Learning and Discipline",
       pages: 10,
       status: "draft",
+      generationStatus: "Needs review",
       locked: false,
       sourceRefs: [{ title: "Knowledge and Learning", page: 37, excerpt: "Education and disciplined inquiry are presented as foundations for sound judgement." }],
       body: `<p class="chapter-kicker">CHAPTER TWO</p><h1>Knowledge, Learning<br/>and Discipline</h1><p class="chapter-deck">A practical education joins careful study with reflection, observation and responsible action.</p><h2>Learning as preparation</h2><p>The text treats education as preparation for sound judgment. It connects intellectual training with self-control and attention to real conditions.</p><div class="illustration"><span>ILLUSTRATION 02</span><strong>Four paths of learning</strong><small>Suggested visual: a precise editorial diagram built from the approved source.</small></div>`,
@@ -298,6 +314,7 @@ let seedProject: Project = {
       title: "Leadership and Public Welfare",
       pages: 14,
       status: "draft",
+      generationStatus: "Needs review",
       locked: false,
       sourceRefs: [{ title: "Leadership and Welfare", page: 55, excerpt: "Leadership is evaluated through responsibility, institutional strength and public welfare." }],
       body: `<p class="chapter-kicker">CHAPTER THREE</p><h1>Leadership and<br/>Public Welfare</h1><p class="chapter-deck">Leadership is presented not as privilege, but as a demanding responsibility.</p><h2>The work of leadership</h2><p>A capable leader listens, studies evidence, chooses advisers carefully and keeps public welfare at the centre of policy.</p>`,
@@ -307,6 +324,7 @@ let seedProject: Project = {
       title: "Economy, Trade and Resources",
       pages: 14,
       status: "planned",
+      generationStatus: "Waiting",
       locked: false,
       sourceRefs: [{ title: "Economy and Resources", page: 75, excerpt: "Revenue, trade, agriculture and resources are treated as connected parts of prosperity." }],
       body: `<p class="chapter-kicker">CHAPTER FOUR</p><h1>Economy, Trade<br/>and Resources</h1><p class="chapter-deck">Prosperity depends on systems that are understood, measured and maintained.</p>`,
@@ -316,6 +334,7 @@ let seedProject: Project = {
       title: "Strategy, Diplomacy and Peace",
       pages: 14,
       status: "planned",
+      generationStatus: "Waiting",
       locked: false,
       sourceRefs: [{ title: "Strategy and Diplomacy", page: 101, excerpt: "Diplomacy and strategy require realistic assessment, preparation and awareness of changing relationships." }],
       body: `<p class="chapter-kicker">CHAPTER FIVE</p><h1>Strategy, Diplomacy<br/>and Peace</h1><p class="chapter-deck">Wise strategy begins with a realistic view of relationships, risks and possible futures.</p>`,
@@ -340,6 +359,7 @@ seedProject = {
     title,
     pages: index === 5 ? 6 : 9,
     status: "planned" as const,
+    generationStatus: "Waiting" as const,
     locked: false,
     sourceRefs: seedProject.sourceSections[index] ? [seedProject.sourceSections[index]] : [],
     body: `<p class="chapter-kicker">CHAPTER ${String(index + 1).padStart(2, "0")}</p><h1>${title}</h1>`,
@@ -375,7 +395,7 @@ const emptyProject: Project = {
   citationStyle: "Source notes for grown-ups",
   learningFeatures: ["Key terms", "Clear examples", "Reflection"],
   chapters: [
-    { id: 1, title: "Opening chapter", pages: 10, status: "planned", locked: false, sourceRefs: [], body: `<p class="chapter-kicker">CHAPTER ONE</p><h1>Opening chapter</h1><p class="chapter-deck">Your generated chapter will appear here after the book brief is approved.</p>` },
+    { id: 1, title: "Opening chapter", pages: 10, status: "planned", generationStatus: "Waiting", locked: false, sourceRefs: [], body: `<p class="chapter-kicker">CHAPTER ONE</p><h1>Opening chapter</h1><p class="chapter-deck">Your generated chapter will appear here after the book brief is approved.</p>` },
   ],
   editorialPreferences: [],
   briefApproved: false,
@@ -672,6 +692,7 @@ function chapterFromContextPlan(title: string, index: number, section: SourceSec
     title,
     pages: plan?.recommendedPages ?? 6,
     status: "planned",
+    generationStatus: "Waiting",
     locked: false,
     sourceRefs: section ? [section] : [],
     body: `<p class="chapter-kicker">CHAPTER ${index + 1}</p><h1>${escapeHtml(title)}</h1><p class="chapter-deck">This chapter is ready to become a complete, engaging part of the children’s book.</p>`,
@@ -741,6 +762,9 @@ function reconcileOriginalChapters(project: Project, titles: string[], sections:
       visualType: existing?.visualType,
       wordCount: existing?.wordCount,
       generationProfile: existing?.generationProfile,
+      generationStatus: existing?.generationStatus || (existing?.pedagogyQuality?.status === "passed" ? "Completed" : "Waiting"),
+      generationUsage: existing?.generationUsage,
+      generationError: existing?.generationError,
       sourceStartPage: plan?.sourceStartPage ?? existing?.sourceStartPage,
       sourceEndPage: plan?.sourceEndPage ?? existing?.sourceEndPage,
       sourcePageCount: plan?.sourcePageCount ?? existing?.sourcePageCount,
@@ -843,6 +867,9 @@ function normalizeProject(saved: Project): Project {
       pedagogyQuality: chapter.pedagogyQuality,
       importedPages: chapter.importedPages?.map((page) => ({ ...page, body: authorialReaderHtml(page.body) })),
       importValidated: Boolean(chapter.importValidated),
+      generationStatus: chapter.generationStatus || (chapter.importValidated || chapter.pedagogyQuality?.status === "passed" ? "Completed" : "Waiting"),
+      generationUsage: chapter.generationUsage,
+      generationError: chapter.generationError,
     };
   });
   const hierarchy = repairChapterHierarchy(normalizedChapters);
@@ -954,6 +981,28 @@ function pedagogyAverage(quality?: PedagogyQuality) {
   if (!quality) return 0;
   const values = Object.values(quality.scores);
   return Math.round(values.reduce((sum, score) => sum + score, 0) / Math.max(1, values.length));
+}
+
+function chapterGenerationState(chapter: Chapter): ChapterGenerationStatus {
+  return chapter.generationStatus || (chapter.importValidated || chapter.pedagogyQuality?.status === "passed" ? "Completed" : "Waiting");
+}
+
+const qualityScoreLabels: Record<string, string> = {
+  context: "Context",
+  coherence: "Coherence",
+  ageFit: "Age fit",
+  pedagogy: "Teaching",
+  sourceFidelity: "Accuracy",
+};
+
+function generationTotals(chapters: Chapter[]): GenerationUsage {
+  return chapters.reduce<GenerationUsage>((total, chapter) => ({
+    inputTokens: total.inputTokens + (chapter.generationUsage?.inputTokens || 0),
+    outputTokens: total.outputTokens + (chapter.generationUsage?.outputTokens || 0),
+    totalTokens: total.totalTokens + (chapter.generationUsage?.totalTokens || 0),
+    reasoningTokens: total.reasoningTokens + (chapter.generationUsage?.reasoningTokens || 0),
+    requests: total.requests + (chapter.generationUsage?.requests || 0),
+  }), { inputTokens: 0, outputTokens: 0, totalTokens: 0, reasoningTokens: 0, requests: 0 });
 }
 
 function printableChapters(chapters: Chapter[]) {
@@ -1213,7 +1262,7 @@ export default function Home() {
   async function saveChapterBody() {
     if (!active || !editorRef.current) return;
     const html = authorialReaderHtml(editorRef.current.innerHTML);
-    const edited = project.chapters.map((chapter) => chapter.id === active.id ? { ...chapter, body: html, status: "draft" as const, generationProfile: "", pedagogyQuality: undefined, importedPages: undefined, importValidated: false } : chapter);
+    const edited = project.chapters.map((chapter) => chapter.id === active.id ? { ...chapter, body: html, status: "draft" as const, generationStatus: "Needs review" as const, generationProfile: "", pedagogyQuality: undefined, importedPages: undefined, importValidated: false } : chapter);
     const next = { ...project, chapters: attachChapterVisuals(project, edited) };
     setProject(next);
     try { await persistProject(next); notify("Chapter updated and saved"); } catch { notify("Chapter changed; save again when connected"); }
@@ -1242,6 +1291,18 @@ export default function Home() {
       setVersions((current) => [data.version, ...current]);
       notify("Version checkpoint created");
     } catch { notify("Version could not be created"); }
+  }
+
+  async function preserveGenerationVersion(snapshot: Project, chapter: Chapter) {
+    const label = `Before Chapter ${String(chapter.id).padStart(2, "0")} generation`;
+    const response = await fetch("/api/versions", {
+      method: "POST",
+      headers: requestHeaders(),
+      body: JSON.stringify({ projectId: snapshot.id, label, snapshot }),
+    });
+    if (!response.ok) throw new Error("The previous book version could not be preserved, so generation did not start");
+    const data = await response.json() as { version: { label: string; date: string; snapshot: Project } };
+    setVersions((current) => [data.version, ...current]);
   }
 
   async function rememberPreference(scope: "book" | "designer") {
@@ -1295,7 +1356,7 @@ export default function Home() {
   function addChapter() {
     if (project.chapters.length >= CHAPTER_PAGE_BUDGET) { notify("The 100-page safety ceiling cannot fit another chapter start"); return; }
     const id = Math.max(0, ...project.chapters.map((chapter) => chapter.id)) + 1;
-    const nextChapter: Chapter = { id, title: `New chapter ${id}`, pages: 6, status: "planned", locked: false, sourceRefs: [], body: `<p class="chapter-kicker">CHAPTER ${id}</p><h1>New chapter ${id}</h1><p class="chapter-deck">Develop this chapter with a clear idea, a memorable example and a thoughtful ending.</p>` };
+    const nextChapter: Chapter = { id, title: `New chapter ${id}`, pages: 6, status: "planned", generationStatus: "Waiting", locked: false, sourceRefs: [], body: `<p class="chapter-kicker">CHAPTER ${id}</p><h1>New chapter ${id}</h1><p class="chapter-deck">Develop this chapter with a clear idea, a memorable example and a thoughtful ending.</p>` };
     patchProject({ chapters: fitChaptersToBookLimit(attachChapterVisuals(project, [...project.chapters, nextChapter])) });
     setActiveChapter(id);
     notify("Chapter added");
@@ -1408,6 +1469,7 @@ export default function Home() {
           recommendedPages: incoming.pages.length,
           pagePlanCustom: true,
           status: "approved" as const,
+          generationStatus: "Completed" as const,
           locked: false,
           body: authorialReaderHtml(body),
           wordCount: incoming.pages.reduce((sum, page) => sum + (page.text.match(/[\p{L}\p{N}’'-]+/gu)?.length ?? 0), 0),
@@ -1446,7 +1508,7 @@ export default function Home() {
           ? active.body.replace(escapedSelection, replacement)
           : `${active.body}<div class="editorial-insert"><b>EDITORIAL REVISION</b>${replacement}</div>`;
     }
-    const next = { ...project, chapters: project.chapters.map((chapter) => chapter.id === active.id ? { ...chapter, body, status: "draft" as const, generationProfile: "", pedagogyQuality: undefined, importedPages: undefined, importValidated: false } : chapter) };
+    const next = { ...project, chapters: project.chapters.map((chapter) => chapter.id === active.id ? { ...chapter, body, status: "draft" as const, generationStatus: "Needs review" as const, generationProfile: "", pedagogyQuality: undefined, importedPages: undefined, importValidated: false } : chapter) };
     setProject(next);
     setAiRequest(null);
     await persistProject(next).catch(() => undefined);
@@ -1466,7 +1528,7 @@ export default function Home() {
     const selectedProfile = generationProfileKey(project.audience, project.language);
     const chapterIds = project.chapters.filter((chapter, index) => {
       if (chapter.locked) return false;
-      if (scope === "all") return chapter.pedagogyQuality?.status !== "passed" || chapter.generationProfile !== selectedProfile;
+      if (scope === "all") return chapter.generationStatus !== "Completed" || chapter.generationProfile !== selectedProfile;
       if (scope === "sample") return index === 0;
       if (scope === "active") return index === activeIndex;
       return chapterWordCount(chapter) < 350;
@@ -1475,6 +1537,7 @@ export default function Home() {
     setDraftBusy(true);
     let completed = 0;
     let workingProject = project;
+    let runningChapterId: number | null = null;
     const totalUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0, reasoningTokens: 0, requests: 0 };
     try {
       if (!project.sourceObjectKey) {
@@ -1482,6 +1545,18 @@ export default function Home() {
         return;
       }
       for (const chapterId of chapterIds) {
+        const currentChapter = workingProject.chapters.find((chapter) => chapter.id === chapterId);
+        if (!currentChapter) continue;
+        await preserveGenerationVersion(workingProject, currentChapter);
+        workingProject = {
+          ...workingProject,
+          chapters: workingProject.chapters.map((chapter) => chapter.id === chapterId
+            ? { ...chapter, generationStatus: "Generating" as const, generationError: undefined }
+            : chapter),
+        };
+        setProject(workingProject);
+        await persistProject(workingProject);
+        runningChapterId = chapterId;
         const response = await fetch("/api/draft", {
           method: "POST",
           headers: requestHeaders(),
@@ -1501,15 +1576,43 @@ export default function Home() {
             chapterIds: [chapterId],
           }),
         });
-        const data = await response.json() as { chapters?: Chapter[]; error?: string; usage?: typeof totalUsage };
-        if (!response.ok || !data.chapters?.length) throw new Error(data.error || "Chapter drafting failed");
+        const data = await response.json() as { chapters?: Chapter[]; error?: string; usage?: GenerationUsage };
+        if (!response.ok || !data.chapters?.length) {
+          const generationStatus: ChapterGenerationStatus = response.status === 429 || response.status === 402 ? "Paused by quota" : "Needs review";
+          workingProject = {
+            ...workingProject,
+            chapters: workingProject.chapters.map((chapter) => chapter.id === chapterId
+              ? { ...chapter, generationStatus, generationError: data.error || "Chapter drafting failed" }
+              : chapter),
+          };
+          setProject(workingProject);
+          await persistProject(workingProject);
+          throw new Error(data.error || "Chapter drafting failed");
+        }
         const replacement = data.chapters[0];
         const merged = workingProject.chapters.map((chapter) => chapter.id === replacement.id
-          ? { ...chapter, ...replacement, body: authorialReaderHtml(replacement.body), importedPages: undefined, importValidated: false }
+          ? {
+              ...chapter,
+              ...replacement,
+              body: authorialReaderHtml(replacement.body),
+              importedPages: undefined,
+              importValidated: false,
+              generationStatus: "Completed" as const,
+              generationError: undefined,
+              generationUsage: {
+                inputTokens: (chapter.generationUsage?.inputTokens || 0) + (data.usage?.inputTokens || 0),
+                outputTokens: (chapter.generationUsage?.outputTokens || 0) + (data.usage?.outputTokens || 0),
+                totalTokens: (chapter.generationUsage?.totalTokens || 0) + (data.usage?.totalTokens || 0),
+                reasoningTokens: (chapter.generationUsage?.reasoningTokens || 0) + (data.usage?.reasoningTokens || 0),
+                requests: (chapter.generationUsage?.requests || 0) + (data.usage?.requests || 0),
+                updatedAt: new Date().toISOString(),
+              },
+            }
           : chapter);
         workingProject = { ...workingProject, chapters: attachChapterVisuals(workingProject, merged) };
         setProject(workingProject);
         await persistProject(workingProject);
+        runningChapterId = null;
         completed += 1;
         if (data.usage) {
           totalUsage.inputTokens += data.usage.inputTokens || 0;
@@ -1524,7 +1627,20 @@ export default function Home() {
       notify(`${completed} chapter${completed === 1 ? "" : "s"} prepared and saved${usageNote}`);
     } catch (error) {
       const reason = error instanceof Error ? error.message : "Could not prepare the chapters";
-      notify(completed ? `${completed} chapter${completed === 1 ? "" : "s"} saved. Paused before the next chapter: ${reason}` : reason);
+      if (runningChapterId !== null) {
+        const running = workingProject.chapters.find((chapter) => chapter.id === runningChapterId);
+        if (running?.generationStatus === "Generating") {
+          workingProject = {
+            ...workingProject,
+            chapters: workingProject.chapters.map((chapter) => chapter.id === runningChapterId
+              ? { ...chapter, generationStatus: "Needs review" as const, generationError: reason }
+              : chapter),
+          };
+          setProject(workingProject);
+          await persistProject(workingProject).catch(() => undefined);
+        }
+      }
+      notify(completed ? `${completed} chapter${completed === 1 ? "" : "s"} saved. Resume will continue from the first unfinished chapter: ${reason}` : reason);
     } finally {
       setDraftBusy(false);
     }
@@ -1666,13 +1782,14 @@ function Analysis({ project, sourceBusy, onPatch, onBack, onContinue }: { projec
 }
 
 function BookBrief({ project, allocated, draftBusy, onBack, onUpdateChapter, onPrepare, onContinue }: { project: Project; allocated: number; draftBusy: boolean; onBack: () => void; onUpdateChapter: (id: number, patch: Partial<Chapter>) => void; onPrepare: (scope: "sample" | "all" | "active") => void; onContinue: () => void }) {
-  const drafted = project.chapters.filter((chapter) => chapter.status !== "planned").length;
+  const drafted = project.chapters.filter((chapter) => chapterGenerationState(chapter) === "Completed").length;
+  const usage = generationTotals(project.chapters);
   const first = project.chapters[0];
   return <main className="brief-page">
     <button className="text-button" onClick={onBack}>← Back to source analysis</button>
     <header className="brief-hero"><div><p className="eyebrow">CHILDREN’S BOOK BRIEF & PAGE PLAN</p><h1>{project.title}</h1><p className="lead">An illustrated adaptation for {project.audience.toLowerCase()}, written in clear natural language in the {project.aesthetic.toLowerCase()} book world.</p><div className="brief-chips"><span>{project.language}</span><span>{project.readingLevel}</span><span>{project.pageAesthetic} pages</span><span>{project.bookBorder} border</span><span>{project.imageFrequency}</span></div></div><aside><span>PROMISE TO THE CHILD READER</span><p>Keep the source truthful, make every new word understandable, and give each chapter a visual and something worth thinking about.</p></aside></header>
-    <div className="brief-layout"><section className="plan-card"><header><div><p className="eyebrow">STRUCTURE</p><h2>Chapter adaptation-page plan</h2></div><div className="budget-pill">{allocated} pages planned</div></header><div className="plan-head"><span>CHAPTER</span><span>ORIGINAL TITLE</span><span>PAGES</span><span>STATE</span></div>{project.chapters.map((chapter, index) => <div className="plan-row" key={chapter.id}><span>{String(index + 1).padStart(2, "0")}</span><strong className="preserved-title">{chapter.title}</strong><input aria-label={`Adaptation pages for ${chapter.title}`} type="number" min="1" max={maximumChapterPages(project.chapters, index)} value={chapter.pages} onChange={(event) => onUpdateChapter(chapter.id, { pages: Number(event.target.value), pagePlanCustom: true })}/><b className={`draft-state ${chapter.status}`}>{chapter.status}</b></div>)}<footer><span>Each recommendation is the shortest comfortable treatment for the selected age. Eight pages are included for front and back matter; 100 pages remains a ceiling only.</span></footer></section>
-      <aside className="generation-card"><p className="eyebrow">TOKEN-SMART AI WORKFLOW</p><h2>Build one saved lesson at a time</h2><p>Nemotron reads only the most relevant pages for the current chapter, plans, writes and reviews the complete lesson in one compact request. A second request is used only when the local quality gate finds a real problem.</p><div className="quality-gates"><span>Context</span><span>Coherence</span><span>Age fit</span><span>Teaching</span><span>Accuracy</span></div><div className="draft-progress"><span><b>{drafted}</b> of {project.chapters.length} drafted</span><i><b style={{ width: `${project.chapters.length ? drafted / project.chapters.length * 100 : 0}%` }}/></i></div><button className="secondary full" disabled={draftBusy} onClick={() => onPrepare("sample")}>{draftBusy ? "Teaching engine is reviewing…" : "Build and review sample lesson"}</button><button className="primary full" disabled={draftBusy} onClick={() => onPrepare("all")}>{draftBusy ? "Building and saving chapter by chapter…" : "Build all reviewed lessons"}</button><small>Each passed chapter is saved immediately. If a free-model limit is reached, run this again later and it resumes from the first unfinished chapter.</small></aside></div>
+    <div className="brief-layout"><section className="plan-card"><header><div><p className="eyebrow">STRUCTURE</p><h2>Chapter adaptation-page plan</h2></div><div className="budget-pill">{allocated} pages planned</div></header><div className="plan-head"><span>CHAPTER</span><span>ORIGINAL TITLE</span><span>PAGES</span><span>STATE</span></div>{project.chapters.map((chapter, index) => { const state = chapterGenerationState(chapter); return <div className="plan-row" key={chapter.id}><span>{String(index + 1).padStart(2, "0")}</span><strong className="preserved-title">{chapter.title}</strong><input aria-label={`Adaptation pages for ${chapter.title}`} type="number" min="1" max={maximumChapterPages(project.chapters, index)} value={chapter.pages} onChange={(event) => onUpdateChapter(chapter.id, { pages: Number(event.target.value), pagePlanCustom: true })}/><b className={`draft-state generation-${normalizedTitle(state).replace(/[^a-z]+/g, "-")}`}>{state}</b></div>; })}<footer><span>Each recommendation is the shortest comfortable treatment for the selected age. Eight pages are included for front and back matter; 100 pages remains a ceiling only.</span></footer></section>
+      <aside className="generation-card"><p className="eyebrow">RESUMABLE BOOK WORKFLOW</p><h2>Build one protected lesson at a time</h2><p>Before each chapter starts, the website preserves the previous book version. Nemotron writes only the current unfinished chapter, which is saved immediately after it passes.</p><div className="quality-gates"><span>Waiting</span><span>Generating</span><span>Completed</span><span>Needs review</span><span>Quota pause</span></div><div className="draft-progress"><span><b>{drafted}</b> of {project.chapters.length} completed</span><i><b style={{ width: `${project.chapters.length ? drafted / project.chapters.length * 100 : 0}%` }}/></i></div><div className="generation-usage"><span><b>{usage.totalTokens.toLocaleString()}</b> tokens recorded</span><span><b>{usage.requests}</b> Nemotron request{usage.requests === 1 ? "" : "s"}</span></div><button className="secondary full" disabled={draftBusy} onClick={() => onPrepare("sample")}>{draftBusy ? "Teaching engine is reviewing…" : "Build and review sample lesson"}</button><button className="primary full" disabled={draftBusy} onClick={() => onPrepare("all")}>{draftBusy ? "Saving each chapter before continuing…" : drafted ? "Resume unfinished chapters" : "Build all reviewed lessons"}</button><small>If a chapter fails or quota pauses, earlier completed chapters remain saved. Resume starts from the first unfinished chapter without regenerating completed work.</small></aside></div>
     {first && <section className="sample-spread"><div className="sample-copy"><p className="eyebrow">SAMPLE SPREAD</p><span>CHAPTER 01</span><h2>{first.title}</h2>{first.pedagogyQuality && <div className="sample-quality"><b>✓ Teaching quality passed · {pedagogyAverage(first.pedagogyQuality)}/100</b><span>{first.pedagogyQuality.summary}</span></div>}<p>{first.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 420)}</p><button className="text-button" onClick={() => onPrepare("sample")}>{first.status === "planned" ? "Create this sample" : "Refresh and review sample"} →</button></div>{first.imageUrl ? <figure className="sample-art sample-art-image"><img src={first.imageUrl} alt={first.imageAlt || first.imageCaption || first.title}/><figcaption>{first.imageCaption || first.title}</figcaption></figure> : <div className="sample-art"><span>ILLUSTRATION DIRECTION</span><strong>{project.aesthetic}</strong><p>{first.title} · {project.imageFrequency}</p><b>✦</b></div>}</section>}
     <footer className="brief-actions"><div><b>Ready for editorial review</b><span>{drafted ? `${drafted} chapter draft${drafted === 1 ? "" : "s"} prepared` : "Prepare at least one chapter now, or begin with a blank structure."}</span></div><button className="primary" onClick={onContinue}>Approve brief & open studio →</button></footer>
   </main>;
@@ -1690,10 +1807,10 @@ function Editor({ project, active, activeId, allocated, draftBusy, onSelect, edi
   const borderClass = normalizedTitle(project.bookBorder).replace(/[^a-z]+/g, "-");
   return <main className="editor-layout">
     <label className="editor-typography-select">Typography<select value={project.fontTheme} onChange={(event) => onPatchProject(typographyPatch(event.target.value))}>{typographyThemes.map((theme) => <option key={theme.value}>{theme.value}</option>)}</select></label>
-    <aside className="chapters"><header><p className="eyebrow">BOOK STRUCTURE</p><button onClick={onAddChapter} aria-label="Add chapter">＋</button></header><div className="front-matter"><span>FM</span><div><b>Front matter</b><small>Cover · Contents · Preface</small></div></div>{project.chapters.map((chapter) => <button className={chapter.id === activeId ? "chapter active" : "chapter"} onClick={() => onSelect(chapter.id)} key={chapter.id}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small>{chapter.importValidated ? `✓ package locked · ${chapter.importedPages?.length || chapter.pages} pages` : chapter.pedagogyQuality?.status === "passed" ? `✓ lesson passed · ${pedagogyAverage(chapter.pedagogyQuality)}/100` : `${chapter.pages} pages · ${chapter.status}`}</small></div><i>{chapter.locked ? "◆" : ""}</i></button>)}<div className="page-budget"><span><b>{allocated}</b> planned pages</span><small>Natural length · 100-page safety ceiling</small></div></aside>
+    <aside className="chapters"><header><p className="eyebrow">BOOK STRUCTURE</p><button onClick={onAddChapter} aria-label="Add chapter">＋</button></header><div className="front-matter"><span>FM</span><div><b>Front matter</b><small>Cover · Contents · Preface</small></div></div>{project.chapters.map((chapter) => { const state = chapterGenerationState(chapter); return <button className={chapter.id === activeId ? "chapter active" : "chapter"} onClick={() => onSelect(chapter.id)} key={chapter.id}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small className={`chapter-generation-state generation-${normalizedTitle(state).replace(/[^a-z]+/g, "-")}`}>{state}{chapter.generationUsage?.totalTokens ? ` · ${chapter.generationUsage.totalTokens.toLocaleString()} tokens` : ""}</small></div><i>{chapter.locked ? "◆" : ""}</i></button>; })}<div className="page-budget"><span><b>{allocated}</b> planned pages</span><small>Natural length · 100-page safety ceiling</small></div></aside>
     <section className="canvas"><nav className="editor-tools"><div><button onClick={() => document.execCommand("bold")}><b>B</b></button><button onClick={() => document.execCommand("italic")}><i>I</i></button><button onClick={() => document.execCommand("formatBlock", false, "h2")}>H2</button><button onClick={() => document.execCommand("insertUnorderedList")}>• List</button></div><div className="chapter-meter"><span>{active.pages} target pages</span><i><b style={{ width: active.status === "planned" ? "18%" : "67%" }}/></i><button onClick={onToggleLock}>{active.locked ? "◆ Locked" : "◇ Lock"}</button></div></nav><div className="page-stage"><article className={`paper font-${fontClass} world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")} page-aesthetic-${pageClass} book-border-${borderClass} age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}${active.imageUrl ? " has-chapter-image" : ""}`}><header><span>{project.title}</span><span>{project.audience}</span></header><div className="ornament">✦</div><div key={active.id} ref={editorRef} className="book-copy" contentEditable={!active.locked} suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: authorialReaderHtml(active.body) }}/>{active.imageUrl && <figure className="chapter-image"><img src={active.imageUrl} alt={active.imageAlt || active.imageCaption || active.title}/><figcaption>{active.imageCaption || active.title}</figcaption></figure>}<footer><span>{project.title}</span><span>{active.id}</span></footer></article></div><button className="save-float" onClick={onSaveBody}>✓ Save chapter</button></section>
     <aside className="assistant"><nav><button className={tab === "ai" ? "active" : ""} onClick={() => setTab("ai")}>✦<span>AI EDIT</span></button><button className={tab === "design" ? "active" : ""} onClick={() => setTab("design")}>◈<span>DESIGN</span></button><button className={tab === "sources" ? "active" : ""} onClick={() => setTab("sources")}>⌕<span>SOURCES</span></button></nav><div className="assistant-body">
-      {tab === "ai" && <><div className="assistant-title"><span>✦</span><div><b>Teaching-quality editor</b><small>The complete lesson must pass before publication.</small></div></div>{!active.locked && <button className="draft-chapter-button" disabled={draftBusy} onClick={onDraft}>{draftBusy ? "Understanding and reviewing…" : active.pedagogyQuality?.status === "passed" ? "↻ Rebuild and review lesson" : "✦ Build and review this lesson"}</button>}{active.importValidated ? <div className="package-lock-report"><b>✓ STRUCTURED PACKAGE VERIFIED</b><p>{active.importedPages?.length || active.pages} page IDs are locked to Chapter {active.id}. Its text and images were imported without automatic redistribution.</p>{active.importedPages && <ol>{active.importedPages.map((page) => <li key={page.pageId}><span>{page.pageId}</span><b>{page.purpose}</b><i>{page.imageUrl ? "image linked" : "text"}</i></li>)}</ol>}</div> : active.pedagogyQuality ? <div className="pedagogy-report"><header><div><b>✓ READY FOR CHILDREN</b><span>{pedagogyAverage(active.pedagogyQuality)}/100</span></div><p>{active.pedagogyQuality.summary}</p></header><div className="score-grid">{Object.entries(active.pedagogyQuality.scores).map(([name, score]) => <span key={name}><b>{score}</b>{name.replace(/([A-Z])/g, " $1")}</span>)}</div><div className="quality-checks">{active.pedagogyQuality.checks.map((check) => <p key={check}>✓ {check}</p>)}</div></div> : <div className="pedagogy-pending"><b>Quality review required</b><p>This older draft has not passed context, coherence, age-fit, teaching, and accuracy checks. Rebuild it before export.</p></div>}<p className="selection-tip">This chapter has <b>{chapterWordCount(active).toLocaleString()} words</b>. Every edit keeps the voice direct and authorial for the selected age.</p><div className="ai-list">{["Simplify language", "Shorten selection", "Expand with examples", "Make age-appropriate", "Improve storytelling", "Check factual accuracy", "Suggest an illustration"].map((action) => <button onClick={() => onAi(action)} key={action}><span>✦</span>{action}<i>→</i></button>)}</div><div className="memory-box"><p className="eyebrow">EDITORIAL MEMORY</p><p>{project.editorialPreferences.length ? project.editorialPreferences.join(" · ") : "No saved preferences yet"}</p><button onClick={() => onRemember("book")}>＋ Remember for this book</button><button onClick={() => onRemember("designer")}>＋ Remember for future books</button></div></>}
+      {tab === "ai" && <><div className="assistant-title"><span>✦</span><div><b>Teaching-quality editor</b><small>The complete lesson must pass before publication.</small></div></div><div className={`generation-status-card generation-${normalizedTitle(chapterGenerationState(active)).replace(/[^a-z]+/g, "-")}`}><b>{chapterGenerationState(active)}</b><span>{active.generationUsage?.totalTokens ? `${active.generationUsage.totalTokens.toLocaleString()} tokens · ${active.generationUsage.requests} request${active.generationUsage.requests === 1 ? "" : "s"}` : "No Nemotron usage recorded yet"}</span>{active.generationError && <small>{active.generationError}</small>}</div>{!active.locked && <button className="draft-chapter-button" disabled={draftBusy} onClick={onDraft}>{draftBusy ? "Understanding and reviewing…" : chapterGenerationState(active) === "Completed" ? "↻ Rebuild and review lesson" : chapterGenerationState(active) === "Paused by quota" ? "▶ Resume this chapter" : "✦ Build and review this lesson"}</button>}{active.importValidated ? <div className="package-lock-report"><b>✓ STRUCTURED PACKAGE VERIFIED</b><p>{active.importedPages?.length || active.pages} page IDs are locked to Chapter {active.id}. Its text and images were imported without automatic redistribution.</p>{active.importedPages && <ol>{active.importedPages.map((page) => <li key={page.pageId}><span>{page.pageId}</span><b>{page.purpose}</b><i>{page.imageUrl ? "image linked" : "text"}</i></li>)}</ol>}</div> : active.pedagogyQuality ? <div className="pedagogy-report"><header><div><b>✓ READY FOR CHILDREN</b><span>{pedagogyAverage(active.pedagogyQuality)}/100</span></div><p>{active.pedagogyQuality.summary}</p></header><div className="score-grid">{Object.entries(active.pedagogyQuality.scores).map(([name, score]) => <span key={name}><b>{score}</b>{qualityScoreLabels[name] || name}</span>)}</div><div className="quality-checks">{active.pedagogyQuality.checks.map((check) => <p key={check}>✓ {check}</p>)}</div></div> : <div className="pedagogy-pending"><b>Quality review required</b><p>This older draft has not passed context, coherence, age-fit, teaching, and accuracy checks. Rebuild it before export.</p></div>}<p className="selection-tip">This chapter has <b>{chapterWordCount(active).toLocaleString()} words</b>. Every edit keeps the voice direct and authorial for the selected age.</p><div className="ai-list">{["Simplify language", "Shorten selection", "Expand with examples", "Make age-appropriate", "Improve storytelling", "Check factual accuracy", "Suggest an illustration"].map((action) => <button onClick={() => onAi(action)} key={action}><span>✦</span>{action}<i>→</i></button>)}</div><div className="memory-box"><p className="eyebrow">EDITORIAL MEMORY</p><p>{project.editorialPreferences.length ? project.editorialPreferences.join(" · ") : "No saved preferences yet"}</p><button onClick={() => onRemember("book")}>＋ Remember for this book</button><button onClick={() => onRemember("designer")}>＋ Remember for future books</button></div></>}
       {tab === "design" && <><div className="assistant-title"><span>◈</span><div><b>Book design</b><small>Illustration world, page aesthetic, border and watermark apply across the whole adaptation.</small></div></div><div className="design-controls"><div className="visual-status"><b>✓ Chapter visual ready</b><span>{active.visualType === "uploaded" ? "Your uploaded image" : `${active.visualType || "context"} visual generated from this chapter`}</span></div><label>Illustration world<select value={project.aesthetic} onChange={(e) => onPatchProject(designWorldPatch(e.target.value))}>{childDesignWorlds.map((world) => <option key={world.value}>{world.value}</option>)}</select></label><label>Page aesthetic<select value={project.pageAesthetic} onChange={(e) => onPatchProject(pageAestheticPatch(e.target.value))}>{pageAesthetics.map((aesthetic) => <option key={aesthetic.value}>{aesthetic.value}</option>)}</select></label><label>Book border<select value={project.bookBorder} onChange={(e) => onPatchProject(bookBorderPatch(e.target.value))}>{bookBorders.map((border) => <option key={border.value}>{border.value}</option>)}</select></label><label>Page watermark<select value={project.pageWatermark} onChange={(e) => onPatchProject(pageWatermarkPatch(e.target.value))}>{pageWatermarks.map((watermark) => <option key={watermark.value}>{watermark.value}</option>)}</select></label><div className="design-summary"><b>{project.pageAesthetic} · {project.bookBorder} · {project.pageWatermark}</b><span>{project.illustrationStyle} · {project.fontTheme} · {project.imageFrequency}</span></div><label className="image-upload">Replace chapter image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && onUploadImage(e.target.files[0])}/></label>{active.imageUrl && <label>Image caption<input value={active.imageCaption || ""} onChange={(e) => onUpdateChapter(active.id, { imageCaption: e.target.value })}/></label>}</div></>}
       {tab === "sources" && <><div className="assistant-title"><span>⌕</span><div><b>Private fact check</b><small>{active.sourceRefs.length} editor-only reference{active.sourceRefs.length === 1 ? "" : "s"} linked to this chapter · never printed.</small></div></div><div className="source-list">{active.sourceRefs.length ? active.sourceRefs.map((ref, index) => <article key={`${ref.title}-${index}`}><span>PRIVATE · PAGE {ref.page || "—"}</span><b>{ref.title}</b><p>{ref.excerpt}</p></article>) : <p className="empty">No private reference is linked yet. Prepare this chapter to attach the closest fact-checking passage.</p>}</div><div className="source-policy"><b>Editor-only provenance</b><p>Verify important names, dates and quotations before approval. These notes never appear in Preview, PDF or DOCX.</p></div></>}
     </div></aside>
