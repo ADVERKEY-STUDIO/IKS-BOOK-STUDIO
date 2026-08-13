@@ -93,6 +93,37 @@ export type PedagogyQuality = {
   learningGoals: string[];
 };
 
+export type ChapterEvaluation = {
+  passed: boolean;
+  failures: string[];
+  totalWords: number;
+  averageSentenceWords: number;
+  sourceTermOverlap: string[];
+};
+
+export type ChapterOneGate = {
+  passed: boolean;
+  checks: {
+    requests: boolean;
+    tokenBudget: boolean;
+    speed: boolean;
+    length: boolean;
+    accuracy: boolean;
+    ageSuitability: boolean;
+    overallQuality: boolean;
+  };
+  limits: { maxRequests: number; maxTokens: number; maxDurationMs: number };
+  metrics: {
+    requests: number;
+    totalTokens: number;
+    durationMs: number;
+    words: number;
+    accuracyScore: number;
+    ageFitScore: number;
+    qualityAverage: number;
+  };
+};
+
 export const teachingChapterSchema = {
   type: "object",
   properties: {
@@ -244,7 +275,7 @@ function significantSourceTerms(sourceText: string) {
   return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40).map(([word]) => word);
 }
 
-export function evaluateTeachingChapter(chapter: TeachingChapter, audience: string, sourceText: string, targetPages = 5) {
+export function evaluateTeachingChapter(chapter: TeachingChapter, audience: string, sourceText: string, targetPages = 5): ChapterEvaluation {
   const failures: string[] = [];
   const age = /7\s*[–-]\s*9/.test(audience) ? "7-9" : /13\s*[–-]\s*15/.test(audience) ? "13-15" : "10-12";
   const text = plainChapterText(chapter);
@@ -275,6 +306,40 @@ export function evaluateTeachingChapter(chapter: TeachingChapter, audience: stri
   if (overlap.length < 4) failures.push("The lesson is not sufficiently grounded in chapter-specific concepts");
 
   return { passed: failures.length === 0, failures, totalWords, averageSentenceWords: Math.round(averageSentenceWords(text) * 10) / 10, sourceTermOverlap: overlap.slice(0, 12) };
+}
+
+export function evaluateChapterOneGate({ usage, durationMs, wordCount, quality }: {
+  usage: { requests?: number; totalTokens?: number };
+  durationMs: number;
+  wordCount: number;
+  quality?: PedagogyQuality;
+}): ChapterOneGate {
+  const limits = { maxRequests: 1, maxTokens: 7500, maxDurationMs: 180000 };
+  const scores = quality?.scores;
+  const qualityAverage = scores ? Math.round(Object.values(scores).reduce((sum, score) => sum + score, 0) / 5) : 0;
+  const checks = {
+    requests: (usage.requests || 0) === 1,
+    tokenBudget: (usage.totalTokens || 0) > 0 && (usage.totalTokens || 0) <= limits.maxTokens,
+    speed: durationMs > 0 && durationMs <= limits.maxDurationMs,
+    length: wordCount >= 380 && wordCount <= 1400,
+    accuracy: (scores?.sourceFidelity || 0) >= 85,
+    ageSuitability: (scores?.ageFit || 0) >= 85,
+    overallQuality: quality?.status === "passed" && qualityAverage >= 85,
+  };
+  return {
+    passed: Object.values(checks).every(Boolean),
+    checks,
+    limits,
+    metrics: {
+      requests: usage.requests || 0,
+      totalTokens: usage.totalTokens || 0,
+      durationMs,
+      words: wordCount,
+      accuracyScore: scores?.sourceFidelity || 0,
+      ageFitScore: scores?.ageFit || 0,
+      qualityAverage,
+    },
+  };
 }
 
 export function renderTeachingChapter(chapter: TeachingChapter, chapterNumber: number, escapeHtml: (value: string) => string) {

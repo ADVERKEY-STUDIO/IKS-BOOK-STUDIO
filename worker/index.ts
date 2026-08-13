@@ -6,7 +6,7 @@ import { extractText, getDocumentProxy } from "unpdf";
 import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, TextRun } from "docx";
 import { authorialReaderHtml, generationProfileKey } from "../lib/child-summary";
 import { allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET, recommendedAdaptationPages } from "../lib/adaptation-pages";
-import { efficientChapterPrompt, evaluateTeachingChapter, normalizeTeachingChapter, renderTeachingChapter, reviewPrompt, type ChapterBlueprint, type PedagogyQuality, type PedagogyScores, type TeachingChapter } from "../lib/pedagogy";
+import { efficientChapterPrompt, evaluateChapterOneGate, evaluateTeachingChapter, normalizeTeachingChapter, renderTeachingChapter, reviewPrompt, type ChapterBlueprint, type ChapterOneGate, type PedagogyQuality, type PedagogyScores, type TeachingChapter } from "../lib/pedagogy";
 
 interface Env {
   ASSETS: Fetcher;
@@ -66,6 +66,7 @@ type DraftProjectInput = {
   chapters: DraftChapterInput[];
   chapterIds: number[];
   repairOnly?: boolean;
+  phase7ChapterOneOnly?: boolean;
 };
 
 interface ExecutionContext {
@@ -979,8 +980,12 @@ async function draftApi(request: Request, env: Env) {
   const extracted = await extractSourcePages(bytes, extension);
   const requested = new Set(project.chapterIds.map(Number));
   if (requested.size > 1) return json({ error: "For safe progress saving, request exactly one chapter at a time." }, 400);
+  if (project.phase7ChapterOneOnly && (requested.size !== 1 || !requested.has(1))) {
+    return json({ error: "Phase 7 is locked to Chapter 1 until its measured evaluation passes.", code: "chapter-one-gate" }, 423);
+  }
   const chapters = [];
   let usage: AiUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0, reasoningTokens: 0, requests: 0 };
+  const startedAt = Date.now();
   try {
     for (let index = 0; index < project.chapters.length; index += 1) {
       const chapter = project.chapters[index];
@@ -1002,7 +1007,18 @@ async function draftApi(request: Request, env: Env) {
     throw error;
   }
   if (!chapters.length) return json({ error: "No unlocked chapters were selected" }, 400);
-  return json({ chapters, sourcePages: extracted.pages, usage });
+  const durationMs = Date.now() - startedAt;
+  let phase7Evaluation: ChapterOneGate | undefined;
+  if (project.phase7ChapterOneOnly) {
+    const chapter = chapters[0];
+    phase7Evaluation = evaluateChapterOneGate({
+      usage,
+      durationMs,
+      wordCount: chapter.wordCount || contentWords(chapter.body?.replace(/<[^>]+>/g, " ") || "").length,
+      quality: chapter.pedagogyQuality,
+    });
+  }
+  return json({ chapters, sourcePages: extracted.pages, usage, durationMs, phase7Evaluation });
 }
 
 // Image security config. SVG sources with .svg extension auto-skip the

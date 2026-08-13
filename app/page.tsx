@@ -4,7 +4,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { strToU8, unzipSync, zipSync } from "fflate";
 import { AUTHORIAL_READER_INSTRUCTION, authorialReaderHtml, childAgeBand, generationProfileKey } from "../lib/child-summary";
 import { ADAPTATION_PLAN_VERSION, allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET, FIXED_MATTER_PAGES, recommendedAdaptationPages, TOTAL_BOOK_PAGE_LIMIT } from "../lib/adaptation-pages";
-import type { PedagogyQuality } from "../lib/pedagogy";
+import type { ChapterOneGate, PedagogyQuality } from "../lib/pedagogy";
 import { BOOK_PACKAGE_FORMAT, expectedChapterId, expectedContextKey, expectedPageId, type BookPackage, type BookPackageValidation, validateBookPackage } from "../lib/book-package";
 
 type View = "dashboard" | "wizard" | "analysis" | "brief" | "editor";
@@ -30,6 +30,8 @@ type DraftApiResponse = {
   retryable?: boolean;
   quota?: boolean;
   requestCount?: number;
+  durationMs?: number;
+  phase7Evaluation?: ChapterOneGate;
 };
 
 const MAX_CONCURRENT_CHAPTERS = 2;
@@ -79,6 +81,7 @@ type Chapter = {
   generationUsage?: GenerationUsage;
   generationError?: string;
   repairAttempts?: number;
+  phase7Evaluation?: ChapterOneGate;
 };
 
 type NemotronConnection = {
@@ -787,6 +790,7 @@ function reconcileOriginalChapters(project: Project, titles: string[], sections:
       generationStatus: existing?.generationStatus || (existing?.pedagogyQuality?.status === "passed" ? "Completed" : "Waiting"),
       generationUsage: existing?.generationUsage,
       generationError: existing?.generationError,
+      phase7Evaluation: existing?.phase7Evaluation,
       sourceStartPage: plan?.sourceStartPage ?? existing?.sourceStartPage,
       sourceEndPage: plan?.sourceEndPage ?? existing?.sourceEndPage,
       sourcePageCount: plan?.sourcePageCount ?? existing?.sourcePageCount,
@@ -892,6 +896,8 @@ function normalizeProject(saved: Project): Project {
       generationStatus: chapter.generationStatus || (chapter.importValidated || chapter.pedagogyQuality?.status === "passed" ? "Completed" : "Waiting"),
       generationUsage: chapter.generationUsage,
       generationError: chapter.generationError,
+      repairAttempts: chapter.repairAttempts,
+      phase7Evaluation: chapter.phase7Evaluation,
     };
   });
   const hierarchy = repairChapterHierarchy(normalizedChapters);
@@ -1566,6 +1572,7 @@ export default function Home() {
       chapters: snapshot.chapters.map(({ id, title, pages, locked, body, sourceStartPage, sourceEndPage, sourcePageCount, sourceWordCount, complexityScore, pedagogyQuality }) => ({ id, title, pages, locked, body, sourceStartPage, sourceEndPage, sourcePageCount, sourceWordCount, complexityScore, pedagogyQuality })),
       chapterIds: [chapterId],
       repairOnly,
+      phase7ChapterOneOnly: !repairOnly && !snapshot.chapters.find((chapter) => chapter.id === 1)?.phase7Evaluation?.passed,
     });
   }
 
@@ -1612,13 +1619,19 @@ export default function Home() {
     setBookPaused(false);
     const activeIndex = project.chapters.findIndex((chapter) => chapter.id === activeChapter);
     const selectedProfile = generationProfileKey(project.audience, project.language);
-    const chapterIds = project.chapters.filter((chapter, index) => {
+    const requestedChapterIds = project.chapters.filter((chapter, index) => {
       if (chapter.locked) return false;
       if (scope === "all") return chapter.generationStatus !== "Completed" || chapter.generationProfile !== selectedProfile;
       if (scope === "sample") return index === 0;
       if (scope === "active") return index === activeIndex;
       return chapterWordCount(chapter) < 350;
     }).map((chapter) => chapter.id);
+    const chapterOne = project.chapters.find((chapter) => chapter.id === 1);
+    const chapterOnePassed = Boolean(chapterOne?.phase7Evaluation?.passed);
+    const chapterIds = options.repairOnly || chapterOnePassed ? requestedChapterIds : chapterOne && !chapterOne.locked ? [1] : [];
+    if (!options.repairOnly && !chapterOnePassed && requestedChapterIds.some((chapterId) => chapterId !== 1)) {
+      notify("Phase 7 safety gate: generating Chapter 1 only. Chapters 2–6 stay untouched until its measurements pass.");
+    }
     if (!chapterIds.length) { notify("All unlocked chapters already passed the teaching-quality review"); return; }
     setDraftBusy(true);
     let completed = 0;
@@ -1705,6 +1718,7 @@ export default function Home() {
                     requests: (chapter.generationUsage?.requests || 0) + (usage?.requests || 0),
                     updatedAt: new Date().toISOString(),
                   },
+                  phase7Evaluation: result.data.phase7Evaluation,
                 }
               : chapter);
             workingProject = { ...workingProject, chapters: attachChapterVisuals(workingProject, merged) };
@@ -1741,7 +1755,8 @@ export default function Home() {
         notify(completed ? `${completed} chapter${completed === 1 ? "" : "s"} saved. Resume starts from the first unfinished chapter: ${failureReason}` : failureReason);
       } else {
         const usageNote = totalUsage.requests ? ` · ${totalUsage.totalTokens.toLocaleString()} tokens in ${totalUsage.requests} request${totalUsage.requests === 1 ? "" : "s"}` : "";
-        notify(`${completed} chapter${completed === 1 ? "" : "s"} prepared and saved${usageNote}`);
+        const gate = workingProject.chapters.find((chapter) => chapter.id === 1)?.phase7Evaluation;
+        notify(gate ? `Chapter 1 ${gate.passed ? "passed" : "did not pass"} the Phase 7 measurement gate${usageNote}` : `${completed} chapter${completed === 1 ? "" : "s"} prepared and saved${usageNote}`);
       }
     } catch (error) {
       const reason = error instanceof Error ? error.message : "Could not prepare the chapters";
@@ -1906,12 +1921,13 @@ function SimpleWorkflowBar({ project, active, busy, paused, connection, hasCompa
 }) {
   const quotaPaused = project.chapters.some((chapter) => chapter.generationStatus === "Paused by quota");
   const unfinished = project.chapters.some((chapter) => chapter.generationStatus !== "Completed" && !chapter.locked);
+  const chapterOneGate = project.chapters.find((chapter) => chapter.id === 1)?.phase7Evaluation;
   return <section className="simple-workflow-bar" aria-label="Book improvement controls">
     <div className={`connection-pill ${connection.state}`}><span /> <b>Nemotron</b><small>{connection.message}</small></div>
     <div className="workflow-actions primary-actions">
       <button onClick={onTest} disabled={busy || connection.state === "testing"}>{connection.state === "testing" ? "Testing…" : "Test Nemotron connection"}</button>
       <button className="main-action" onClick={onImprove} disabled={busy || active.locked}>Improve this chapter</button>
-      <button className="main-action" onClick={onBuild} disabled={busy || !unfinished}>Build remaining chapters</button>
+      <button className="main-action" onClick={onBuild} disabled={busy || (Boolean(chapterOneGate?.passed) && !unfinished)}>{chapterOneGate?.passed ? "Build remaining chapters" : "Generate Chapter 1 test"}</button>
       <button onClick={onPause} disabled={!busy || paused}>Pause after current chapter</button>
       <button onClick={onResume} disabled={busy || (!paused && !quotaPaused && !unfinished)}>Resume book</button>
     </div>
@@ -1922,7 +1938,14 @@ function SimpleWorkflowBar({ project, active, busy, paused, connection, hasCompa
       <button onClick={onRepair} disabled={busy || active.locked || (active.repairAttempts || 0) >= 1}>Repair once</button>
       <button onClick={onRestore} disabled={busy}>Restore previous version</button>
     </div>
+    <Phase7Report evaluation={chapterOneGate}/>
   </section>;
+}
+
+function Phase7Report({ evaluation }: { evaluation?: ChapterOneGate }) {
+  if (!evaluation) return <div className="phase7-report waiting"><b>PHASE 7 · CHAPTER 1 GATE</b><span>Waiting for one measured Chapter 1 generation. Chapters 2–6 are locked.</span></div>;
+  const seconds = Math.round(evaluation.metrics.durationMs / 100) / 10;
+  return <div className={`phase7-report ${evaluation.passed ? "passed" : "failed"}`}><header><b>PHASE 7 · {evaluation.passed ? "PASSED" : "NEEDS REVIEW"}</b><span>{evaluation.passed ? "Chapters 2–6 unlocked" : "Chapters 2–6 remain locked"}</span></header><div><span><b>{evaluation.metrics.requests}</b> request</span><span><b>{evaluation.metrics.totalTokens.toLocaleString()}</b> tokens</span><span><b>{seconds}s</b> speed</span><span><b>{evaluation.metrics.words}</b> words</span><span><b>{evaluation.metrics.accuracyScore}</b> accuracy</span><span><b>{evaluation.metrics.ageFitScore}</b> age fit</span><span><b>{evaluation.metrics.qualityAverage}</b> quality</span></div></div>;
 }
 
 function ChapterComparison({ original, improved, onAccept, onKeep, onClose }: { original: Chapter; improved: Chapter; onAccept: () => void; onKeep: () => void; onClose: () => void }) {
