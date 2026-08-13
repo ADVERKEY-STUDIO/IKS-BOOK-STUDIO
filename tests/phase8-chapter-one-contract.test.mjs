@@ -25,8 +25,8 @@ test("Phase 8 gives Nemotron a hard, complete one-pass Chapter 1 contract", () =
   assert.match(prompt, /finish and close the JSON object before the token limit/i);
   assert.match(prompt, /empty paragraphs array is invalid/i);
   assert.match(prompt, /do not invent who found it/i);
-  assert.match(prompt, /chapter object directly/i);
-  assert.match(prompt, /no wrapper, scores, summary, checks/i);
+  assert.match(prompt, /exactly one top-level field named chapter/i);
+  assert.match(prompt, /Do not return scores, summary, checks/i);
 });
 
 test("Phase 8 Chapter 1 gate rejects both summaries and overlong drafts", () => {
@@ -43,7 +43,7 @@ test("the gated Chapter 1 browser flow never performs a hidden retry", () => {
   assert.match(worker, /strictChapterOneTrial: !allowAutomaticRepair/);
   assert.match(worker, /allowAutomaticRepair \? 3200 : 2300/);
   assert.match(worker, /finish the JSON before the token limit/);
-  assert.match(worker, /openRouterStructured<TeachingChapter>/);
+  assert.match(worker, /openRouterStructured<\{ chapter: TeachingChapter \}>/);
   assert.match(worker, /localPedagogyScores\(deterministic\)/);
 });
 

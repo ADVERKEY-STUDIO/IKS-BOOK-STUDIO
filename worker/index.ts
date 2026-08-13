@@ -556,13 +556,13 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
   if (contentWords(sourceMaterial).length < 120) throw new TeachingEngineError("This chapter does not contain enough readable text. OCR or a clearer source file may be required.", 422);
   const audience = project.audience || "Ages 10–12";
   const language = project.language || "English";
-  const initial = await openRouterStructured<TeachingChapter>(
+  const initial = await openRouterStructured<{ chapter: TeachingChapter }>(
     env,
     efficientChapterPrompt({ title: chapter.title, audience, language, targetPages: chapter.pages, sourceMaterial, strictChapterOneTrial: !allowAutomaticRepair }),
     allowAutomaticRepair ? 3200 : 2300,
   );
   let review: { chapter: TeachingChapter; scores: PedagogyScores; summary: string; checks: string[] } = {
-    chapter: initial.data,
+    chapter: initial.data.chapter,
     scores: { context: 0, coherence: 0, ageFit: 0, pedagogy: 0, sourceFidelity: 0 },
     summary: "The chapter was scored by deterministic local teaching checks.",
     checks: [],
