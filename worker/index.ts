@@ -356,6 +356,8 @@ class TeachingEngineError extends Error {
     readonly retryable = false,
     readonly quota = false,
     readonly requestCount = 0,
+    readonly usage?: AiUsage,
+    readonly diagnostic?: { wordCount: number; scores: PedagogyScores; summary: string },
   ) {
     super(message);
   }
@@ -548,7 +550,7 @@ function privateChapterRefs(pageTexts: string[], chapter: DraftChapterInput, ind
     .map((item) => ({ title: chapter.title, page: entry.pageIndex + 1, excerpt: item.sentence.slice(0, 520) }))).slice(0, 8);
 }
 
-async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput) {
+async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput, allowAutomaticRepair = true) {
   const sourceMaterial = chapterSourceMaterial(pageTexts, chapter, index, total, project);
   if (contentWords(sourceMaterial).length < 120) throw new TeachingEngineError("This chapter does not contain enough readable text. OCR or a clearer source file may be required.", 422);
   const audience = project.audience || "Ages 10–12";
@@ -564,6 +566,18 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
   let deterministic = evaluateTeachingChapter(draft, audience, sourceMaterial, chapter.pages);
   let revisionPasses = 0;
   let usage = initial.usage;
+  if (!allowAutomaticRepair && (!deterministic.passed || Object.values(scores).some((score) => score < 80))) {
+    throw new TeachingEngineError(
+      `Chapter 1 stopped after its single Phase 7 request: ${[...deterministic.failures, ...Object.entries(scores).filter(([, score]) => score < 80).map(([name]) => `${name} needs improvement`)].join("; ")}. Chapters 2–6 remain locked.`,
+      422,
+      "quality-review",
+      false,
+      false,
+      usage.requests,
+      usage,
+      { wordCount: deterministic.totalWords, scores, summary: typeof review.summary === "string" ? review.summary : "The single response needs review." },
+    );
+  }
   // Formatting cleanup happens locally in normalizeTeachingChapter. Spend one
   // additional model request only when the meaningful quality gate truly fails.
   if (!deterministic.passed || Object.values(scores).some((score) => score < 80)) {
@@ -992,18 +1006,34 @@ async function draftApi(request: Request, env: Env) {
       if (!requested.has(chapter.id) || chapter.locked) continue;
       const built = project.repairOnly
         ? await buildTargetedRepair(env, extracted.pageTexts, chapter, index, project.chapters.length, project)
-        : await buildPedagogicalDraft(env, extracted.pageTexts, chapter, index, project.chapters.length, project);
+        : await buildPedagogicalDraft(env, extracted.pageTexts, chapter, index, project.chapters.length, project, !project.phase7ChapterOneOnly);
       chapters.push(built.chapter);
       usage = addUsage(usage, built.usage);
     }
   } catch (error) {
-    if (error instanceof TeachingEngineError) return json({
-      error: error.message,
-      code: error.code,
-      retryable: error.retryable,
-      quota: error.quota,
-      requestCount: error.requestCount,
-    }, error.status);
+    if (error instanceof TeachingEngineError) {
+      const durationMs = Date.now() - startedAt;
+      const quality: PedagogyQuality | undefined = error.diagnostic ? {
+        status: "needs-review",
+        engine: env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL,
+        scores: error.diagnostic.scores,
+        revisionPasses: 0,
+        summary: error.diagnostic.summary,
+        checks: ["Stopped after the single Phase 7 request"],
+        learningGoals: [],
+      } : undefined;
+      const phase7Evaluation = project.phase7ChapterOneOnly ? evaluateChapterOneGate({ usage: error.usage || { requests: error.requestCount, totalTokens: 0 }, durationMs, wordCount: error.diagnostic?.wordCount || 0, quality }) : undefined;
+      return json({
+        error: error.message,
+        code: error.code,
+        retryable: error.retryable,
+        quota: error.quota,
+        requestCount: error.requestCount,
+        usage: error.usage,
+        durationMs,
+        phase7Evaluation,
+      }, error.status);
+    }
     throw error;
   }
   if (!chapters.length) return json({ error: "No unlocked chapters were selected" }, 400);

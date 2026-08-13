@@ -1672,6 +1672,7 @@ export default function Home() {
           saveQueue = saveQueue.then(async () => {
             if (!result.ok || !result.data.chapters?.length) {
               const requestCount = result.data.requestCount || 0;
+              const failedUsage = result.data.usage;
               const generationStatus: ChapterGenerationStatus = result.data.quota ? "Paused by quota" : "Needs review";
               workingProject = {
                 ...workingProject,
@@ -1681,12 +1682,13 @@ export default function Home() {
                       generationStatus,
                       generationError: result.data.error || "Chapter drafting failed",
                       repairAttempts: options.repairOnly || result.data.code === "quality-review" ? 1 : chapter.repairAttempts || 0,
-                      generationUsage: requestCount ? {
-                        inputTokens: chapter.generationUsage?.inputTokens || 0,
-                        outputTokens: chapter.generationUsage?.outputTokens || 0,
-                        totalTokens: chapter.generationUsage?.totalTokens || 0,
-                        reasoningTokens: chapter.generationUsage?.reasoningTokens || 0,
-                        requests: (chapter.generationUsage?.requests || 0) + requestCount,
+                      phase7Evaluation: result.data.phase7Evaluation,
+                      generationUsage: requestCount || failedUsage ? {
+                        inputTokens: (chapter.generationUsage?.inputTokens || 0) + (failedUsage?.inputTokens || 0),
+                        outputTokens: (chapter.generationUsage?.outputTokens || 0) + (failedUsage?.outputTokens || 0),
+                        totalTokens: (chapter.generationUsage?.totalTokens || 0) + (failedUsage?.totalTokens || 0),
+                        reasoningTokens: (chapter.generationUsage?.reasoningTokens || 0) + (failedUsage?.reasoningTokens || 0),
+                        requests: (chapter.generationUsage?.requests || 0) + (failedUsage?.requests || requestCount),
                         updatedAt: new Date().toISOString(),
                       } : chapter.generationUsage,
                     }

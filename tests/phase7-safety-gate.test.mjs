@@ -11,6 +11,9 @@ test("Phase 7 sends and accepts only Chapter 1 before the measured gate passes",
   assert.match(page, /chapterOne && !chapterOne\.locked \? \[1\] : \[\]/);
   assert.match(worker, /phase7ChapterOneOnly && \(requested\.size !== 1 \|\| !requested\.has\(1\)\)/);
   assert.match(worker, /code: "chapter-one-gate"/);
+  assert.match(worker, /!project\.phase7ChapterOneOnly/);
+  assert.match(worker, /Chapter 1 stopped after its single Phase 7 request/);
+  assert.match(worker, /usage: error\.usage/);
 });
 
 test("the live response measures speed, requests, tokens, length, accuracy and age fit", () => {
