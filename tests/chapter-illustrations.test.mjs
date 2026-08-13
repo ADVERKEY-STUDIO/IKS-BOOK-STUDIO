@@ -59,3 +59,15 @@ test("generic books use chapter-aware visual fallbacks instead of Arthashastra a
   assert.match(page, /visualKeywords\(chapter\.title, chapter\.body, project\.sourceTerms\)/);
   assert.doesNotMatch(page, /return fallback\[/);
 });
+
+test("illustration suggestion includes chapter context and print constraints", () => {
+  assert.match(page, /action === "Suggest an illustration"/);
+  assert.match(page, /BOOK AND CHAPTER CONTEXT/);
+  assert.match(page, /Chapter focus:/);
+  assert.match(page, /Essential concepts to represent:/);
+  assert.match(page, /Recommended visual form:/);
+  assert.match(page, /No title, labels, captions, letters, numbers, logos, watermarks/);
+  assert.match(page, /2048 × 1536 pixels or higher/);
+  assert.match(page, /CHAPTER-CONTEXT IMAGE PROMPT/);
+  assert.match(page, /Generate in ChatGPT/);
+});

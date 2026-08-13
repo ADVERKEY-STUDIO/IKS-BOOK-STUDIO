@@ -28,7 +28,7 @@ test("screen preview and PDF use the same physical page sheets", () => {
   assert.match(page, /book-sheet preview-page chapter-preview/);
   assert.match(page, /PAGE \{pageIndex \+ 1\} OF \{pageCount\}/);
   assert.match(css, /\.preview-scroll>article\.book-sheet[^}]*height:665px/);
-  assert.match(css, /\.preview-scroll>article\.book-sheet[^}]*height:263mm!important/);
+  assert.match(css, /\.preview-scroll>article\.book-sheet[^}]*height:auto!important[^}]*min-height:252mm!important/);
 });
 
 test("selected borders reach editor, preview and print output", () => {

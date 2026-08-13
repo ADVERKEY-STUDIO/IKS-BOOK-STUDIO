@@ -1303,7 +1303,40 @@ export default function Home() {
 
   async function aiAction(action: string) {
     const selected = window.getSelection()?.toString().trim();
-    const prompt = `Edit the children’s book “${project.title}” as its author. ${action}. Audience: ${project.audience}. Reading level: ${project.readingLevel}. Use natural, age-appropriate prose without a themed writing mode. Preserve factual accuracy. ${AUTHORIAL_READER_INSTRUCTION} Text: ${selected || authorialReaderHtml(active?.body || "").replace(/<[^>]+>/g, " ")}`;
+    const chapterText = authorialReaderHtml(active?.body || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    const visualType = active ? chooseVisualType(active.title, active.body, active.id - 1) : "concept";
+    const visualTerms = active ? visualKeywords(active.title, active.body, project.sourceTerms) : project.sourceTerms.slice(0, 5);
+    const prompt = action === "Suggest an illustration" && active
+      ? `Create one original, print-ready illustration for a children’s educational book.
+
+BOOK AND CHAPTER CONTEXT
+- Book: ${project.title}
+- Chapter ${active.id}: ${active.title}
+- Reader age: ${project.audience}
+- Reading level: ${project.readingLevel}
+- Language: ${project.language}
+- Chapter focus: ${active.context || chapterText.slice(0, 1700)}
+- Essential concepts to represent: ${visualTerms.join(", ") || "the central idea of the chapter"}
+
+VISUAL DIRECTION
+- Recommended visual form: ${visualType}
+- Illustration world: ${project.aesthetic}
+- Art style: ${project.illustrationStyle}
+- Composition: one clear focal idea, strong visual hierarchy, generous breathing room, landscape 4:3 crop suitable for an A4 children’s textbook page
+- Make this image visibly different from every other chapter illustration
+- Show the meaning of this specific chapter rather than a generic ancient-India scene
+
+ACCURACY AND CHILD SAFETY
+- Keep clothing, architecture, objects and social setting historically and culturally respectful
+- Use age-appropriate expressions and avoid frightening violence, stereotypes, caricature or invented religious symbolism
+- Do not invent a portrait of a real historical person; use a respectful representative scene or diagram when identity is uncertain
+
+OUTPUT REQUIREMENTS
+- Return one finished illustration only
+- No title, labels, captions, letters, numbers, logos, watermarks, UI, mockup, border or page frame inside the image
+- No repeated characters or copied composition from another chapter
+- High detail, clean edges, balanced colour, print-safe contrast, 2048 × 1536 pixels or higher`
+      : `Edit the children’s book “${project.title}” as its author. ${action}. Audience: ${project.audience}. Reading level: ${project.readingLevel}. Use natural, age-appropriate prose without a themed writing mode. Preserve factual accuracy. ${AUTHORIAL_READER_INSTRUCTION} Text: ${selected || chapterText}`;
     setAiRequest({ action, prompt, selection: selected || "", result: "" });
   }
 
@@ -2199,29 +2232,85 @@ function BookPackageImporter({ project, busy, onClose, onDownloadRequest, onImpo
 }
 
 function AiRoundTrip({ request, onChange, onClose, onApply }: { request: { action: string; prompt: string; selection: string; result: string }; onChange: (value: string) => void; onClose: () => void; onApply: () => void }) {
+  const illustrationRequest = request.action === "Suggest an illustration";
   const openChatGPT = async () => {
     try { await navigator.clipboard.writeText(request.prompt); } catch { /* clipboard permission can be unavailable */ }
     window.open(`https://chatgpt.com/?q=${encodeURIComponent(request.prompt)}`, "_blank", "noopener,noreferrer");
   };
-  return <div className="modal-backdrop"><section className="ai-modal"><header><div><p className="eyebrow">CHATGPT EDIT</p><h2>{request.action}</h2></div><button onClick={onClose}>×</button></header><ol><li><button className="primary" onClick={openChatGPT}>Open this edit in ChatGPT ↗</button><small>The instruction is also copied automatically.</small></li><li><label>Paste ChatGPT’s revised text here<textarea value={request.result} onChange={(e) => onChange(e.target.value)} placeholder="Paste the approved revision…"/></label></li></ol><footer><button className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={!request.result.trim()} onClick={onApply}>Apply and save revision</button></footer></section></div>;
+  const copyPrompt = async () => {
+    try { await navigator.clipboard.writeText(request.prompt); } catch { /* clipboard permission can be unavailable */ }
+  };
+  return <div className="modal-backdrop"><section className={`ai-modal${illustrationRequest ? " illustration-prompt-modal" : ""}`}><header><div><p className="eyebrow">{illustrationRequest ? "CHAPTER-CONTEXT IMAGE PROMPT" : "CHATGPT EDIT"}</p><h2>{request.action}</h2></div><button onClick={onClose}>×</button></header>{illustrationRequest ? <><p className="illustration-prompt-help">This prompt already contains the selected chapter’s meaning, concepts, reader age, visual world, accuracy rules and print requirements. Generate the image, then upload it from the Design tab.</p><label className="illustration-prompt-label">Complete prompt<textarea readOnly value={request.prompt}/></label><footer><button className="secondary" onClick={() => void copyPrompt()}>Copy prompt</button><button className="primary" onClick={() => void openChatGPT()}>Generate in ChatGPT ↗</button><button className="secondary" onClick={onClose}>Close</button></footer></> : <><ol><li><button className="primary" onClick={openChatGPT}>Open this edit in ChatGPT ↗</button><small>The instruction is also copied automatically.</small></li><li><label>Paste ChatGPT’s revised text here<textarea value={request.result} onChange={(e) => onChange(e.target.value)} placeholder="Paste the approved revision…"/></label></li></ol><footer><button className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={!request.result.trim()} onClick={onApply}>Apply and save revision</button></footer></>}</section></div>;
 }
 
 function paginateReaderHtml(html: string, audience: string) {
   const clean = authorialReaderHtml(html);
-  const blocks = clean.match(/<(h2|h3|p|blockquote|ul|ol)\b[^>]*>[\s\S]*?<\/\1>/gi) ?? [clean];
+  const flattened = clean.replace(/<\/?(?:section|div)\b[^>]*>/gi, "");
+  const rawBlocks = flattened.match(/<(h2|h3|p|blockquote|ul|ol|b)\b[^>]*>[\s\S]*?<\/\1>/gi) ?? [flattened];
   const age = childAgeBand(audience);
   const pageCapacity = age === "7-9" ? 1180 : age === "13-15" ? 1580 : 1380;
+  const textLength = (block: string) => block.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().length;
+  const splitLongBlock = (block: string) => {
+    if (textLength(block) <= pageCapacity * .62) return [block];
+    const listMatch = block.match(/^<(ul|ol)\b[^>]*>([\s\S]*)<\/\1>$/i);
+    if (listMatch) {
+      const items = listMatch[2].match(/<li\b[^>]*>[\s\S]*?<\/li>/gi) ?? [];
+      const groups: string[] = [];
+      let current: string[] = [];
+      let length = 0;
+      for (const item of items) {
+        const itemLength = textLength(item);
+        if (current.length && length + itemLength > pageCapacity * .52) {
+          groups.push(`<${listMatch[1]}>${current.join("")}</${listMatch[1]}>`);
+          current = [];
+          length = 0;
+        }
+        current.push(item);
+        length += itemLength;
+      }
+      if (current.length) groups.push(`<${listMatch[1]}>${current.join("")}</${listMatch[1]}>`);
+      if (groups.length) return groups;
+    }
+    const paragraphMatch = block.match(/^<(p|blockquote)\b[^>]*>([\s\S]*)<\/\1>$/i);
+    if (!paragraphMatch) return [block];
+    const sentences = paragraphMatch[2].replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [];
+    const chunks: string[] = [];
+    let current = "";
+    for (const sentence of sentences) {
+      if (current && current.length + sentence.length > pageCapacity * .5) {
+        chunks.push(`<${paragraphMatch[1]}>${escapeHtml(current.trim())}</${paragraphMatch[1]}>`);
+        current = "";
+      }
+      current += `${sentence.trim()} `;
+    }
+    if (current.trim()) chunks.push(`<${paragraphMatch[1]}>${escapeHtml(current.trim())}</${paragraphMatch[1]}>`);
+    return chunks.length ? chunks : [block];
+  };
+  const blocks = rawBlocks.flatMap(splitLongBlock);
   const pages: string[] = [];
   let current: string[] = [];
   let weight = 0;
 
   for (const block of blocks) {
-    const textLength = block.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().length;
-    const blockWeight = textLength + (/^<h[23]/i.test(block) ? 260 : 0) + (/^<(?:ul|ol|blockquote)/i.test(block) ? 150 : 0);
-    if (current.length && weight + blockWeight > pageCapacity) {
+    const isHeading = /^<h[23]/i.test(block);
+    const blockWeight = textLength(block) + (isHeading ? 260 : 0) + (/^<(?:ul|ol|blockquote)/i.test(block) ? 150 : 0);
+    if (isHeading && current.length && weight > pageCapacity * .72) {
       pages.push(current.join(""));
       current = [];
       weight = 0;
+    }
+    if (current.length && weight + blockWeight > pageCapacity) {
+      const trailingHeading = current.length > 1 && /^<h[23]/i.test(current[current.length - 1]);
+      if (trailingHeading) {
+        const heading = current.pop()!;
+        pages.push(current.join(""));
+        current = [heading];
+        weight = textLength(heading) + 260;
+      } else {
+        pages.push(current.join(""));
+        current = [];
+        weight = 0;
+      }
     }
     current.push(block);
     weight += blockWeight;
