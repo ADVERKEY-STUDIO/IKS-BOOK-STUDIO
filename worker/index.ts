@@ -14,6 +14,8 @@ interface Env {
   BUCKET: R2Bucket;
   GEMINI_API_KEY?: string;
   GEMINI_MODEL?: string;
+  OPENROUTER_API_KEY?: string;
+  OPENROUTER_MODEL?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -350,6 +352,80 @@ class TeachingEngineError extends Error {
   constructor(message: string, readonly status = 502) {
     super(message);
   }
+}
+
+const DEFAULT_OPENROUTER_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
+
+async function openRouterStatusApi(request: Request, env: Env) {
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  if (!env.OPENROUTER_API_KEY) {
+    return json({ connected: false, error: "OPENROUTER_API_KEY is not configured as a server secret." }, 503);
+  }
+
+  const authHeaders = {
+    authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+    "content-type": "application/json",
+    "http-referer": "https://iks-book-studio.gaurav-gupta-6041.chatgpt.site",
+    "x-openrouter-title": "IKS Book Studio",
+  };
+  const model = env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL;
+
+  const keyResponse = await fetch("https://openrouter.ai/api/v1/key", {
+    headers: { authorization: authHeaders.authorization },
+  });
+  if (!keyResponse.ok) {
+    const status = keyResponse.status === 401 || keyResponse.status === 403 ? 401 : 502;
+    return json({ connected: false, model, error: status === 401 ? "The OpenRouter key was rejected." : "OpenRouter key verification is temporarily unavailable." }, status);
+  }
+  const keyData = await keyResponse.json() as { data?: { is_free_tier?: boolean; limit_remaining?: number | null; usage_daily?: number } };
+
+  const testResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: authHeaders,
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: "Return only the requested word. Do not explain." },
+        { role: "user", content: "Reply exactly: READY" },
+      ],
+      max_tokens: 12,
+      temperature: 0,
+      reasoning: { effort: "none", exclude: true },
+      stream: false,
+    }),
+  });
+  if (!testResponse.ok) {
+    const detail = (await testResponse.text()).slice(0, 400);
+    const message = testResponse.status === 429
+      ? "The key is valid, but the free-model request limit or provider capacity is currently unavailable."
+      : testResponse.status === 404
+        ? "The configured Nemotron model is not currently available to this key."
+        : `The key is valid, but Nemotron could not complete the connection test (${testResponse.status}).`;
+    return json({ connected: false, authenticated: true, model, error: message, detail: detail.replace(/sk-or-[\w-]+/gi, "[redacted]") }, testResponse.status === 429 ? 429 : 502);
+  }
+
+  const testData = await testResponse.json() as {
+    choices?: Array<{ message?: { content?: string } }>;
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; reasoning_tokens?: number };
+  };
+  const answer = testData.choices?.[0]?.message?.content?.trim() ?? "";
+  return json({
+    connected: /^READY\.?$/i.test(answer),
+    authenticated: true,
+    model,
+    test: /^READY\.?$/i.test(answer) ? "passed" : "unexpected-response",
+    usage: {
+      inputTokens: testData.usage?.prompt_tokens ?? 0,
+      outputTokens: testData.usage?.completion_tokens ?? 0,
+      totalTokens: testData.usage?.total_tokens ?? 0,
+      reasoningTokens: testData.usage?.reasoning_tokens ?? 0,
+    },
+    account: {
+      freeTier: Boolean(keyData.data?.is_free_tier),
+      creditLimitRemaining: keyData.data?.limit_remaining ?? null,
+      dailyCreditUsage: keyData.data?.usage_daily ?? 0,
+    },
+  });
 }
 
 function chapterSourceMaterial(pageTexts: string[], chapter: DraftChapterInput) {
@@ -869,6 +945,7 @@ const worker = {
       if (url.pathname === "/api/source") return await sourceApi(request, env);
       if (url.pathname === "/api/source/download") return await downloadSourceApi(request, env);
       if (url.pathname === "/api/source/reanalyse") return await reanalyseSourceApi(request, env);
+      if (url.pathname === "/api/ai/status") return await openRouterStatusApi(request, env);
       if (url.pathname === "/api/draft") return await draftApi(request, env);
       if (url.pathname === "/api/image") return await imageApi(request, env);
       if (url.pathname === "/api/visual") return await visualApi(request);
