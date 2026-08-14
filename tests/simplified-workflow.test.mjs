@@ -58,6 +58,13 @@ test("failed chapters can be handed to a designer without blocking PDF export", 
   assert.match(page, /Send Chapter \{active\.id\} to designer/);
   assert.match(page, /chapterGenerationState\(chapter\) !== "Designer handoff"/);
   assert.match(page, /function exportPdf\(\)/);
-  assert.match(page, /window\.setTimeout\(\(\) => window\.print\(\), 450\)/);
+  assert.match(page, /window\.setTimeout\(\(\) => \{[\s\S]*document\.querySelector\("\.preview-modal"\)[\s\S]*window\.print\(\)/);
   assert.match(page, />↓ PDF<\/button>/);
+});
+
+test("preview opens even when export is quality-gated", () => {
+  assert.match(page, /function openPreview\(\)/);
+  assert.match(page, /preview opened/);
+  assert.match(page, /onClick=\{openPreview\}/);
+  assert.match(page, /disabled=\{unreviewedChapters\.length > 0\}/);
 });

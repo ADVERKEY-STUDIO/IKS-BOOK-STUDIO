@@ -1390,15 +1390,23 @@ OUTPUT REQUIREMENTS
     finally { setExportBusy(false); }
   }
 
+  function openPreview() {
+    setShowPreview(true);
+  }
+
   function exportPdf() {
     const blocked = project.chapters.filter((chapter) => !chapter.importValidated && chapter.pedagogyQuality?.status !== "passed" && chapterGenerationState(chapter) !== "Designer handoff");
     if (blocked.length) {
-      notify(`${blocked.length} chapter${blocked.length === 1 ? " is" : "s are"} still waiting for review or designer handoff`);
-      setShowPreview(true);
+      notify(`${blocked.length} chapter${blocked.length === 1 ? " is" : "s are"} still waiting for review or designer handoff; preview opened`);
+      openPreview();
       return;
     }
-    setShowPreview(true);
-    window.setTimeout(() => window.print(), 450);
+    openPreview();
+    // Wait for React to mount the preview before entering the browser print
+    // flow; invoking print during the state update can produce a blank proof.
+    window.setTimeout(() => {
+      if (document.querySelector(".preview-modal")) window.print();
+    }, 650);
   }
 
   async function duplicateProject(source: Project) {
@@ -1887,7 +1895,7 @@ OUTPUT REQUIREMENTS
         <div className="top-actions">
           {view === "editor" && <button onClick={() => setView("brief")}>☷ <span>Book plan</span></button>}
           {(view === "editor" || view === "brief") && <details className="advanced-tools"><summary>Advanced tools</summary><div><label className="advanced-upload">{sourceBusy ? "Reading source…" : "Replace source book"}<input type="file" accept=".pdf,.docx,.txt,.md" disabled={sourceBusy || draftBusy} onChange={(event) => event.target.files?.[0] && refreshSource(event.target.files[0])}/></label><button onClick={openVersions}>Version history</button><button onClick={saveProject}>Save project now</button><button className="package-import-button" onClick={() => setShowPackageImport(true)}>ChatGPT ZIP workflow</button><small>Source, versions, manual save, and ZIP import</small></div></details>}
-          <button onClick={() => setShowPreview(true)}>Preview</button>
+          <button onClick={openPreview}>Preview</button>
           <button className="pdf-button" onClick={exportPdf}>↓ PDF</button>
           <button className="export-button" onClick={exportDoc} disabled={exportBusy}>{exportBusy ? "Preparing…" : "↓ DOCX"}</button>
         </div>
@@ -1917,7 +1925,7 @@ OUTPUT REQUIREMENTS
       {view === "brief" && <BookBrief project={project} allocated={allocatedPages} draftBusy={draftBusy} onBack={() => setView("analysis")} onUpdateChapter={updateChapter} onPrepare={prepareDraft} onContinue={() => { patchProject({ briefApproved: true }); setActiveChapter(project.chapters[0]?.id ?? 1); setView("editor"); }} />}
       {view === "editor" && <Editor project={project} active={active} activeId={activeChapter} allocated={allocatedPages} draftBusy={draftBusy} onSelect={setActiveChapter} onSaveBody={saveChapterBody} editorRef={editorRef} onAi={aiAction} onRemember={rememberPreference} onToggleLock={() => patchProject({ chapters: project.chapters.map((chapter) => chapter.id === active?.id ? { ...chapter, locked: !chapter.locked } : chapter) })} onAddChapter={addChapter} onUploadImage={uploadChapterImage} onPatchProject={patchProject} onUpdateChapter={updateChapter} />}
 
-      {showPreview && <Preview project={project} draftBusy={draftBusy} onFill={() => prepareDraft("thin")} onRefresh={() => prepareDraft("all")} onClose={() => setShowPreview(false)} onPrint={() => window.print()} />}
+      {showPreview && <Preview project={project} draftBusy={draftBusy} onFill={() => prepareDraft("thin")} onRefresh={() => prepareDraft("all")} onClose={() => setShowPreview(false)} onPrint={() => { if (document.querySelector(".preview-modal")) window.print(); }} />}
       {showVersions && <Versions versions={versions} onCreate={createVersion} onRestore={(snapshot) => { setProject(normalizeProject(snapshot)); setShowVersions(false); notify("Version restored"); }} onClose={() => setShowVersions(false)} />}
       {showPackageImport && <BookPackageImporter project={project} busy={packageBusy} onClose={() => setShowPackageImport(false)} onDownloadRequest={downloadChatGptBookRequest} onImport={importBookPackage} />}
       {showComparison && comparison && <ChapterComparison original={comparison.original} improved={project.chapters.find((chapter) => chapter.id === comparison.chapterId) || comparison.original} onAccept={acceptImprovement} onKeep={() => void keepOriginal()} onClose={() => setShowComparison(false)} />}
