@@ -69,8 +69,18 @@ test("preview and PDF stay available while chapters are unfinished", () => {
   assert.doesNotMatch(page, /disabled=\{exportBusy \|\| Boolean\(unresolved\.length\)\}/);
 });
 
+test("preview supports the complete book, a complete chapter, and a single page", () => {
+  for (const label of ["Whole book", "Scroll every page", "Chapter", "All chapter pages", "Single page", "Focused reading"]) {
+    assert.match(page, new RegExp(label));
+  }
+  assert.match(page, /useState<"book" \| "chapter" \| "page">\("book"\)/);
+  assert.match(page, /selectedChapterSheets\.map/);
+  assert.match(page, /sheets\.map\(\(sheet, index\) => scaledSheet\(sheet, `whole-book-/);
+  assert.match(page, /className="pdf-render-stack"/);
+});
+
 test("publishing workflow exposes review, operations and real PDF controls", () => {
-  for (const label of ["Source uploaded", "Chapters generated", "Quality review", "Illustrations", "Export ready", "Review Queue", "Request History", "BOOK PREVIEW", "Download PDF"]) {
+  for (const label of ["Source uploaded", "Chapters generated", "Quality review", "Illustrations", "Preview & PDF", "Review Queue", "Request History", "BOOK PREVIEW", "Download PDF"]) {
     assert.match(page, new RegExp(label));
   }
   assert.doesNotMatch(page, /Proof mode|Final-book mode/);
