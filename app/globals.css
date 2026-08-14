@@ -215,6 +215,9 @@
 .sheet-number{margin-top:auto;padding-top:10px;border-top:1px solid var(--line);font-size:7px;color:var(--muted)}
 .chapter-visual-sheet .chapter-image{margin:auto 0}
 .chapter-visual-sheet .chapter-image img{max-height:450px;object-fit:contain}
+.chapter-text-visual-sheet .chapter-image{margin:18px 0 0}
+.chapter-text-visual-sheet .chapter-image img{width:100%;max-height:315px;object-fit:cover}
+.chapter-text-visual-sheet .chapter-image figcaption{padding:6px 0}
 .book-border-no-border{border:0!important;outline:0!important;border-image:none!important}
 
 @media print{

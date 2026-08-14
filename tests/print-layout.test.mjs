@@ -35,6 +35,15 @@ test("A4 pagination fills continuation sheets without crowding paragraphs", asyn
   assert.match(css, /\.preview-v2 \.preview-body p\{margin:0 0 \.68em;line-height:1\.56\}/);
 });
 
+test("a sparse final text page shares its unused space with the chapter illustration", async () => {
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /const shareIllustration = Boolean\(chapter\.imageUrl\).*readerTextLength/);
+  assert.match(page, /chapter-text-visual-sheet/);
+  assert.match(page, /chapter\.imageUrl && !shareIllustration/);
+  assert.match(css, /\.chapter-text-visual-sheet \.chapter-image img\{[^}]*max-height:315px;object-fit:cover/);
+});
+
 test("chapter drafting keeps private fact-check references inside each detected range", async () => {
   const worker = await readFile(new URL("../worker/index.ts", import.meta.url), "utf8");
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");

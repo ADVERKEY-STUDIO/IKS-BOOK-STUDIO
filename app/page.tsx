@@ -2469,6 +2469,10 @@ function paginateReaderHtml(html: string, audience: string) {
   return pages.length ? pages : [clean];
 }
 
+function readerTextLength(html: string) {
+  return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().length;
+}
+
 function Preview({ project, exportBusy, pdfProgress, onClose, onDownload }: { project: Project; exportBusy: boolean; pdfProgress: number; onClose: () => void; onDownload: () => void }) {
   const [viewMode, setViewMode] = useState<"book" | "chapter" | "page">("book");
   const [pageIndex, setPageIndex] = useState(0);
@@ -2484,8 +2488,18 @@ function Preview({ project, exportBusy, pdfProgress, onClose, onDownload }: { pr
   const chapterSheets = printable.chapters.flatMap((chapter) => {
     if (chapter.importValidated && chapter.importedPages?.length) return chapter.importedPages.map((page, index) => ({ kind: "chapter" as const, chapter, body: page.body, pageIndex: index, pageCount: chapter.importedPages!.length, imageUrl: page.imageUrl, imageCaption: page.imageCaption, imageAlt: page.imageAlt }));
     const pages = paginateReaderHtml(chapter.body, project.audience);
-    const text = pages.map((body, index) => ({ kind: "chapter" as const, chapter, body, pageIndex: index, pageCount: pages.length + (chapter.imageUrl ? 1 : 0), imageUrl: undefined, imageCaption: undefined, imageAlt: undefined }));
-    return chapter.imageUrl ? [...text, { kind: "chapter" as const, chapter, body: "", pageIndex: pages.length, pageCount: pages.length + 1, imageUrl: chapter.imageUrl, imageCaption: chapter.imageCaption, imageAlt: chapter.imageAlt }] : text;
+    // A short final text page and a separate illustration page created two
+    // half-empty sheets in almost every chapter. Let the illustration occupy
+    // the remaining lower half when the final page has enough safe room.
+    const age = childAgeBand(project.audience);
+    const shareLimit = age === "7-9" ? 1500 : age === "13-15" ? 1750 : 1625;
+    const shareIllustration = Boolean(chapter.imageUrl) && readerTextLength(pages[pages.length - 1] ?? "") <= shareLimit;
+    const pageCount = pages.length + (chapter.imageUrl && !shareIllustration ? 1 : 0);
+    const text = pages.map((body, index) => {
+      const includesIllustration = shareIllustration && index === pages.length - 1;
+      return { kind: "chapter" as const, chapter, body, pageIndex: index, pageCount, imageUrl: includesIllustration ? chapter.imageUrl : undefined, imageCaption: includesIllustration ? chapter.imageCaption : undefined, imageAlt: includesIllustration ? chapter.imageAlt : undefined };
+    });
+    return chapter.imageUrl && !shareIllustration ? [...text, { kind: "chapter" as const, chapter, body: "", pageIndex: pages.length, pageCount, imageUrl: chapter.imageUrl, imageCaption: chapter.imageCaption, imageAlt: chapter.imageAlt }] : text;
   });
   const sheets: ({ kind: "cover" | "contents" | "back" } | (typeof chapterSheets)[number])[] = [{ kind: "cover" }, { kind: "contents" }, ...chapterSheets, { kind: "back" }];
   useEffect(() => { if (pageIndex >= sheets.length) setPageIndex(Math.max(0, sheets.length - 1)); }, [pageIndex, sheets.length]);
@@ -2495,8 +2509,9 @@ function Preview({ project, exportBusy, pdfProgress, onClose, onDownload }: { pr
     if (sheet.kind === "contents") return <article className={`${base} preview-page contents-page`} key={key}><span>CONTENTS</span><h2>Inside this book</h2><ol>{printable.chapters.map((chapter, index) => <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{isPublishApproved(chapter) ? `${chapter.pages} pages` : "In progress"}</i></li>)}</ol></article>;
     if (sheet.kind === "back") return <article className={`${base} preview-page backmatter`} key={key}><span>A FINAL THOUGHT</span><h2>Keep wondering</h2><p>The most powerful ideas do not end on the last page. They grow when we ask careful questions, notice new connections and share what we discover.</p><p>Carry one idea from this book into the world—and see where it leads.</p></article>;
     const image = Boolean(sheet.imageUrl) && !sheet.body;
+    const combined = Boolean(sheet.imageUrl) && Boolean(sheet.body);
     const waitingForContent = chapterWordCount(sheet.chapter) < 45 && !sheet.chapter.importValidated;
-    return <article className={`${base} preview-page chapter-preview ${ageClass}${image ? " chapter-visual-sheet" : ""}`} key={key}><header className="print-chapter-header"><span>CHAPTER {sheet.chapter.id}</span><span>PAGE {sheet.pageIndex + 1} OF {sheet.pageCount}</span></header>{sheet.pageIndex === 0 && <h2>{sheet.chapter.title}</h2>}{sheet.pageIndex > 0 && !image && <p className="continued-title">{sheet.chapter.title} · continued</p>}{sheet.body && <div className="preview-body" dangerouslySetInnerHTML={{ __html: sheet.body }}/>} {waitingForContent && sheet.pageIndex === 0 && <div className="unfinished-page-note"><b>Chapter in progress</b><span>Generated content will appear here automatically. You can still preview and download the complete book layout now.</span></div>}{sheet.imageUrl && <figure className="chapter-image"><img src={sheet.imageUrl} alt={sheet.imageAlt || sheet.imageCaption || sheet.chapter.title}/><figcaption>{sheet.imageCaption || sheet.chapter.title}</figcaption></figure>}<footer className="sheet-number"><span>{project.title}</span><span>{sheet.pageIndex + 1}</span></footer></article>;
+    return <article className={`${base} preview-page chapter-preview ${ageClass}${image ? " chapter-visual-sheet" : ""}${combined ? " chapter-text-visual-sheet" : ""}`} key={key}><header className="print-chapter-header"><span>CHAPTER {sheet.chapter.id}</span><span>PAGE {sheet.pageIndex + 1} OF {sheet.pageCount}</span></header>{sheet.pageIndex === 0 && <h2>{sheet.chapter.title}</h2>}{sheet.pageIndex > 0 && !image && <p className="continued-title">{sheet.chapter.title} · continued</p>}{sheet.body && <div className="preview-body" dangerouslySetInnerHTML={{ __html: sheet.body }}/>} {waitingForContent && sheet.pageIndex === 0 && <div className="unfinished-page-note"><b>Chapter in progress</b><span>Generated content will appear here automatically. You can still preview and download the complete book layout now.</span></div>}{sheet.imageUrl && <figure className="chapter-image"><img src={sheet.imageUrl} alt={sheet.imageAlt || sheet.imageCaption || sheet.chapter.title}/><figcaption>{sheet.imageCaption || sheet.chapter.title}</figcaption></figure>}<footer className="sheet-number"><span>{project.title}</span><span>{sheet.pageIndex + 1}</span></footer></article>;
   };
   const current = sheets[pageIndex];
   const currentChapter = current?.kind === "chapter" ? current.chapter.id : current?.kind === "contents" ? -1 : 0;
