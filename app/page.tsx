@@ -2332,9 +2332,11 @@ function paginateReaderHtml(html: string, audience: string) {
   const age = childAgeBand(audience);
   // Calibrated to the usable A4 text area. The opening sheet reserves room for
   // the chapter title; continuation sheets use more of the page.
-  const pageCapacity = age === "7-9" ? 2050 : age === "13-15" ? 2400 : 2225;
+  const pageCapacity = age === "7-9" ? 2550 : age === "13-15" ? 3000 : 2750;
   const firstPageCapacity = Math.round(pageCapacity * .78);
   const textLength = (block: string) => block.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().length;
+  const blockWeightFor = (block: string) => textLength(block) + (/^<h[23]/i.test(block) ? 145 : 0) + (/^<(?:ul|ol|blockquote)/i.test(block) ? 100 : 0);
+  const sentenceParts = (value: string) => value.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [];
   const splitLongBlock = (block: string) => {
     if (textLength(block) <= pageCapacity * .76) return [block];
     const listMatch = block.match(/^<(ul|ol)\b[^>]*>([\s\S]*)<\/\1>$/i);
@@ -2358,7 +2360,7 @@ function paginateReaderHtml(html: string, audience: string) {
     }
     const paragraphMatch = block.match(/^<(p|blockquote)\b[^>]*>([\s\S]*)<\/\1>$/i);
     if (!paragraphMatch) return [block];
-    const sentences = paragraphMatch[2].replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [];
+    const sentences = sentenceParts(paragraphMatch[2]);
     const chunks: string[] = [];
     let current = "";
     for (const sentence of sentences) {
@@ -2371,27 +2373,89 @@ function paginateReaderHtml(html: string, audience: string) {
     if (current.trim()) chunks.push(`<${paragraphMatch[1]}>${escapeHtml(current.trim())}</${paragraphMatch[1]}>`);
     return chunks.length ? chunks : [block];
   };
+  const splitBlockToFit = (block: string, availableWeight: number): [string, string] | null => {
+    const listMatch = block.match(/^<(ul|ol)\b[^>]*>([\s\S]*)<\/\1>$/i);
+    if (listMatch) {
+      const items = listMatch[2].match(/<li\b[^>]*>[\s\S]*?<\/li>/gi) ?? [];
+      const availableText = availableWeight - 100;
+      const head: string[] = [];
+      let used = 0;
+      for (const item of items) {
+        const size = textLength(item);
+        if (head.length && used + size > availableText) break;
+        if (!head.length && size > availableText) break;
+        head.push(item);
+        used += size;
+      }
+      if (head.length && head.length < items.length) {
+        const tag = listMatch[1].toLowerCase();
+        return [`<${tag}>${head.join("")}</${tag}>`, `<${tag}>${items.slice(head.length).join("")}</${tag}>`];
+      }
+      return null;
+    }
+    const paragraphMatch = block.match(/^<(p|blockquote)(\b[^>]*)>([\s\S]*)<\/\1>$/i);
+    if (!paragraphMatch) return null;
+    const availableText = availableWeight - (paragraphMatch[1].toLowerCase() === "blockquote" ? 100 : 0);
+    if (availableText < 260) return null;
+    const fullText = sentenceParts(paragraphMatch[3]).map((sentence) => sentence.trim()).join(" ");
+    if (fullText.length <= availableText) return null;
+    const sentences = sentenceParts(paragraphMatch[3]);
+    const head: string[] = [];
+    let used = 0;
+    for (const sentence of sentences) {
+      const cleanSentence = sentence.trim();
+      if (head.length && used + cleanSentence.length + 1 > availableText) break;
+      if (!head.length && cleanSentence.length > availableText) {
+        const words = cleanSentence.split(/\s+/);
+        let partial = "";
+        while (words.length && `${partial} ${words[0]}`.trim().length <= availableText) partial = `${partial} ${words.shift()}`.trim();
+        if (partial.length >= 220) head.push(partial);
+        break;
+      }
+      head.push(cleanSentence);
+      used += cleanSentence.length + 1;
+    }
+    const headText = head.join(" ").trim();
+    if (headText.length < 220 || headText.length >= fullText.length) return null;
+    const tailText = fullText.slice(headText.length).trim();
+    const tag = paragraphMatch[1].toLowerCase();
+    const attributes = paragraphMatch[2] ?? "";
+    return [`<${tag}${attributes}>${escapeHtml(headText)}</${tag}>`, `<${tag}${attributes}>${escapeHtml(tailText)}</${tag}>`];
+  };
   const blocks = rawBlocks.flatMap(splitLongBlock);
   const pages: string[] = [];
   let current: string[] = [];
   let weight = 0;
 
-  for (const block of blocks) {
+  const pending = [...blocks];
+  while (pending.length) {
+    const block = pending.shift()!;
     const isHeading = /^<h[23]/i.test(block);
     const activeCapacity = pages.length === 0 ? firstPageCapacity : pageCapacity;
-    const blockWeight = textLength(block) + (isHeading ? 145 : 0) + (/^<(?:ul|ol|blockquote)/i.test(block) ? 100 : 0);
+    const blockWeight = blockWeightFor(block);
     if (isHeading && current.length && weight > activeCapacity * .84) {
       pages.push(current.join(""));
       current = [];
       weight = 0;
     }
     if (current.length && weight + blockWeight > activeCapacity) {
+      const available = activeCapacity - weight;
+      const fitted = splitBlockToFit(block, available);
+      if (fitted) {
+        const [fragment, remainder] = fitted;
+        current.push(fragment);
+        pages.push(current.join(""));
+        current = [];
+        weight = 0;
+        pending.unshift(remainder);
+        continue;
+      }
       const trailingHeading = current.length > 1 && /^<h[23]/i.test(current[current.length - 1]);
       if (trailingHeading) {
         const heading = current.pop()!;
         pages.push(current.join(""));
         current = [heading];
-        weight = textLength(heading) + 145;
+        weight = blockWeightFor(heading);
       } else {
         pages.push(current.join(""));
         current = [];
