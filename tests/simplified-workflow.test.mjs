@@ -54,17 +54,27 @@ test("the main workflow is chapter-wise instead of a wall of global buttons", ()
 
 test("failed chapters can be handed to a designer without blocking PDF export", () => {
   assert.match(page, /\| "Designer handoff"/);
-  assert.match(page, /async function leaveActiveForDesigner\(\)/);
+  assert.match(page, /async function leaveChapterForDesigner\(chapterId = active\?\.id\)/);
   assert.match(page, /Send Chapter \{active\.id\} to designer/);
   assert.match(page, /chapterGenerationState\(chapter\) !== "Designer handoff"/);
-  assert.match(page, /function exportPdf\(\)/);
-  assert.match(page, /window\.setTimeout\(\(\) => \{[\s\S]*document\.querySelector\("\.preview-modal"\)[\s\S]*window\.print\(\)/);
-  assert.match(page, />↓ PDF<\/button>/);
+  assert.match(page, /async function downloadPdf\(mode: "proof" \| "final"\)/);
+  assert.match(page, /pdf\.save\(`/);
+  assert.match(page, /Download proof PDF/);
 });
 
 test("preview opens even when export is quality-gated", () => {
-  assert.match(page, /function openPreview\(\)/);
-  assert.match(page, /preview opened/);
-  assert.match(page, /onClick=\{openPreview\}/);
-  assert.match(page, /disabled=\{unreviewedChapters\.length > 0\}/);
+  assert.match(page, /function openPreview\(mode: "proof" \| "final" = "proof"\)/);
+  assert.match(page, /Proof ready/);
+  assert.match(page, /openPreview\("proof"\)/);
+  assert.match(page, /disabled=\{exportBusy \|\| Boolean\(unresolved\.length\)\}/);
+});
+
+test("publishing workflow exposes review, operations and real PDF controls", () => {
+  for (const label of ["Source uploaded", "Chapters generated", "Quality review", "Illustrations", "Export ready", "Review Queue", "Request History", "Proof mode", "Final-book mode"]) {
+    assert.match(page, new RegExp(label));
+  }
+  assert.match(page, /generationRuns\?: GenerationRun\[\]/);
+  assert.match(page, /Current generation run|current run/i);
+  assert.match(page, /html2canvas/);
+  assert.match(page, /jsPDF/);
 });

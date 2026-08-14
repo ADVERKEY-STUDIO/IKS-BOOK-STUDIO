@@ -22,6 +22,17 @@ type GenerationUsage = {
   updatedAt?: string;
 };
 
+type GenerationRun = {
+  id: string;
+  startedAt: string;
+  completedAt?: string;
+  status: "running" | "passed" | "needs-review" | "quota-paused" | "failed";
+  usage: GenerationUsage;
+  feedback?: string[];
+  error?: string;
+  durationMs?: number;
+};
+
 type DraftApiResponse = {
   chapters?: Chapter[];
   candidateChapter?: Chapter;
@@ -82,6 +93,9 @@ type Chapter = {
   generationError?: string;
   repairAttempts?: number;
   phase7Evaluation?: ChapterOneGate;
+  generationRuns?: GenerationRun[];
+  manualApproved?: boolean;
+  manualApprovedAt?: string;
 };
 
 type NemotronConnection = {
@@ -773,6 +787,9 @@ function reconcileOriginalChapters(project: Project, titles: string[], sections:
       generationUsage: existing?.generationUsage,
       generationError: existing?.generationError,
       phase7Evaluation: existing?.phase7Evaluation,
+      generationRuns: existing?.generationRuns,
+      manualApproved: existing?.manualApproved,
+      manualApprovedAt: existing?.manualApprovedAt,
       sourceStartPage: plan?.sourceStartPage ?? existing?.sourceStartPage,
       sourceEndPage: plan?.sourceEndPage ?? existing?.sourceEndPage,
       sourcePageCount: plan?.sourcePageCount ?? existing?.sourcePageCount,
@@ -880,6 +897,9 @@ function normalizeProject(saved: Project): Project {
       generationError: chapter.generationError,
       repairAttempts: chapter.repairAttempts,
       phase7Evaluation: chapter.phase7Evaluation,
+      generationRuns: chapter.generationRuns ?? [],
+      manualApproved: Boolean(chapter.manualApproved),
+      manualApprovedAt: chapter.manualApprovedAt,
     };
   });
   const hierarchy = repairChapterHierarchy(normalizedChapters);
@@ -997,6 +1017,27 @@ function chapterGenerationState(chapter: Chapter): ChapterGenerationStatus {
   return chapter.generationStatus || (chapter.importValidated || chapter.pedagogyQuality?.status === "passed" ? "Completed" : "Waiting");
 }
 
+function isPublishApproved(chapter: Chapter) {
+  return Boolean(chapter.importValidated || chapter.manualApproved || chapter.pedagogyQuality?.status === "passed" || chapterGenerationState(chapter) === "Designer handoff");
+}
+
+function emptyUsage(): GenerationUsage {
+  return { inputTokens: 0, outputTokens: 0, totalTokens: 0, reasoningTokens: 0, requests: 0 };
+}
+
+function latestGenerationRun(chapter: Chapter) {
+  return chapter.generationRuns?.at(-1);
+}
+
+function finishGenerationRun(chapter: Chapter, runId: string | undefined, status: GenerationRun["status"], usage: GenerationUsage | undefined, error?: string, durationMs?: number): GenerationRun[] {
+  const runs = [...(chapter.generationRuns ?? [])];
+  const index = runId ? runs.findIndex((run) => run.id === runId) : runs.length - 1;
+  const nextUsage = { ...emptyUsage(), ...usage, requests: usage?.requests || 0 };
+  if (index >= 0) runs[index] = { ...runs[index], status, usage: nextUsage, completedAt: new Date().toISOString(), error, durationMs };
+  else runs.push({ id: runId || makeId(), startedAt: new Date().toISOString(), completedAt: new Date().toISOString(), status, usage: nextUsage, error, durationMs });
+  return runs.slice(-50);
+}
+
 const qualityScoreLabels: Record<string, string> = {
   context: "Context",
   coherence: "Coherence",
@@ -1047,6 +1088,9 @@ export default function Home() {
   const [wizardStep, setWizardStep] = useState(0);
   const [toast, setToast] = useState("");
   const [showPreview, setShowPreview] = useState(false);
+  const [previewMode, setPreviewMode] = useState<"proof" | "final">("proof");
+  const [showReviewQueue, setShowReviewQueue] = useState(false);
+  const [showOperations, setShowOperations] = useState(false);
   const [showVersions, setShowVersions] = useState(false);
   const [showPackageImport, setShowPackageImport] = useState(false);
   const [showComparison, setShowComparison] = useState(false);
@@ -1055,6 +1099,7 @@ export default function Home() {
   const [sourceBusy, setSourceBusy] = useState(false);
   const [draftBusy, setDraftBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
+  const [pdfProgress, setPdfProgress] = useState(0);
   const [designerPreferences, setDesignerPreferences] = useState<string[]>([]);
   const [aiRequest, setAiRequest] = useState<{ action: string; prompt: string; selection: string; result: string } | null>(null);
   const [connection, setConnection] = useState<NemotronConnection>({ state: "idle", message: "Not tested" });
@@ -1390,23 +1435,49 @@ OUTPUT REQUIREMENTS
     finally { setExportBusy(false); }
   }
 
-  function openPreview() {
+  function openPreview(mode: "proof" | "final" = "proof") {
+    setPreviewMode(mode);
     setShowPreview(true);
   }
 
-  function exportPdf() {
-    const blocked = project.chapters.filter((chapter) => !chapter.importValidated && chapter.pedagogyQuality?.status !== "passed" && chapterGenerationState(chapter) !== "Designer handoff");
-    if (blocked.length) {
-      notify(`${blocked.length} chapter${blocked.length === 1 ? " is" : "s are"} still waiting for review or designer handoff; preview opened`);
-      openPreview();
+  async function downloadPdf(mode: "proof" | "final") {
+    const blocked = project.chapters.filter((chapter) => !isPublishApproved(chapter));
+    if (mode === "final" && blocked.length) {
+      notify(`Final PDF unavailable — ${blocked.length} chapter${blocked.length === 1 ? " requires" : "s require"} review. Opening the Review Queue.`);
+      setShowReviewQueue(true);
       return;
     }
-    openPreview();
-    // Wait for React to mount the preview before entering the browser print
-    // flow; invoking print during the state update can produce a blank proof.
-    window.setTimeout(() => {
-      if (document.querySelector(".preview-modal")) window.print();
-    }, 650);
+    setPreviewMode(mode);
+    setShowPreview(true);
+    setExportBusy(true);
+    setPdfProgress(0);
+    try {
+      await new Promise((resolve) => window.setTimeout(resolve, 450));
+      await document.fonts?.ready;
+      const sheets = Array.from(document.querySelectorAll<HTMLElement>(".pdf-render-stack .book-sheet"));
+      if (!sheets.length) throw new Error("Preview pages are not ready");
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")]);
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4", compress: true });
+      for (let index = 0; index < sheets.length; index += 1) {
+        const canvas = await html2canvas(sheets[index], { backgroundColor: "#fffdf8", scale: 1.55, useCORS: true, logging: false, imageTimeout: 15000 });
+        if (index > 0) pdf.addPage("a4", "portrait");
+        pdf.addImage(canvas.toDataURL("image/jpeg", 0.9), "JPEG", 0, 0, 210, 297, undefined, "FAST");
+        setPdfProgress(Math.round((index + 1) / sheets.length * 100));
+        await new Promise((resolve) => window.setTimeout(resolve, 0));
+      }
+      const safeTitle = project.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "book";
+      pdf.save(`${safeTitle}-${mode === "proof" ? "review-proof" : "final"}.pdf`);
+      notify(`${mode === "proof" ? "Review proof" : "Final publishing"} PDF downloaded`);
+    } catch {
+      notify("The PDF could not be created. Preview remains open so you can inspect the pages.");
+    } finally {
+      setExportBusy(false);
+      setPdfProgress(0);
+    }
+  }
+
+  function exportPdf() {
+    openPreview("proof");
   }
 
   async function duplicateProject(source: Project) {
@@ -1666,6 +1737,7 @@ OUTPUT REQUIREMENTS
     let failureReason = "";
     let chapterOneStable = project.chapters.some((chapter) => chapter.id === 1 && chapterGenerationState(chapter) === "Completed" && chapter.generationProfile === selectedProfile);
     const totalUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0, reasoningTokens: 0, requests: 0 };
+    const runIds = new Map<number, string>();
     try {
       if (!project.sourceObjectKey) {
         notify("Re-upload the original book to build a meaningfully taught chapter with the AI teaching engine.");
@@ -1681,10 +1753,12 @@ OUTPUT REQUIREMENTS
           const currentChapter = workingProject.chapters.find((chapter) => chapter.id === chapterId);
           if (!currentChapter) continue;
           await preserveGenerationVersion(workingProject, currentChapter);
+          const runId = makeId();
+          runIds.set(chapterId, runId);
           workingProject = {
             ...workingProject,
             chapters: workingProject.chapters.map((chapter) => chapter.id === chapterId
-              ? { ...chapter, generationStatus: "Generating" as const, generationError: undefined }
+              ? { ...chapter, generationStatus: "Generating" as const, generationError: undefined, manualApproved: false, manualApprovedAt: undefined, generationRuns: [...(chapter.generationRuns ?? []), { id: runId, startedAt: new Date().toISOString(), status: "running" as const, usage: emptyUsage() }].slice(-50) }
               : chapter),
           };
           setProject(workingProject);
@@ -1719,6 +1793,7 @@ OUTPUT REQUIREMENTS
                         requests: (chapter.generationUsage?.requests || 0) + (failedUsage?.requests || requestCount),
                         updatedAt: new Date().toISOString(),
                       } : chapter.generationUsage,
+                      generationRuns: finishGenerationRun(chapter, runIds.get(chapterId), result.data.quota ? "quota-paused" : result.data.code === "human-review" ? "needs-review" : "failed", failedUsage || { ...emptyUsage(), requests: requestCount }, result.data.error, result.data.durationMs),
                     }
                   : chapter),
               };
@@ -1749,6 +1824,9 @@ OUTPUT REQUIREMENTS
                     updatedAt: new Date().toISOString(),
                   },
                   phase7Evaluation: result.data.phase7Evaluation,
+                  generationRuns: finishGenerationRun(chapter, runIds.get(chapterId), "passed", usage, undefined, result.data.durationMs),
+                  manualApproved: false,
+                  manualApprovedAt: undefined,
                 }
               : chapter);
             workingProject = { ...workingProject, chapters: attachChapterVisuals(workingProject, merged) };
@@ -1859,14 +1937,15 @@ OUTPUT REQUIREMENTS
     }
   }
 
-  async function leaveActiveForDesigner() {
-    if (!active || chapterGenerationState(active) === "Completed") return;
+  async function leaveChapterForDesigner(chapterId = active?.id) {
+    const chapterToSend = project.chapters.find((chapter) => chapter.id === chapterId);
+    if (!chapterToSend || chapterGenerationState(chapterToSend) === "Completed") return;
     try {
-      await preserveGenerationVersion(project, active);
-      const handoffBody = chapterWordCount(active) >= 80 ? active.body : `<p class="chapter-kicker">DESIGNER HANDOFF</p><h1>${active.title}</h1><div class="designer-handoff-page"><b>Reserved for final human development</b><p>This section is intentionally left for the book designer and editor. Its final text, layout and any supporting material will be completed during the human review stage.</p><p>The rest of the reviewed book can be exported now without asking Nemotron to regenerate this chapter.</p></div>`;
+      await preserveGenerationVersion(project, chapterToSend);
+      const handoffBody = chapterWordCount(chapterToSend) >= 80 ? chapterToSend.body : `<p class="chapter-kicker">DESIGNER HANDOFF</p><h1>${chapterToSend.title}</h1><div class="designer-handoff-page"><b>Reserved for final human development</b><p>This section is intentionally left for the book designer and editor. Its final text, layout and any supporting material will be completed during the human review stage.</p><p>The rest of the reviewed book can be exported now without asking Nemotron to regenerate this chapter.</p></div>`;
       const next = {
         ...project,
-        chapters: project.chapters.map((chapter) => chapter.id === active.id ? {
+        chapters: project.chapters.map((chapter) => chapter.id === chapterToSend.id ? {
           ...chapter,
           body: handoffBody,
           status: "draft" as const,
@@ -1879,10 +1958,27 @@ OUTPUT REQUIREMENTS
       };
       setProject(next);
       await persistProject(next);
-      notify(`Chapter ${active.id} left for the designer. PDF export is now available.`);
+      notify(`Chapter ${chapterToSend.id} sent to the designer and saved.`);
     } catch {
       notify("The designer handoff could not be saved");
     }
+  }
+
+  async function approveChapterManually(chapterId: number) {
+    const next = {
+      ...project,
+      chapters: project.chapters.map((chapter) => chapter.id === chapterId ? {
+        ...chapter,
+        manualApproved: true,
+        manualApprovedAt: new Date().toISOString(),
+        status: "approved" as const,
+        generationStatus: "Completed" as const,
+        generationError: undefined,
+      } : chapter),
+    };
+    setProject(next);
+    await persistProject(next);
+    notify(`Chapter ${chapterId} manually approved and saved.`);
   }
 
   if (view === "dashboard") return <Dashboard projects={projects} onNew={startNewBook} onOpen={openProject} onDuplicate={duplicateProject} onDelete={deleteProject} />;
@@ -1893,11 +1989,9 @@ OUTPUT REQUIREMENTS
         <button className="brand" onClick={() => setView("dashboard")}><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></button>
         <div className="current-project"><i /> <span><strong>{project.title}</strong><small>{project.source}</small></span></div>
         <div className="top-actions">
+          {view === "editor" && <><button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>Workflow</button><button onClick={() => setShowReviewQueue(true)}>Review <span>{project.chapters.filter((chapter) => !isPublishApproved(chapter)).length || "✓"}</span></button><button onClick={() => openPreview("proof")}>Preview</button><button className="pdf-button" onClick={() => openPreview("proof")}>Export</button></>}
           {view === "editor" && <button onClick={() => setView("brief")}>☷ <span>Book plan</span></button>}
-          {(view === "editor" || view === "brief") && <details className="advanced-tools"><summary>Advanced tools</summary><div><label className="advanced-upload">{sourceBusy ? "Reading source…" : "Replace source book"}<input type="file" accept=".pdf,.docx,.txt,.md" disabled={sourceBusy || draftBusy} onChange={(event) => event.target.files?.[0] && refreshSource(event.target.files[0])}/></label><button onClick={openVersions}>Version history</button><button onClick={saveProject}>Save project now</button><button className="package-import-button" onClick={() => setShowPackageImport(true)}>ChatGPT ZIP workflow</button><small>Source, versions, manual save, and ZIP import</small></div></details>}
-          <button onClick={openPreview}>Preview</button>
-          <button className="pdf-button" onClick={exportPdf}>↓ PDF</button>
-          <button className="export-button" onClick={exportDoc} disabled={exportBusy}>{exportBusy ? "Preparing…" : "↓ DOCX"}</button>
+          {(view === "editor" || view === "brief") && <details className="advanced-tools"><summary>Advanced tools</summary><div><label className="advanced-upload">{sourceBusy ? "Reading source…" : "Replace source book"}<input type="file" accept=".pdf,.docx,.txt,.md" disabled={sourceBusy || draftBusy} onChange={(event) => event.target.files?.[0] && refreshSource(event.target.files[0])}/></label><button onClick={openVersions}>Version history</button><button onClick={() => setShowOperations(true)}>Request history</button><button onClick={saveProject}>Save project now</button><button onClick={exportDoc} disabled={exportBusy}>{exportBusy ? "Preparing DOCX…" : "Download DOCX"}</button><button className="package-import-button" onClick={() => setShowPackageImport(true)}>ChatGPT ZIP workflow</button><small>Source, versions, request history, DOCX and ZIP import</small></div></details>}
         </div>
       </header>
 
@@ -1916,7 +2010,9 @@ OUTPUT REQUIREMENTS
         onCompare={() => comparison ? setShowComparison(true) : notify("Improve a chapter first to compare both versions")}
         onAccept={acceptImprovement}
         onKeep={() => void keepOriginal()}
-        onDesignerHandoff={() => void leaveActiveForDesigner()}
+        onDesignerHandoff={(chapterId) => void leaveChapterForDesigner(chapterId)}
+        onOpenReview={() => setShowReviewQueue(true)}
+        onOpenOperations={() => setShowOperations(true)}
         onRestore={() => void restorePreviousVersion()}
       />}
 
@@ -1925,7 +2021,9 @@ OUTPUT REQUIREMENTS
       {view === "brief" && <BookBrief project={project} allocated={allocatedPages} draftBusy={draftBusy} onBack={() => setView("analysis")} onUpdateChapter={updateChapter} onPrepare={prepareDraft} onContinue={() => { patchProject({ briefApproved: true }); setActiveChapter(project.chapters[0]?.id ?? 1); setView("editor"); }} />}
       {view === "editor" && <Editor project={project} active={active} activeId={activeChapter} allocated={allocatedPages} draftBusy={draftBusy} onSelect={setActiveChapter} onSaveBody={saveChapterBody} editorRef={editorRef} onAi={aiAction} onRemember={rememberPreference} onToggleLock={() => patchProject({ chapters: project.chapters.map((chapter) => chapter.id === active?.id ? { ...chapter, locked: !chapter.locked } : chapter) })} onAddChapter={addChapter} onUploadImage={uploadChapterImage} onPatchProject={patchProject} onUpdateChapter={updateChapter} />}
 
-      {showPreview && <Preview project={project} draftBusy={draftBusy} onFill={() => prepareDraft("thin")} onRefresh={() => prepareDraft("all")} onClose={() => setShowPreview(false)} onPrint={() => { if (document.querySelector(".preview-modal")) window.print(); }} />}
+      {showPreview && <Preview project={project} draftBusy={draftBusy} mode={previewMode} exportBusy={exportBusy} pdfProgress={pdfProgress} onMode={setPreviewMode} onClose={() => setShowPreview(false)} onDownload={(mode) => void downloadPdf(mode)} onOpenReview={() => { setShowPreview(false); setShowReviewQueue(true); }} />}
+      {showReviewQueue && <ReviewQueue project={project} busy={draftBusy} onClose={() => setShowReviewQueue(false)} onOpen={(chapterId) => { setActiveChapter(chapterId); setShowReviewQueue(false); }} onRepair={(chapterId) => { setActiveChapter(chapterId); setShowReviewQueue(false); void prepareDraft("active", { chapterId }); }} onApprove={(chapterId) => void approveChapterManually(chapterId)} onDesigner={(chapterId) => void leaveChapterForDesigner(chapterId)} onRestore={() => void restorePreviousVersion()} />}
+      {showOperations && <OperationsHistory project={project} onClose={() => setShowOperations(false)} />}
       {showVersions && <Versions versions={versions} onCreate={createVersion} onRestore={(snapshot) => { setProject(normalizeProject(snapshot)); setShowVersions(false); notify("Version restored"); }} onClose={() => setShowVersions(false)} />}
       {showPackageImport && <BookPackageImporter project={project} busy={packageBusy} onClose={() => setShowPackageImport(false)} onDownloadRequest={downloadChatGptBookRequest} onImport={importBookPackage} />}
       {showComparison && comparison && <ChapterComparison original={comparison.original} improved={project.chapters.find((chapter) => chapter.id === comparison.chapterId) || comparison.original} onAccept={acceptImprovement} onKeep={() => void keepOriginal()} onClose={() => setShowComparison(false)} />}
@@ -1935,7 +2033,7 @@ OUTPUT REQUIREMENTS
   );
 }
 
-function SimpleWorkflowBar({ project, active, busy, paused, connection, hasComparison, onTest, onSelectChapter, onGenerateChapter, onPause, onResume, onCompare, onAccept, onKeep, onDesignerHandoff, onRestore }: {
+function SimpleWorkflowBar({ project, active, busy, paused, connection, hasComparison, onTest, onSelectChapter, onGenerateChapter, onPause, onResume, onCompare, onAccept, onKeep, onDesignerHandoff, onOpenReview, onOpenOperations, onRestore }: {
   project: Project;
   active: Chapter;
   busy: boolean;
@@ -1950,26 +2048,40 @@ function SimpleWorkflowBar({ project, active, busy, paused, connection, hasCompa
   onCompare: () => void;
   onAccept: () => void;
   onKeep: () => void;
-  onDesignerHandoff: () => void;
+  onDesignerHandoff: (chapterId: number) => void;
+  onOpenReview: () => void;
+  onOpenOperations: () => void;
   onRestore: () => void;
 }) {
   const quotaPaused = project.chapters.some((chapter) => chapter.generationStatus === "Paused by quota");
-  const unfinished = project.chapters.some((chapter) => !["Completed", "Designer handoff", "Human review"].includes(chapterGenerationState(chapter)) && !chapter.locked);
-  const chapterOneGate = project.chapters.find((chapter) => chapter.id === 1)?.phase7Evaluation;
+  const approved = project.chapters.filter(isPublishApproved).length;
+  const reviewCount = project.chapters.length - approved;
+  const illustrated = project.chapters.filter((chapter) => Boolean(chapter.imageUrl) || chapterGenerationState(chapter) === "Designer handoff").length;
+  const totals = generationTotals(project.chapters);
+  const activeRun = latestGenerationRun(active);
+  const unfinished = reviewCount > 0;
+  const stages = [
+    ["01", "Source uploaded", project.sourceObjectKey ? "Complete" : "Needed"],
+    ["02", "Chapters generated", `${approved}/${project.chapters.length}`],
+    ["03", "Quality review", reviewCount ? `${reviewCount} to review` : "Complete"],
+    ["04", "Illustrations", `${illustrated}/${project.chapters.length}`],
+    ["05", "Export ready", reviewCount ? "Proof ready" : "Final ready"],
+  ];
   return <section className="simple-workflow-bar" aria-label="Book improvement controls">
     <div className="workflow-heading"><div><b>Automated publishing workflow</b><span>Build once. Every chapter is checked, repaired when needed, and saved automatically.</span></div><div className={`connection-pill ${connection.state}`}><span /><b>Nemotron</b><small>{connection.message}</small><button onClick={onTest} disabled={busy || connection.state === "testing"}>{connection.state === "testing" ? "Testing…" : "Test"}</button></div></div>
+    <div className="publishing-steps">{stages.map(([number, label, detail], index) => <div className={`${index === 0 || (index === 1 && approved) || (index === 2 && !reviewCount) ? "done" : ""}`} key={label}><span>{number}</span><b>{label}</b><small>{detail}</small></div>)}</div>
     <div className="chapter-generation-grid">
       {project.chapters.map((chapter) => {
         const status = chapterGenerationState(chapter);
-        const disabled = busy || chapter.locked || status === "Designer handoff" || status === "Human review";
-        const action = status === "Completed" || status === "Designer handoff" ? "View" : status === "Human review" ? "Human review" : status === "Needs review" ? "Review details" : status === "Paused by quota" ? "Resume" : status === "Generating" ? "Generating…" : "Generate";
+        const disabled = busy || chapter.locked || status === "Designer handoff";
+        const action = status === "Completed" || status === "Designer handoff" ? "View" : status === "Human review" || status === "Needs review" ? "Review issues" : status === "Paused by quota" ? "Resume" : status === "Generating" ? "Generating…" : "Generate";
         const reviewOnly = ["Completed", "Designer handoff", "Needs review", "Human review"].includes(status);
-        return <article className={`chapter-generation-card ${active.id === chapter.id ? "active" : ""} ${normalizedTitle(status).replace(/[^a-z]+/g, "-")}`} key={chapter.id}><button className="chapter-card-select" onClick={() => onSelectChapter(chapter.id)}><span>CH {String(chapter.id).padStart(2, "0")}</span><b>{chapter.title}</b></button><button className="chapter-card-action" disabled={disabled} onClick={() => reviewOnly ? onSelectChapter(chapter.id) : onGenerateChapter(chapter.id)}>{action}</button></article>;
+        return <article className={`chapter-generation-card ${active.id === chapter.id ? "active" : ""} ${normalizedTitle(status).replace(/[^a-z]+/g, "-")}`} key={chapter.id}><button className="chapter-card-select" onClick={() => onSelectChapter(chapter.id)}><span>CH {String(chapter.id).padStart(2, "0")}</span><b>{chapter.title}</b><small>{chapter.manualApproved ? "Manually approved" : status}</small></button><button className="chapter-card-action" disabled={disabled} onClick={() => status === "Human review" || status === "Needs review" ? (onSelectChapter(chapter.id), onOpenReview()) : reviewOnly ? onSelectChapter(chapter.id) : onGenerateChapter(chapter.id)}>{action}</button></article>;
       })}
     </div>
     <div className="workflow-lower-row">
-      <Phase7Report evaluation={chapterOneGate} totalChapters={project.chapters.length}/>
-      <div className="workflow-context-actions">{!busy && unfinished && <button className="primary" onClick={onResume}>{quotaPaused ? "Resume book" : "Build this book"}</button>}{chapterGenerationState(active) === "Human review" && <button className="designer-handoff-action" onClick={onDesignerHandoff} disabled={busy}>Send Chapter {active.id} to designer</button>}{busy && <button onClick={onPause} disabled={paused}>Pause after this chapter</button>}<details><summary>More actions</summary><div><button onClick={onCompare} disabled={!hasComparison}>Compare versions</button><button onClick={onAccept} disabled={!hasComparison}>Accept improvement</button><button onClick={onKeep} disabled={!hasComparison}>Keep original</button><button onClick={onRestore} disabled={busy}>Restore previous version</button></div></details></div>
+      <div className="request-usage-strip"><span><b>{activeRun?.usage.requests || 0}</b> of 3 · current run</span><span><b>{active.generationUsage?.requests || 0}</b> chapter requests</span><span><b>{totals.requests}</b> whole-book requests</span><span><b>{totals.totalTokens.toLocaleString()}</b> tokens</span><button onClick={onOpenOperations}>Request history →</button></div>
+      <div className="workflow-context-actions">{!busy && unfinished && <button className="primary" onClick={onResume}>{quotaPaused ? "Resume book" : approved ? `Continue generation · ${reviewCount} left` : "Build this book"}</button>}{reviewCount > 0 && <button onClick={onOpenReview}>Review {reviewCount} chapter{reviewCount === 1 ? "" : "s"}</button>}{chapterGenerationState(active) === "Human review" && <button className="designer-handoff-action" onClick={() => onDesignerHandoff(active.id)} disabled={busy}>Send Chapter {active.id} to designer</button>}{busy && <button onClick={onPause} disabled={paused}>Pause after this chapter</button>}<details><summary>More actions</summary><div><button onClick={onCompare} disabled={!hasComparison}>Compare versions</button><button onClick={onAccept} disabled={!hasComparison}>Accept improvement</button><button onClick={onKeep} disabled={!hasComparison}>Keep original</button><button onClick={onRestore} disabled={busy}>Restore previous version</button></div></details></div>
     </div>
   </section>;
 }
@@ -1979,6 +2091,27 @@ function Phase7Report({ evaluation, totalChapters }: { evaluation?: ChapterOneGa
   if (!evaluation) return <div className="phase7-report waiting"><b>PUBLISHING PILOT · CHAPTER 1</b><span>The first chapter proves the age, relevance and token configuration. The workflow then continues automatically.</span></div>;
   const seconds = Math.round(evaluation.metrics.durationMs / 100) / 10;
   return <div className={`phase7-report ${evaluation.passed ? "passed" : "failed"}`}><header><b>PUBLISHING PILOT · {evaluation.passed ? "PASSED" : "HUMAN REVIEW"}</b><span>{evaluation.passed ? `${remainingLabel} continue automatically` : "The best candidate was preserved; the remaining book can continue"}</span></header><div><span><b>{evaluation.metrics.requests}</b> of 3 passes</span><span><b>{evaluation.metrics.totalTokens.toLocaleString()}</b> tokens</span><span><b>{seconds}s</b> speed</span><span><b>{evaluation.metrics.words}</b> words</span><span><b>{evaluation.metrics.accuracyScore}</b> accuracy</span><span><b>{evaluation.metrics.ageFitScore}</b> age fit</span><span><b>{evaluation.metrics.qualityAverage}</b> quality</span></div></div>;
+}
+
+function reviewReasons(chapter: Chapter) {
+  const reasons = [...(chapter.pedagogyQuality?.checks || [])];
+  if (chapter.generationError) reasons.unshift(chapter.generationError);
+  if (chapterWordCount(chapter) < 350) reasons.push("Short or incomplete content");
+  if (!chapter.imageUrl) reasons.push("Illustration missing");
+  return [...new Set(reasons)].slice(0, 6);
+}
+
+function ReviewQueue({ project, busy, onClose, onOpen, onRepair, onApprove, onDesigner, onRestore }: {
+  project: Project; busy: boolean; onClose: () => void; onOpen: (chapterId: number) => void; onRepair: (chapterId: number) => void; onApprove: (chapterId: number) => void; onDesigner: (chapterId: number) => void; onRestore: () => void;
+}) {
+  const chapters = project.chapters.filter((chapter) => !isPublishApproved(chapter));
+  return <div className="modal-backdrop"><section className="review-queue-modal"><header><div><p className="eyebrow">QUALITY REVIEW</p><h2>Review Queue</h2><p>{chapters.length ? `${chapters.length} chapter${chapters.length === 1 ? " needs" : "s need"} a decision before final export.` : "Every chapter is cleared for final export."}</p></div><button onClick={onClose}>×</button></header><div className="review-queue-list">{chapters.map((chapter) => { const latest = latestGenerationRun(chapter); const attempts = latest?.usage.requests || chapter.repairAttempts || 0; return <article key={chapter.id}><div className="review-chapter-number">{String(chapter.id).padStart(2, "0")}</div><div><h3>{chapter.title}</h3><div className="review-reason-tags">{reviewReasons(chapter).map((reason) => <span key={reason}>{reason}</span>)}</div><small>{attempts} of 3 passes in current run · {chapter.generationUsage?.requests || 0} lifetime requests · saved automatically</small></div><div className="review-card-actions"><button className="primary" onClick={() => onRepair(chapter.id)} disabled={busy || attempts >= 3}>{attempts >= 3 ? "3-pass limit reached" : "Repair with feedback"}</button><button onClick={() => onApprove(chapter.id)} disabled={busy}>Approve manually</button><button onClick={() => onOpen(chapter.id)}>Open in editor</button><button onClick={() => onDesigner(chapter.id)} disabled={busy}>Send to designer</button><button onClick={onRestore} disabled={busy}>Restore previous</button></div></article>; })}{!chapters.length && <div className="review-empty"><b>✓ Publishing review complete</b><span>You can now download the final PDF.</span></div>}</div></section></div>;
+}
+
+function OperationsHistory({ project, onClose }: { project: Project; onClose: () => void }) {
+  const rows = project.chapters.flatMap((chapter) => chapter.generationRuns?.length ? chapter.generationRuns.map((run, index) => ({ chapter, run, index })) : chapter.generationUsage?.requests ? [{ chapter, run: { id: `legacy-${chapter.id}`, startedAt: chapter.generationUsage.updatedAt || "Earlier session", completedAt: chapter.generationUsage.updatedAt, status: chapterGenerationState(chapter) === "Completed" ? "passed" as const : "needs-review" as const, usage: chapter.generationUsage } satisfies GenerationRun, index: 0 }] : []);
+  const totals = generationTotals(project.chapters);
+  return <div className="modal-backdrop"><section className="operations-modal"><header><div><p className="eyebrow">APPEND-ONLY OPERATIONS LOG</p><h2>Request History</h2><p>Refreshing, resuming and regenerating never reset these lifetime totals.</p></div><button onClick={onClose}>×</button></header><div className="operations-summary"><span><b>{totals.requests}</b> requests</span><span><b>{totals.inputTokens.toLocaleString()}</b> input tokens</span><span><b>{totals.outputTokens.toLocaleString()}</b> output tokens</span><span><b>{totals.totalTokens.toLocaleString()}</b> total tokens</span></div><div className="operations-table-wrap"><table><thead><tr><th>Chapter</th><th>Run</th><th>Date</th><th>Result</th><th>Passes</th><th>Input</th><th>Output</th><th>Duration</th><th>Feedback / error</th></tr></thead><tbody>{rows.map(({ chapter, run, index }) => <tr key={`${chapter.id}-${run.id}`}><td>{chapter.id}. {chapter.title}</td><td>{index + 1}</td><td>{run.startedAt === "Earlier session" ? run.startedAt : new Date(run.startedAt).toLocaleString()}</td><td><span className={`operation-status ${run.status}`}>{run.status.replace("-", " ")}</span></td><td>{run.usage.requests}</td><td>{run.usage.inputTokens.toLocaleString()}</td><td>{run.usage.outputTokens.toLocaleString()}</td><td>{run.durationMs ? `${Math.round(run.durationMs / 100) / 10}s` : "—"}</td><td>{run.error || run.feedback?.join(" · ") || "Initial generation"}</td></tr>)}</tbody></table>{!rows.length && <p className="empty">No Nemotron requests have been made for this project yet.</p>}</div></section></div>;
 }
 
 function ChapterComparison({ original, improved, onAccept, onKeep, onClose }: { original: Chapter; improved: Chapter; onAccept: () => void; onKeep: () => void; onClose: () => void }) {
@@ -2281,7 +2414,39 @@ function paginateReaderHtml(html: string, audience: string) {
   return pages.length ? pages : [clean];
 }
 
-function Preview({ project, draftBusy, onFill, onRefresh, onClose, onPrint }: { project: Project; draftBusy: boolean; onFill: () => void; onRefresh: () => void; onClose: () => void; onPrint: () => void }) {
+function Preview({ project, mode, exportBusy, pdfProgress, onMode, onClose, onDownload, onOpenReview }: { project: Project; draftBusy: boolean; mode: "proof" | "final"; exportBusy: boolean; pdfProgress: number; onMode: (mode: "proof" | "final") => void; onClose: () => void; onDownload: (mode: "proof" | "final") => void; onOpenReview: () => void }) {
+  const [pageIndex, setPageIndex] = useState(0);
+  const [zoom, setZoom] = useState(.72);
+  const [showThumbnails, setShowThumbnails] = useState(false);
+  const printable = useMemo(() => printableChapters(project.chapters), [project.chapters]);
+  const unresolved = project.chapters.filter((chapter) => !isPublishApproved(chapter));
+  const worldClass = `world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")}`;
+  const pageClass = `page-aesthetic-${normalizedTitle(project.pageAesthetic).replace(/[^a-z]+/g, "-")}`;
+  const borderClass = `book-border-${normalizedTitle(project.bookBorder).replace(/[^a-z]+/g, "-")}`;
+  const ageClass = `age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+  const chapterSheets = printable.chapters.flatMap((chapter) => {
+    if (chapter.importValidated && chapter.importedPages?.length) return chapter.importedPages.map((page, index) => ({ kind: "chapter" as const, chapter, body: page.body, pageIndex: index, pageCount: chapter.importedPages!.length, imageUrl: page.imageUrl, imageCaption: page.imageCaption, imageAlt: page.imageAlt }));
+    const pages = paginateReaderHtml(chapter.body, project.audience);
+    const text = pages.map((body, index) => ({ kind: "chapter" as const, chapter, body, pageIndex: index, pageCount: pages.length + (chapter.imageUrl ? 1 : 0), imageUrl: undefined, imageCaption: undefined, imageAlt: undefined }));
+    return chapter.imageUrl ? [...text, { kind: "chapter" as const, chapter, body: "", pageIndex: pages.length, pageCount: pages.length + 1, imageUrl: chapter.imageUrl, imageCaption: chapter.imageCaption, imageAlt: chapter.imageAlt }] : text;
+  });
+  const sheets: ({ kind: "cover" | "contents" | "back" } | (typeof chapterSheets)[number])[] = [{ kind: "cover" }, { kind: "contents" }, ...chapterSheets, { kind: "back" }];
+  useEffect(() => { if (pageIndex >= sheets.length) setPageIndex(Math.max(0, sheets.length - 1)); }, [pageIndex, sheets.length]);
+  const renderSheet = (sheet: (typeof sheets)[number], key: string) => {
+    const base = `book-sheet ${mode === "proof" ? "proof-sheet" : ""} ${worldClass} ${pageClass} ${borderClass}`;
+    if (sheet.kind === "cover") return <article className={`${base} preview-cover`} key={key}><p>AN ILLUSTRATED BOOK FOR {project.audience.toUpperCase()}</p><h1>{project.title}</h1><span>Written to invite curiosity, imagination and thoughtful questions</span><b>✦</b></article>;
+    if (sheet.kind === "contents") return <article className={`${base} preview-page contents-page`} key={key}><span>CONTENTS</span><h2>Inside this book</h2><ol>{printable.chapters.map((chapter, index) => <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{chapter.pages} pages</i></li>)}</ol></article>;
+    if (sheet.kind === "back") return <article className={`${base} preview-page backmatter`} key={key}><span>A FINAL THOUGHT</span><h2>Keep wondering</h2><p>The most powerful ideas do not end on the last page. They grow when we ask careful questions, notice new connections and share what we discover.</p><p>Carry one idea from this book into the world—and see where it leads.</p></article>;
+    const image = Boolean(sheet.imageUrl) && !sheet.body;
+    return <article className={`${base} preview-page chapter-preview ${ageClass}${image ? " chapter-visual-sheet" : ""}`} key={key}><header className="print-chapter-header"><span>CHAPTER {sheet.chapter.id}</span><span>PAGE {sheet.pageIndex + 1} OF {sheet.pageCount}</span></header>{sheet.pageIndex === 0 && <h2>{sheet.chapter.title}</h2>}{sheet.pageIndex > 0 && !image && <p className="continued-title">{sheet.chapter.title} · continued</p>}{sheet.body && <div className="preview-body" dangerouslySetInnerHTML={{ __html: sheet.body }}/>} {sheet.imageUrl && <figure className="chapter-image"><img src={sheet.imageUrl} alt={sheet.imageAlt || sheet.imageCaption || sheet.chapter.title}/><figcaption>{sheet.imageCaption || sheet.chapter.title}</figcaption></figure>}<footer className="sheet-number">{project.title}</footer></article>;
+  };
+  const current = sheets[pageIndex];
+  const currentChapter = current && current.kind === "chapter" ? current.chapter.id : 0;
+  const goToChapter = (chapterId: number) => { const index = sheets.findIndex((sheet) => sheet.kind === "chapter" && sheet.chapter.id === chapterId); if (index >= 0) setPageIndex(index); };
+  return <div className="modal-backdrop"><section className="preview-modal preview-v2"><header><div><p className="eyebrow">PUBLISHING PREVIEW · {mode === "proof" ? "REVIEW PROOF" : "FINAL BOOK"}</p><h2>{project.title}</h2></div><div className="preview-header-actions"><button className={mode === "proof" ? "active" : ""} onClick={() => onMode("proof")}>Proof mode</button><button className={mode === "final" ? "active" : ""} onClick={() => onMode("final")} disabled={Boolean(unresolved.length)}>Final-book mode</button><button className="primary" onClick={() => onDownload("proof")} disabled={exportBusy}>{exportBusy && mode === "proof" ? `Creating ${pdfProgress}%` : "Download proof PDF"}</button><button onClick={() => onDownload("final")} disabled={exportBusy || Boolean(unresolved.length)} title={unresolved.length ? `${unresolved.length} chapters require review` : "Download publication-ready PDF"}>Download final PDF</button><button onClick={onClose}>×</button></div></header><div className={`preflight-banner ${unresolved.length ? "warning" : "ready"}`}><div><b>{unresolved.length ? `Proof ready · ${unresolved.length} chapter${unresolved.length === 1 ? " requires" : "s require"} review` : "Publishing preflight passed"}</b><span>{unresolved.length ? "The proof PDF remains available. Resolve or manually approve each issue for final export." : "All chapters are included, reviewed, ordered and ready for final export."}</span></div>{unresolved.length > 0 && <button onClick={onOpenReview}>Open Review Queue</button>}</div><div className="preview-toolbar"><button onClick={() => setPageIndex(Math.max(0, pageIndex - 1))} disabled={pageIndex === 0}>← Previous</button><span>Page <b>{pageIndex + 1}</b> of {sheets.length}</span><button onClick={() => setPageIndex(Math.min(sheets.length - 1, pageIndex + 1))} disabled={pageIndex === sheets.length - 1}>Next →</button><select value={currentChapter} onChange={(event) => Number(event.target.value) ? goToChapter(Number(event.target.value)) : setPageIndex(Number(event.target.value) === -1 ? 1 : 0)}><option value={0}>Cover</option><option value={-1}>Contents</option>{project.chapters.map((chapter) => <option key={chapter.id} value={chapter.id}>Chapter {chapter.id}</option>)}</select><button onClick={() => setZoom(Math.min(1.1, zoom + .1))}>Zoom +</button><button onClick={() => setZoom(Math.max(.45, zoom - .1))}>Zoom −</button><button onClick={() => setZoom(.72)}>Fit page</button><button onClick={() => setZoom(.95)}>Fit width</button><button onClick={() => setShowThumbnails(!showThumbnails)}>{showThumbnails ? "Hide" : "Show"} thumbnails</button></div><div className="page-viewer-shell">{showThumbnails && <aside className="page-thumbnails">{sheets.map((sheet, index) => <button className={index === pageIndex ? "active" : ""} onClick={() => setPageIndex(index)} key={index}><span>{index + 1}</span><b>{sheet.kind === "chapter" ? `Ch ${sheet.chapter.id}` : sheet.kind}</b></button>)}</aside>}<div className="single-page-stage"><div style={{ transform: `scale(${zoom})` }}>{renderSheet(current, `visible-${pageIndex}`)}</div></div></div><div className="pdf-render-stack" aria-hidden="true">{sheets.map((sheet, index) => renderSheet(sheet, `export-${index}`))}</div></section></div>;
+}
+
+function LegacyPreview({ project, draftBusy, onFill, onRefresh, onClose, onPrint }: { project: Project; draftBusy: boolean; onFill: () => void; onRefresh: () => void; onClose: () => void; onPrint: () => void }) {
   useEffect(() => {
     document.documentElement.dataset.bookTypography = normalizedTitle(typographyTheme(project.fontTheme).value).replace(/[^a-z]+/g, "-");
     document.documentElement.dataset.bookBorder = normalizedTitle(bookBorder(project.bookBorder).value).replace(/[^a-z]+/g, "-");
