@@ -2886,6 +2886,92 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
     }
   };
 
+  const flowBodyFromRenderedPage = (html: string) => {
+    const root = document.createElement("div");
+    root.innerHTML = html;
+    const body = root.querySelector<HTMLElement>(".preview-body");
+    if (body) {
+      const figures = Array.from(root.children).filter((node) => node.tagName === "FIGURE").map((node) => node.outerHTML).join("");
+      return `${body.innerHTML}${figures}`;
+    }
+    Array.from(root.children).forEach((node) => {
+      if (node.tagName === "HEADER" || node.tagName === "FOOTER" || node.matches(".continued-title") || node.tagName === "H1" || node.tagName === "H2") node.remove();
+    });
+    return root.innerHTML.trim();
+  };
+
+  const measureChapterPages = async (chapter: Chapter, flowingHtml: string, style: DesignerPageRevision) => {
+    await document.fonts?.ready;
+    const normalized = paginateReaderHtml(flowingHtml, project.audience).join("");
+    const source = document.createElement("div");
+    source.innerHTML = normalized;
+    const blocks = Array.from(source.children).map((node) => node.outerHTML);
+    if (!blocks.length) return [""];
+
+    const sheet = document.createElement("article");
+    sheet.className = "designer-canvas-page designer-measure-page";
+    Object.assign(sheet.style, { position: "fixed", left: "-10000px", top: "0", width: "650px", minWidth: "650px", height: "919.285714px", visibility: "hidden", pointerEvents: "none" });
+    const content = document.createElement("div");
+    content.className = "designer-editable-content";
+    Object.assign(content.style, { boxSizing: "border-box", height: "100%", fontFamily: style.fontFamily, fontSize: `${style.fontSize}px`, color: style.textColor, lineHeight: String(style.lineHeight), letterSpacing: `${style.letterSpacing}px`, columnCount: String(style.columns), columnGap: `${style.columnGap}px`, padding: `${style.pagePadding}px` });
+    content.style.setProperty("--designer-paragraph-space", `${style.paragraphSpacing}px`);
+    sheet.append(content);
+    document.body.append(sheet);
+
+    const fits = (pageBlocks: string[], pageIndex: number) => {
+      content.innerHTML = designerChapterPageHtml(project, chapter, pageBlocks.join(""), pageIndex, 99);
+      return content.scrollHeight <= content.clientHeight + 1;
+    };
+    const splitForRemainingSpace = (block: string, current: string[], pageIndex: number) => {
+      const holder = document.createElement("div"); holder.innerHTML = block;
+      const element = holder.firstElementChild as HTMLElement | null;
+      if (!element || !["P", "BLOCKQUOTE", "DIV"].includes(element.tagName)) return null;
+      const words = (element.textContent ?? "").trim().split(/\s+/).filter(Boolean);
+      if (words.length < 28) return null;
+      let low = 12; let high = words.length - 12; let best = 0;
+      const tag = element.tagName.toLowerCase();
+      const className = element.className ? ` class="${escapeHtml(element.className)}"` : "";
+      while (low <= high) {
+        const middle = Math.floor((low + high) / 2);
+        const candidate = `<${tag}${className}>${escapeHtml(words.slice(0, middle).join(" "))}</${tag}>`;
+        if (fits([...current, candidate], pageIndex)) { best = middle; low = middle + 1; }
+        else high = middle - 1;
+      }
+      if (best < 12 || best >= words.length - 8) return null;
+      return [
+        `<${tag}${className}>${escapeHtml(words.slice(0, best).join(" "))}</${tag}>`,
+        `<${tag}${className}>${escapeHtml(words.slice(best).join(" "))}</${tag}>`,
+      ] as const;
+    };
+
+    const pages: string[] = [];
+    const pending = [...blocks];
+    let current: string[] = [];
+    while (pending.length) {
+      const block = pending.shift()!;
+      const pageIndex = pages.length;
+      const isHeading = /^<h[23]\b/i.test(block);
+      const headingPair = isHeading && pending[0] ? [...current, block, pending[0]] : null;
+      if (current.length && headingPair && !fits(headingPair, pageIndex)) {
+        pages.push(current.join("")); current = []; pending.unshift(block); continue;
+      }
+      if (fits([...current, block], pageIndex)) { current.push(block); continue; }
+      const split = splitForRemainingSpace(block, current, pageIndex);
+      if (split) {
+        current.push(split[0]);
+        pages.push(current.join(""));
+        current = [];
+        pending.unshift(split[1]);
+        continue;
+      }
+      if (current.length) { pages.push(current.join("")); current = []; pending.unshift(block); continue; }
+      current.push(block);
+    }
+    if (current.length) pages.push(current.join(""));
+    sheet.remove();
+    return pages.length ? pages : [normalized];
+  };
+
   const balanceLayout = async (scope: "chapter" | "book") => {
     const targetChapterIds = scope === "book" ? project.chapters.map((chapter) => chapter.id) : selected.chapterId ? [selected.chapterId] : [];
     if (!targetChapterIds.length) { setMessage("Choose a chapter page before balancing this chapter."); return; }
@@ -2901,18 +2987,19 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
         if (!chapter || !chapterPages.length) continue;
         const revisions = chapterPages.map((page) => ({ page, revision: revisionFor(page) })).filter(({ revision }) => !revision.deleted && !revision.intentionalBlank);
         if (revisions.some(({ revision }) => revision.layoutLocked)) { locked += 1; continue; }
-        const combined = revisions.map(({ page, revision }) => designerFlowBody(bookEditors.current.get(page.slotId)?.innerHTML ?? revision.html)).join("");
+        const combined = revisions.map(({ page, revision }) => flowBodyFromRenderedPage(bookEditors.current.get(page.slotId)?.innerHTML ?? revision.html)).join("");
         const figures = combined.match(/<figure\b[^>]*>[\s\S]*?<\/figure>/gi) ?? [];
         const flowingText = combined.replace(/<figure\b[^>]*>[\s\S]*?<\/figure>/gi, "");
-        let bodies = paginateReaderHtml(flowingText, project.audience);
+        const firstStyle = revisions[0]?.revision ?? defaultDesignerRevision();
+        let bodies = await measureChapterPages(chapter, flowingText, firstStyle);
         if (figures.length) {
           const last = bodies.at(-1) ?? "";
-          if (readerTextLength(last) < 1450) bodies[bodies.length - 1] = `${last}${figures.join("")}`;
+          const measuredWithFigure = await measureChapterPages(chapter, `${last}${figures.join("")}`, firstStyle);
+          if (measuredWithFigure.length === 1) bodies[bodies.length - 1] = measuredWithFigure[0];
           else bodies.push(figures.join(""));
         }
         const existingIds = chapterPages.map((page) => page.slotId);
         const insertion = Math.max(0, Math.min(...existingIds.map((slotId) => nextOrder.indexOf(slotId)).filter((index) => index >= 0)));
-        const firstStyle = revisions[0]?.revision ?? defaultDesignerRevision();
         const nextIds: string[] = [];
         bodies.forEach((body, pageIndex) => {
           const existingDescriptor = chapterPages[pageIndex];

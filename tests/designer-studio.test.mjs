@@ -93,7 +93,10 @@ test("Designer Studio exposes the complete book as one editable flowing workspac
 
 test("whole-book layout balancing is local, scoped and preserves locked pages", () => {
   assert.match(page, /balanceLayout = async \(scope: "chapter" \| "book"\)/);
-  assert.match(page, /paginateReaderHtml\(flowingText, project\.audience\)/);
+  assert.match(page, /measureChapterPages\(chapter, flowingText, firstStyle\)/);
+  assert.match(page, /content\.scrollHeight <= content\.clientHeight \+ 1/);
+  assert.match(page, /splitForRemainingSpace/);
+  assert.match(page, /flowBodyFromRenderedPage/);
   assert.match(page, /layoutLocked/);
   assert.match(page, /Lock this page during reflow/);
   assert.match(page, /Balance this chapter/);
