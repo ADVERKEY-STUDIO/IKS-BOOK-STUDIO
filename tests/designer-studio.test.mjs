@@ -61,11 +61,22 @@ test("custom backgrounds, watermarks, and layers are available", () => {
 
 test("uploaded backgrounds are visible and immediately persisted", () => {
   assert.match(page, /const uploadBackground = async/);
-  assert.match(page, /await saveRevision\(revision\)/);
-  assert.match(page, /Background applied and saved/);
+  assert.match(page, /await saveRevision\(\{ \.\.\.currentSnapshot\(\), \.\.\.background \}\)/);
+  assert.match(page, /Background applied to this page and saved/);
   assert.ok(page.indexOf("function ownerHeaders()") < page.indexOf("export default function Home()"), "ownerHeaders must be module-scoped so Designer Studio can upload");
   assert.match(css, /\.designer-canvas-page \.designer-background-layer,.designer-rendered-sheet \.designer-background-layer\{z-index:0/);
   assert.match(css, /\.designer-canvas-page \.designer-editable-content,.designer-rendered-sheet \.designer-render-content\{position:relative;z-index:2/);
+});
+
+test("background upload asks for page or whole-book scope", () => {
+  assert.match(page, /pendingBackground/);
+  assert.match(page, /Where should this background be used\?/);
+  assert.match(page, />This page only</);
+  assert.match(page, />All pages</);
+  assert.match(page, /applyUploadedBackground\("page"\)/);
+  assert.match(page, /applyUploadedBackground\("book"\)/);
+  assert.match(page, /allPages\.forEach/);
+  assert.match(css, /\.designer-background-choice/);
 });
 
 test("Preview and PDF consume saved designer pages and custom ordering", () => {
