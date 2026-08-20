@@ -118,3 +118,10 @@ test("Preview and PDF consume saved designer pages and custom ordering", () => {
   assert.match(page, /pdf-render-stack/);
   assert.match(page, /override\?\.active[\s\S]*designerFor\(sheet\)/);
 });
+
+test("Designer preview and PDF preserve the authored 650px A4 layout", () => {
+  assert.match(page, /designer-render-canvas/);
+  assert.match(css, /\.designer-render-canvas\{[^}]*width:650px[^}]*height:919\.285714px[^}]*transform:scale\(1\.2215384615\)/);
+  assert.match(page, /previewWholeBook/);
+  assert.match(page, /await saveWholeBook\(\);[\s\S]*onPreview\(\)/);
+});
