@@ -123,6 +123,24 @@ type SourceResult = {
   quality: string;
 };
 
+type CanvaPageVersion = {
+  imageKey: string;
+  imageUrl: string;
+  fileName: string;
+  acceptedAt: string;
+};
+
+type CanvaPageOverride = {
+  slotId: string;
+  label: string;
+  kind: "cover" | "contents" | "chapter" | "back";
+  chapterId?: number;
+  pageIndex?: number;
+  active: boolean;
+  current: CanvaPageVersion;
+  history: CanvaPageVersion[];
+};
+
 type Project = {
   id: string;
   title: string;
@@ -156,6 +174,7 @@ type Project = {
   briefApproved: boolean;
   adaptationPlanConfirmed: boolean;
   adaptationPlanVersion?: number;
+  canvaPages?: CanvaPageOverride[];
   updatedAt: string;
 };
 
@@ -554,18 +573,32 @@ const bookBorders = [
     description: "A quiet double-line border with small, refined corner accents.",
     detail: "Clear and mature for longer reading",
   },
+  { value: "Manuscript Double Rule", label: "Manuscript Double Rule", description: "Two fine archival rules with restrained corner marks.", detail: "A scholarly manuscript finish" },
+  { value: "Museum Archive Frame", label: "Museum Archive Frame", description: "A precise museum-label frame for collected knowledge.", detail: "Formal, curated and quiet" },
+  { value: "Botanical Corners", label: "Botanical Corners", description: "Small leaf details grow from otherwise open corners.", detail: "Organic without reducing reading space" },
+  { value: "Discovery Field Notes", label: "Discovery Field Notes", description: "A hand-noted field journal edge with subtle guide marks.", detail: "Ideal for exploration and activity books" },
 ] as const;
 
 const pageWatermarks = [
+  { value: "No Watermark", label: "No Watermark", description: "A completely clear page behind the text.", detail: "Best for dense chapters and maximum contrast" },
   { value: "Lotus Seal", label: "Lotus Seal", description: "A soft lotus medallion centred behind the page.", detail: "Calm and cultural without distracting from reading" },
   { value: "Knowledge Tree", label: "Knowledge Tree", description: "A faint branching tree rising gently from the lower page.", detail: "Ideal for learning, ideas and connected concepts" },
   { value: "Sun Mandala", label: "Sun Mandala", description: "A quiet circular geometry placed behind the page content.", detail: "Balanced and refined for every age group" },
+  { value: "Palm Leaf", label: "Palm Leaf", description: "Fine horizontal fibres inspired by palm-leaf manuscripts.", detail: "A subtle archival texture" },
+  { value: "Temple Window", label: "Temple Window", description: "A soft architectural arch held behind the reading area.", detail: "Adds cultural structure without a diagram" },
+  { value: "River Lines", label: "River Lines", description: "Quiet flowing contours move across the lower page.", detail: "Natural movement for journeys and stories" },
+  { value: "Botanical Study", label: "Botanical Study", description: "A faint leaf study rests in one open corner.", detail: "Warm and observational" },
 ] as const;
 
 const typographyThemes = [
   { value: "Storybook Serif", label: "Storybook Serif", description: "Warm, literary letterforms with expressive chapter titles.", detail: "Classic and inviting for stories and cultural subjects", sample: "Once an idea begins, it can travel through generations." },
   { value: "Friendly Rounded", label: "Friendly Rounded", description: "Soft, open letters that feel lively and approachable.", detail: "Comfortable for younger and visual-first readers", sample: "Let’s discover how every part of this idea connects!" },
   { value: "Clear Reader", label: "Clear Reader", description: "A clean, highly readable type system with calm spacing.", detail: "Excellent for longer chapters and confident readers", sample: "The central idea becomes clearer when we examine each connection." },
+  { value: "Literary Classic", label: "Literary Classic", description: "Bookish old-style serif type with elegant, measured headings.", detail: "Premium narrative and heritage books", sample: "A careful story can carry wisdom across centuries." },
+  { value: "Modern Humanist", label: "Modern Humanist", description: "Warm sans-serif forms with excellent paragraph rhythm.", detail: "Contemporary educational publishing", sample: "Ideas become easier to follow when every step is clear." },
+  { value: "Sanskrit Scholar", label: "Sanskrit Scholar", description: "A scholarly serif stack designed to preserve Indic diacritics.", detail: "Source-faithful books with Sanskrit terms", sample: "Rasa, bhāva and dhvani retain their precise forms." },
+  { value: "Playful Display", label: "Playful Display", description: "Friendly display headings paired with calm reading text.", detail: "Younger, energetic illustrated books", sample: "Look closely—what surprising detail can you discover?" },
+  { value: "Editorial Sans", label: "Editorial Sans", description: "Crisp editorial typography with compact, confident headings.", detail: "Visual nonfiction and field guides", sample: "Observe the evidence, compare the clues, then decide." },
 ] as const;
 
 function childAudienceProfile(value: string) {
@@ -609,9 +642,10 @@ function bookBorder(value: string) {
 function pageWatermark(value: string) {
   const direct = pageWatermarks.find((watermark) => watermark.value === value);
   if (direct) return direct;
-  if (/tree|branch|knowledge/i.test(value)) return pageWatermarks[1];
-  if (/sun|mandala|circle|geometry/i.test(value)) return pageWatermarks[2];
-  return pageWatermarks[0];
+  if (/none|clear|no watermark/i.test(value)) return pageWatermarks[0];
+  if (/tree|branch|knowledge/i.test(value)) return pageWatermarks[2];
+  if (/sun|mandala|circle|geometry/i.test(value)) return pageWatermarks[3];
+  return pageWatermarks[1];
 }
 
 function typographyTheme(value: string) {
@@ -869,6 +903,7 @@ function normalizeProject(saved: Project): Project {
     illustrationStyle: cleanSaved.bookPersona ? (cleanSaved.illustrationStyle || persona.illustrationStyle) : persona.illustrationStyle,
     fontTheme: typography.value,
     imageFrequency: reader.imageFrequency,
+    canvaPages: cleanSaved.canvaPages ?? [],
   };
   const normalizedChapters = (cleanSaved.chapters ?? []).map((chapter, index) => {
     const title = chapter.title || `Chapter ${index + 1}`;
@@ -930,6 +965,7 @@ function normalizeProject(saved: Project): Project {
     adaptationPlanConfirmed: cleanSaved.adaptationPlanConfirmed ?? Boolean((cleanSaved as Project & { summaryLengthConfirmed?: boolean }).summaryLengthConfirmed),
     sourceHeadings: hierarchy.repaired ? illustratedChapters.map((chapter) => chapter.title) : (cleanSaved.sourceHeadings ?? []),
     chapters: illustratedChapters,
+    canvaPages: cleanSaved.canvaPages ?? [],
   };
 }
 
@@ -1539,6 +1575,34 @@ OUTPUT REQUIREMENTS
     notify("Illustration added to chapter");
   }
 
+  async function uploadCanvaPage(file: File, slot: Omit<CanvaPageOverride, "active" | "current" | "history">) {
+    const form = new FormData();
+    form.set("file", file);
+    form.set("projectId", project.id);
+    const response = await fetch("/api/image", { method: "POST", headers: ownerHeaders(), body: form });
+    const data = await response.json() as { image?: { key: string; url: string }; error?: string };
+    if (!response.ok || !data.image) throw new Error(data.error || "Canva page upload failed");
+    const version: CanvaPageVersion = { imageKey: data.image.key, imageUrl: data.image.url, fileName: file.name, acceptedAt: new Date().toISOString() };
+    const existing = (project.canvaPages ?? []).find((page) => page.slotId === slot.slotId);
+    const replacement: CanvaPageOverride = {
+      ...slot,
+      active: true,
+      current: version,
+      history: existing ? [existing.current, ...existing.history].slice(0, 10) : [],
+    };
+    const next = { ...project, canvaPages: [...(project.canvaPages ?? []).filter((page) => page.slotId !== slot.slotId), replacement] };
+    setProject(next);
+    await persistProject(next);
+    notify(`${slot.label} now uses the Canva version`);
+  }
+
+  async function setCanvaPageActive(slotId: string, active: boolean) {
+    const next = { ...project, canvaPages: (project.canvaPages ?? []).map((page) => page.slotId === slotId ? { ...page, active } : page) };
+    setProject(next);
+    await persistProject(next);
+    notify(active ? "Canva version restored" : "Studio version restored");
+  }
+
   async function downloadChatGptBookRequest() {
     if (!project.sourceObjectKey || !project.source) throw new Error("Upload the source book before creating a ChatGPT request.");
     const response = await fetch(`/api/source/download?key=${encodeURIComponent(project.sourceObjectKey)}`, { headers: ownerHeaders() });
@@ -2042,7 +2106,7 @@ OUTPUT REQUIREMENTS
       {view === "brief" && <BookBrief project={project} allocated={allocatedPages} draftBusy={draftBusy} onBack={() => setView("analysis")} onUpdateChapter={updateChapter} onPrepare={prepareDraft} onContinue={() => { patchProject({ briefApproved: true }); setActiveChapter(project.chapters[0]?.id ?? 1); setView("editor"); }} />}
       {view === "editor" && <Editor project={project} active={active} activeId={activeChapter} allocated={allocatedPages} draftBusy={draftBusy} onSelect={setActiveChapter} onSaveBody={saveChapterBody} editorRef={editorRef} onAi={aiAction} onRemember={rememberPreference} onAddChapter={addChapter} onUploadImage={uploadChapterImage} onPatchProject={patchProject} onUpdateChapter={updateChapter} />}
 
-      {showPreview && <Preview project={project} exportBusy={exportBusy} pdfProgress={pdfProgress} onClose={() => setShowPreview(false)} onDownload={() => void downloadPdf()} />}
+      {showPreview && <CanvaPreview project={project} exportBusy={exportBusy} pdfProgress={pdfProgress} onClose={() => setShowPreview(false)} onDownload={() => void downloadPdf()} onSaveCanvaPage={uploadCanvaPage} onSetCanvaActive={setCanvaPageActive} />}
       {showReviewQueue && <ReviewQueue project={project} busy={draftBusy} onClose={() => setShowReviewQueue(false)} onOpen={(chapterId) => { setActiveChapter(chapterId); setShowReviewQueue(false); }} onRepair={(chapterId) => { setActiveChapter(chapterId); setShowReviewQueue(false); void prepareDraft("active", { chapterId }); }} onApprove={(chapterId) => void approveChapterManually(chapterId)} onDesigner={(chapterId) => void leaveChapterForDesigner(chapterId)} onRestore={() => void restorePreviousVersion()} />}
       {showOperations && <OperationsHistory project={project} onClose={() => setShowOperations(false)} />}
       {showVersions && <Versions versions={versions} onCreate={createVersion} onRestore={(snapshot) => { setProject(normalizeProject(snapshot)); setShowVersions(false); notify("Version restored"); }} onClose={() => setShowVersions(false)} />}
@@ -2564,6 +2628,129 @@ function Preview({ project, exportBusy, pdfProgress, onClose, onDownload }: { pr
   };
   const scaledSheet = (sheet: (typeof sheets)[number], key: string) => <div className="continuous-sheet-frame" style={{ width: 794 * zoom, height: 1123 * zoom }} key={key}><div style={{ transform: `scale(${zoom})` }}>{renderSheet(sheet, key)}</div></div>;
   return <div className="modal-backdrop book-preview-backdrop"><section className="preview-modal preview-v2"><header className="preview-main-header"><div><p className="eyebrow">BOOK PREVIEW</p><h2>{project.title}</h2><span>{sheets.length} pages · {project.chapters.length} chapters</span></div><div className="preview-header-actions"><button className="download-book-button" onClick={onDownload} disabled={exportBusy}>{exportBusy ? `Creating PDF · ${pdfProgress}%` : "Download PDF"}</button><button className="preview-close" onClick={onClose} aria-label="Close preview">×</button></div></header><div className={`preview-availability ${unresolved.length ? "working" : "complete"}`}><span className="preview-status-dot"/><div><b>{unresolved.length ? "Preview and PDF are available now" : "Book ready to publish"}</b><small>{unresolved.length ? `${unresolved.length} chapter${unresolved.length === 1 ? " is" : "s are"} still being improved. Nothing is locked, and unfinished pages are included.` : "Every chapter is included in the downloadable book."}</small></div></div><div className="preview-mode-bar"><div className="preview-mode-switch" aria-label="Preview layout"><button className={viewMode === "book" ? "active" : ""} onClick={() => setViewMode("book")}><b>Whole book</b><span>Scroll every page</span></button><button className={viewMode === "chapter" ? "active" : ""} onClick={() => setViewMode("chapter")}><b>Chapter</b><span>All chapter pages</span></button><button className={viewMode === "page" ? "active" : ""} onClick={() => setViewMode("page")}><b>Single page</b><span>Focused reading</span></button></div></div><div className="preview-toolbar">{viewMode === "page" ? <div className="page-navigation"><button onClick={() => setPageIndex(Math.max(0, pageIndex - 1))} disabled={pageIndex === 0} aria-label="Previous page">←</button><span><b>{pageIndex + 1}</b> / {sheets.length}</span><button onClick={() => setPageIndex(Math.min(sheets.length - 1, pageIndex + 1))} disabled={pageIndex === sheets.length - 1} aria-label="Next page">→</button></div> : viewMode === "chapter" ? <div className="page-navigation chapter-navigation"><button onClick={() => moveChapter(-1)} disabled={selectedChapterPosition === 0} aria-label="Previous chapter">←</button><span><b>{selectedChapterPosition + 1}</b> / {project.chapters.length}</span><button onClick={() => moveChapter(1)} disabled={selectedChapterPosition === project.chapters.length - 1} aria-label="Next chapter">→</button></div> : <div className="preview-scope-summary"><b>{sheets.length}</b><span>pages shown below</span></div>}{viewMode === "page" ? <select aria-label="Jump to chapter" value={currentChapter} onChange={(event) => { const destination = Number(event.target.value); destination > 0 ? goToChapter(destination) : setPageIndex(destination === -1 ? 1 : 0); }}><option value={0}>Cover</option><option value={-1}>Contents</option>{project.chapters.map((chapter) => <option key={chapter.id} value={chapter.id}>Chapter {chapter.id} · {chapter.title}</option>)}</select> : viewMode === "chapter" ? <select aria-label="Choose chapter" value={selectedChapterId} onChange={(event) => goToChapter(Number(event.target.value))}>{project.chapters.map((chapter) => <option key={chapter.id} value={chapter.id}>Chapter {chapter.id} · {chapter.title}</option>)}</select> : <div className="whole-book-label">Cover → Contents → Every chapter → Back cover</div>}<div className="zoom-controls"><button onClick={() => setZoom(Math.max(.45, zoom - .1))} aria-label="Zoom out">−</button><span>{Math.round(zoom * 100)}%</span><button onClick={() => setZoom(Math.min(1.1, zoom + .1))} aria-label="Zoom in">＋</button><button onClick={() => setZoom(.68)}>Fit page</button><button onClick={() => setZoom(.92)}>Fit width</button>{viewMode === "page" && <button onClick={() => setShowThumbnails(!showThumbnails)}>{showThumbnails ? "Hide pages" : "Show pages"}</button>}</div></div>{viewMode === "book" ? <div className="continuous-book-stage whole-book-preview" aria-label="Whole book preview">{sheets.map((sheet, index) => scaledSheet(sheet, `whole-book-${index}`))}</div> : viewMode === "chapter" ? <div className="continuous-book-stage chapter-book-preview" aria-label={`Chapter ${selectedChapterId} preview`}><div className="chapter-preview-heading"><div><span>CHAPTER {selectedChapterId}</span><h3>{selectedChapter?.title}</h3></div><b>{selectedChapterSheets.length} page{selectedChapterSheets.length === 1 ? "" : "s"}</b></div>{selectedChapterSheets.map((sheet, index) => scaledSheet(sheet, `chapter-${selectedChapterId}-${index}`))}</div> : <div className="page-viewer-shell">{showThumbnails && <aside className="page-thumbnails">{sheets.map((sheet, index) => <button className={index === pageIndex ? "active" : ""} onClick={() => setPageIndex(index)} key={index}><span>{index + 1}</span><b>{sheet.kind === "chapter" ? `Chapter ${sheet.chapter.id}` : sheet.kind}</b></button>)}</aside>}<div className="single-page-stage"><div style={{ transform: `scale(${zoom})` }}>{renderSheet(current, `visible-${pageIndex}`)}</div></div></div>}<div className="pdf-render-stack" aria-hidden="true">{sheets.map((sheet, index) => renderSheet(sheet, `export-${index}`))}</div></section></div>;
+}
+
+function CanvaPreview({ project, exportBusy, pdfProgress, onClose, onDownload, onSaveCanvaPage, onSetCanvaActive }: {
+  project: Project;
+  exportBusy: boolean;
+  pdfProgress: number;
+  onClose: () => void;
+  onDownload: () => void;
+  onSaveCanvaPage: (file: File, slot: Omit<CanvaPageOverride, "active" | "current" | "history">) => Promise<void>;
+  onSetCanvaActive: (slotId: string, active: boolean) => Promise<void>;
+}) {
+  const [viewMode, setViewMode] = useState<"book" | "chapter" | "page">("book");
+  const [pageIndex, setPageIndex] = useState(0);
+  const [zoom, setZoom] = useState(.68);
+  const [showThumbnails, setShowThumbnails] = useState(true);
+  const [selectedChapterId, setSelectedChapterId] = useState(project.chapters[0]?.id ?? 1);
+  const [canvaTarget, setCanvaTarget] = useState<Omit<CanvaPageOverride, "active" | "current" | "history"> | null>(null);
+  const [canvaFile, setCanvaFile] = useState<File | null>(null);
+  const [canvaFilePreview, setCanvaFilePreview] = useState("");
+  const [studioPagePreview, setStudioPagePreview] = useState("");
+  const [canvaBusy, setCanvaBusy] = useState(false);
+  const printable = useMemo(() => printableChapters(project.chapters), [project.chapters]);
+  const unresolved = project.chapters.filter((chapter) => !isPublishApproved(chapter));
+  const worldClass = `${bookPersonaClass(project.bookPersona)} world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")}`;
+  const pageClass = `page-aesthetic-${normalizedTitle(project.pageAesthetic).replace(/[^a-z]+/g, "-")}`;
+  const borderClass = `book-border-${normalizedTitle(project.bookBorder).replace(/[^a-z]+/g, "-")}`;
+  const typographyClass = `typography-${normalizedTitle(project.fontTheme).replace(/[^a-z]+/g, "-")}`;
+  const watermarkSlug = normalizedTitle(project.pageWatermark).replace(/[^a-z]+/g, "-");
+  const ageClass = `age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+  const chapterSheets = printable.chapters.flatMap((chapter) => {
+    if (chapter.importValidated && chapter.importedPages?.length) return chapter.importedPages.map((page, index) => ({ kind: "chapter" as const, chapter, body: page.body, pageIndex: index, pageCount: chapter.importedPages!.length, imageUrl: page.imageUrl, imageCaption: page.imageCaption, imageAlt: page.imageAlt }));
+    const pages = paginateReaderHtml(chapter.body, project.audience);
+    const age = childAgeBand(project.audience);
+    const shareLimit = age === "7-9" ? 1500 : age === "13-15" ? 1750 : 1625;
+    const shareIllustration = Boolean(chapter.imageUrl) && readerTextLength(pages[pages.length - 1] ?? "") <= shareLimit;
+    const pageCount = pages.length + (chapter.imageUrl && !shareIllustration ? 1 : 0);
+    const text = pages.map((body, index) => ({ kind: "chapter" as const, chapter, body, pageIndex: index, pageCount, imageUrl: shareIllustration && index === pages.length - 1 ? chapter.imageUrl : undefined, imageCaption: shareIllustration && index === pages.length - 1 ? chapter.imageCaption : undefined, imageAlt: shareIllustration && index === pages.length - 1 ? chapter.imageAlt : undefined }));
+    return chapter.imageUrl && !shareIllustration ? [...text, { kind: "chapter" as const, chapter, body: "", pageIndex: pages.length, pageCount, imageUrl: chapter.imageUrl, imageCaption: chapter.imageCaption, imageAlt: chapter.imageAlt }] : text;
+  });
+  const sheets: ({ kind: "cover" | "contents" | "back" } | (typeof chapterSheets)[number])[] = [{ kind: "cover" }, { kind: "contents" }, ...chapterSheets, { kind: "back" }];
+  type Sheet = (typeof sheets)[number];
+  const slotFor = (sheet: Sheet): Omit<CanvaPageOverride, "active" | "current" | "history"> => {
+    if (sheet.kind === "cover") return { slotId: "cover", label: "Front cover", kind: "cover" };
+    if (sheet.kind === "contents") return { slotId: "contents", label: "Contents page", kind: "contents" };
+    if (sheet.kind === "back") return { slotId: "back", label: "Back cover", kind: "back" };
+    return { slotId: `chapter-${sheet.chapter.id}-page-${sheet.pageIndex + 1}`, label: `Chapter ${sheet.chapter.id} · page ${sheet.pageIndex + 1}`, kind: "chapter", chapterId: sheet.chapter.id, pageIndex: sheet.pageIndex };
+  };
+  const overrideFor = (sheet: Sheet) => (project.canvaPages ?? []).find((page) => page.slotId === slotFor(sheet).slotId);
+  const renderStudioSheet = (sheet: Sheet, key: string) => {
+    const slot = slotFor(sheet);
+    const base = `book-sheet ${worldClass} ${pageClass} ${borderClass} ${typographyClass}`;
+    if (sheet.kind === "cover") return <article data-page-slot={slot.slotId} className={`${base} preview-cover`} key={key}><div className="cover-edition">IKS BOOK STUDIO · {project.audience.toUpperCase()}</div><h1>{project.title}</h1><span>An illustrated book shaped from your source</span><b>✦</b>{unresolved.length > 0 && <small className="draft-status">Working preview · {unresolved.length} chapter{unresolved.length === 1 ? "" : "s"} still in progress</small>}</article>;
+    if (sheet.kind === "contents") return <article data-page-slot={slot.slotId} className={`${base} preview-page contents-page`} key={key}><span>CONTENTS</span><h2>Inside this book</h2><ol>{printable.chapters.map((chapter, index) => <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{isPublishApproved(chapter) ? `${chapter.pages} pages` : "In progress"}</i></li>)}</ol></article>;
+    if (sheet.kind === "back") return <article data-page-slot={slot.slotId} className={`${base} preview-page backmatter`} key={key}><span>A FINAL THOUGHT</span><h2>Keep wondering</h2><p>The most powerful ideas do not end on the last page. They grow when we ask careful questions, notice new connections and share what we discover.</p><p>Carry one idea from this book into the world—and see where it leads.</p></article>;
+    const image = Boolean(sheet.imageUrl) && !sheet.body;
+    const combined = Boolean(sheet.imageUrl) && Boolean(sheet.body);
+    const waitingForContent = chapterWordCount(sheet.chapter) < 45 && !sheet.chapter.importValidated;
+    return <article data-page-slot={slot.slotId} className={`${base} preview-page chapter-preview ${ageClass}${image ? " chapter-visual-sheet" : ""}${combined ? " chapter-text-visual-sheet" : ""}`} key={key}><header className="print-chapter-header"><span>CHAPTER {sheet.chapter.id}</span><span>PAGE {sheet.pageIndex + 1} OF {sheet.pageCount}</span></header>{sheet.pageIndex === 0 && <h2>{sheet.chapter.title}</h2>}{sheet.pageIndex > 0 && !image && <p className="continued-title">{sheet.chapter.title} · continued</p>}{sheet.body && <div className="preview-body" dangerouslySetInnerHTML={{ __html: sheet.body }}/>} {waitingForContent && sheet.pageIndex === 0 && <div className="unfinished-page-note"><b>Chapter in progress</b><span>Generated content will appear here automatically. You can still preview and download the complete book layout now.</span></div>}{sheet.imageUrl && <figure className="chapter-image"><img src={sheet.imageUrl} alt={sheet.imageAlt || sheet.imageCaption || sheet.chapter.title}/><figcaption>{sheet.imageCaption || sheet.chapter.title}</figcaption></figure>}<footer className="sheet-number"><span>{project.title}</span><span>{sheet.pageIndex + 1}</span></footer></article>;
+  };
+  const renderSheet = (sheet: Sheet, key: string) => {
+    const slot = slotFor(sheet);
+    const override = overrideFor(sheet);
+    if (override?.active) return <article data-page-slot={slot.slotId} className="book-sheet canva-custom-sheet" key={key}><img src={override.current.imageUrl} alt={`${slot.label} designed in Canva`}/></article>;
+    return renderStudioSheet(sheet, key);
+  };
+  const capturePage = async (slotId: string) => {
+    const candidates = Array.from(document.querySelectorAll<HTMLElement>(`[data-page-slot="${slotId}"]`));
+    const element = candidates.find((candidate) => !candidate.closest(".pdf-render-stack"));
+    if (!element) throw new Error("Page is not visible yet");
+    const { default: html2canvas } = await import("html2canvas");
+    const canvas = await html2canvas(element, { backgroundColor: "#fffdf8", scale: 2, useCORS: true, logging: false, imageTimeout: 15000 });
+    return await new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not capture page")), "image/png"));
+  };
+  const openCanvaWorkflow = async (sheet: Sheet) => {
+    const slot = slotFor(sheet);
+    setCanvaTarget(slot);
+    setCanvaFile(null);
+    setCanvaFilePreview("");
+    setStudioPagePreview("");
+    try {
+      const blob = await capturePage(slot.slotId);
+      setStudioPagePreview(URL.createObjectURL(blob));
+    } catch { /* The download button can retry after the modal opens. */ }
+  };
+  const downloadCanvaTemplate = async () => {
+    if (!canvaTarget) return;
+    setCanvaBusy(true);
+    try {
+      const blob = await capturePage(canvaTarget.slotId);
+      const href = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = href;
+      anchor.download = `${project.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "book"}-${canvaTarget.slotId}-for-canva.png`;
+      anchor.click();
+      URL.revokeObjectURL(href);
+    } finally { setCanvaBusy(false); }
+  };
+  const chooseCanvaFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (canvaFilePreview) URL.revokeObjectURL(canvaFilePreview);
+    setCanvaFile(file);
+    setCanvaFilePreview(URL.createObjectURL(file));
+  };
+  const acceptCanvaPage = async () => {
+    if (!canvaTarget || !canvaFile) return;
+    setCanvaBusy(true);
+    try { await onSaveCanvaPage(canvaFile, canvaTarget); setCanvaTarget(null); }
+    finally { setCanvaBusy(false); }
+  };
+  const current = sheets[Math.min(pageIndex, Math.max(0, sheets.length - 1))];
+  const currentChapter = current?.kind === "chapter" ? current.chapter.id : current?.kind === "contents" ? -1 : 0;
+  const selectedChapterSheets = chapterSheets.filter((sheet) => sheet.chapter.id === selectedChapterId);
+  const selectedChapter = project.chapters.find((chapter) => chapter.id === selectedChapterId) ?? project.chapters[0];
+  const selectedChapterPosition = Math.max(0, project.chapters.findIndex((chapter) => chapter.id === selectedChapterId));
+  const goToChapter = (chapterId: number) => { setSelectedChapterId(chapterId); const index = sheets.findIndex((sheet) => sheet.kind === "chapter" && sheet.chapter.id === chapterId); if (index >= 0) setPageIndex(index); };
+  const moveChapter = (direction: -1 | 1) => { const next = project.chapters[selectedChapterPosition + direction]; if (next) goToChapter(next.id); };
+  const scaledSheet = (sheet: Sheet, key: string) => {
+    const slot = slotFor(sheet);
+    const override = overrideFor(sheet);
+    return <div className="continuous-sheet-frame canva-editable-frame" style={{ width: 794 * zoom, height: 1123 * zoom }} key={key}><div style={{ transform: `scale(${zoom})` }}>{renderSheet(sheet, key)}</div><div className="canva-sheet-actions"><button onClick={() => void openCanvaWorkflow(sheet)}>Edit in Canva</button>{override && <button onClick={() => void onSetCanvaActive(slot.slotId, !override.active)}>{override.active ? "Use studio" : "Use Canva"}</button>}</div>{override?.active && <span className="canva-version-badge">CANVA VERSION</span>}</div>;
+  };
+  return <div className="modal-backdrop book-preview-backdrop"><section className="preview-modal preview-v2" data-page-watermark={watermarkSlug}><header className="preview-main-header"><div><p className="eyebrow">BOOK PREVIEW</p><h2>{project.title}</h2><span>{sheets.length} pages · {project.chapters.length} chapters · {(project.canvaPages ?? []).filter((page) => page.active).length} Canva pages</span></div><div className="preview-header-actions"><button className="download-book-button" onClick={onDownload} disabled={exportBusy}>{exportBusy ? `Creating PDF · ${pdfProgress}%` : "Download PDF"}</button><button className="preview-close" onClick={onClose} aria-label="Close preview">×</button></div></header><div className={`preview-availability ${unresolved.length ? "working" : "complete"}`}><span className="preview-status-dot"/><div><b>{unresolved.length ? "Preview and PDF are available now" : "Book ready to publish"}</b><small>{unresolved.length ? `${unresolved.length} chapter${unresolved.length === 1 ? " is" : "s are"} still being improved. Canva design and export remain available.` : "Every chapter is included in the downloadable book."}</small></div></div><div className="preview-mode-bar"><div className="preview-mode-switch" aria-label="Preview layout"><button className={viewMode === "book" ? "active" : ""} onClick={() => setViewMode("book")}><b>Whole book</b><span>Scroll every page</span></button><button className={viewMode === "chapter" ? "active" : ""} onClick={() => setViewMode("chapter")}><b>Chapter</b><span>All chapter pages</span></button><button className={viewMode === "page" ? "active" : ""} onClick={() => setViewMode("page")}><b>Single page</b><span>Focused reading</span></button></div></div><div className="preview-toolbar">{viewMode === "page" ? <div className="page-navigation"><button onClick={() => setPageIndex(Math.max(0, pageIndex - 1))} disabled={pageIndex === 0}>←</button><span><b>{pageIndex + 1}</b> / {sheets.length}</span><button onClick={() => setPageIndex(Math.min(sheets.length - 1, pageIndex + 1))} disabled={pageIndex === sheets.length - 1}>→</button></div> : viewMode === "chapter" ? <div className="page-navigation chapter-navigation"><button onClick={() => moveChapter(-1)} disabled={selectedChapterPosition === 0}>←</button><span><b>{selectedChapterPosition + 1}</b> / {project.chapters.length}</span><button onClick={() => moveChapter(1)} disabled={selectedChapterPosition === project.chapters.length - 1}>→</button></div> : <div className="preview-scope-summary"><b>{sheets.length}</b><span>pages shown below</span></div>}{viewMode === "page" ? <select aria-label="Jump to chapter" value={currentChapter} onChange={(event) => { const destination = Number(event.target.value); destination > 0 ? goToChapter(destination) : setPageIndex(destination === -1 ? 1 : 0); }}><option value={0}>Cover</option><option value={-1}>Contents</option>{project.chapters.map((chapter) => <option key={chapter.id} value={chapter.id}>Chapter {chapter.id} · {chapter.title}</option>)}</select> : viewMode === "chapter" ? <select value={selectedChapterId} onChange={(event) => goToChapter(Number(event.target.value))}>{project.chapters.map((chapter) => <option key={chapter.id} value={chapter.id}>Chapter {chapter.id} · {chapter.title}</option>)}</select> : <div className="whole-book-label">Cover → Contents → Every chapter → Back cover</div>}<div className="zoom-controls"><button onClick={() => setZoom(Math.max(.45, zoom - .1))}>−</button><span>{Math.round(zoom * 100)}%</span><button onClick={() => setZoom(Math.min(1.1, zoom + .1))}>＋</button><button onClick={() => setZoom(.68)}>Fit page</button><button onClick={() => setZoom(.92)}>Fit width</button>{viewMode === "page" && <button onClick={() => setShowThumbnails(!showThumbnails)}>{showThumbnails ? "Hide pages" : "Show pages"}</button>}</div></div>{viewMode === "book" ? <div className="continuous-book-stage whole-book-preview">{sheets.map((sheet, index) => scaledSheet(sheet, `whole-book-${index}`))}</div> : viewMode === "chapter" ? <div className="continuous-book-stage chapter-book-preview"><div className="chapter-preview-heading"><div><span>CHAPTER {selectedChapterId}</span><h3>{selectedChapter?.title}</h3></div><b>{selectedChapterSheets.length} pages</b></div>{selectedChapterSheets.map((sheet, index) => scaledSheet(sheet, `chapter-${selectedChapterId}-${index}`))}</div> : <div className="page-viewer-shell">{showThumbnails && <aside className="page-thumbnails">{sheets.map((sheet, index) => <button className={index === pageIndex ? "active" : ""} onClick={() => setPageIndex(index)} key={index}><span>{index + 1}</span><b>{sheet.kind === "chapter" ? `Chapter ${sheet.chapter.id}` : sheet.kind}</b></button>)}</aside>}<div className="single-page-stage">{scaledSheet(current, `visible-${pageIndex}`)}</div></div>}<div className="pdf-render-stack" aria-hidden="true">{sheets.map((sheet, index) => renderSheet(sheet, `export-${index}`))}</div></section>{canvaTarget && <div className="canva-workflow-backdrop" role="dialog" aria-modal="true"><section className="canva-workflow-modal"><header><div><p className="eyebrow">MANUAL CANVA WORKFLOW</p><h2>{canvaTarget.label}</h2><span>Your chapter content and request history will not be changed.</span></div><button onClick={() => setCanvaTarget(null)}>×</button></header><ol className="canva-steps"><li><b>1</b><div><strong>Download the studio page</strong><span>Use this correctly sized PNG as your Canva design reference.</span><button onClick={() => void downloadCanvaTemplate()} disabled={canvaBusy}>{canvaBusy ? "Preparing…" : "Download page PNG"}</button></div></li><li><b>2</b><div><strong>Edit it in Canva</strong><span>Upload the PNG to Canva, finish the design, then export at the same proportions as PNG.</span><button onClick={() => window.open("https://www.canva.com/", "_blank", "noopener,noreferrer")}>Open Canva ↗</button></div></li><li><b>3</b><div><strong>Bring the finished page back</strong><span>PNG is recommended. JPG and WebP are also accepted.</span><label className="canva-upload"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={chooseCanvaFile}/><span>{canvaFile ? canvaFile.name : "Choose finished page"}</span></label></div></li></ol><div className="canva-compare"><figure><span>STUDIO VERSION</span>{studioPagePreview ? <img src={studioPagePreview} alt="Studio page preview"/> : <div>Download the page to create its comparison preview.</div>}</figure><figure><span>CANVA RETURN</span>{canvaFilePreview ? <img src={canvaFilePreview} alt="Returned Canva page preview"/> : <div>Your uploaded Canva page will appear here.</div>}</figure></div><footer><button className="secondary" onClick={() => setCanvaTarget(null)}>Keep studio version</button>{(project.canvaPages ?? []).some((page) => page.slotId === canvaTarget.slotId && page.active) && <button className="secondary" onClick={() => void onSetCanvaActive(canvaTarget.slotId, false)}>Restore studio version</button>}<button className="primary" onClick={() => void acceptCanvaPage()} disabled={!canvaFile || canvaBusy}>{canvaBusy ? "Saving…" : "Use Canva version"}</button></footer></section></div>}</div>;
 }
 
 function LegacyPreview({ project, draftBusy, onFill, onRefresh, onClose, onPrint }: { project: Project; draftBusy: boolean; onFill: () => void; onRefresh: () => void; onClose: () => void; onPrint: () => void }) {
