@@ -8,9 +8,33 @@ const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8
 test("Designer Studio is a separate persisted final-production layer", () => {
   assert.match(page, /designerPages\?: DesignerPageOverride\[\]/);
   assert.match(page, /designerPageOrder\?: string\[\]/);
-  assert.match(page, /designerPages: cleanSaved\.designerPages \?\? \[\]/);
+  assert.match(page, /designerPages: \(cleanSaved\.designerPages \?\? \[\]\)\.map\(hydrateDesignerOverride\)/);
   assert.match(page, />Designer<\/button>/);
   assert.match(page, /Edit the final book without changing generated chapters or Nemotron history/);
+});
+
+test("advanced typography, object, border and image controls are selection-aware", () => {
+  assert.match(page, /Page font/);
+  assert.match(page, /Line height/);
+  assert.match(page, /Paragraph spacing/);
+  assert.match(page, /Page border/);
+  assert.match(page, /Selected image/);
+  assert.match(page, /Crop \/ fit/);
+  assert.match(page, /Replace image/);
+  assert.match(page, /addTextBox/);
+  assert.match(page, /moveObject/);
+  assert.match(page, /Lock \/ unlock object/);
+});
+
+test("designer supports reusable styles, scoped application and local preflight", () => {
+  assert.match(page, /applyStyle\("chapter"\)/);
+  assert.match(page, /applyStyle\("book"\)/);
+  assert.match(page, /Save current style/);
+  assert.match(page, /runPreflight/);
+  assert.match(page, /overflow the printable page/);
+  assert.match(page, /missing accessibility text/);
+  assert.match(page, /undoStack/);
+  assert.match(page, /redoStack/);
 });
 
 test("designer can edit content and manage page structure", () => {
