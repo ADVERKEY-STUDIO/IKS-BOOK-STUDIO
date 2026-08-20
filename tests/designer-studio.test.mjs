@@ -63,6 +63,7 @@ test("uploaded backgrounds are visible and immediately persisted", () => {
   assert.match(page, /const uploadBackground = async/);
   assert.match(page, /await saveRevision\(revision\)/);
   assert.match(page, /Background applied and saved/);
+  assert.ok(page.indexOf("function ownerHeaders()") < page.indexOf("export default function Home()"), "ownerHeaders must be module-scoped so Designer Studio can upload");
   assert.match(css, /\.designer-canvas-page \.designer-background-layer,.designer-rendered-sheet \.designer-background-layer\{z-index:0/);
   assert.match(css, /\.designer-canvas-page \.designer-editable-content,.designer-rendered-sheet \.designer-render-content\{position:relative;z-index:2/);
 });

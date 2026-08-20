@@ -1032,6 +1032,15 @@ function makeId() {
   return `${Date.now().toString(36)}-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
+function ownerHeaders() {
+  let owner = window.localStorage.getItem("iks-book-studio-owner");
+  if (!owner) {
+    owner = makeId();
+    window.localStorage.setItem("iks-book-studio-owner", owner);
+  }
+  return { "x-book-studio-owner": owner };
+}
+
 function escapeHtml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#039;");
 }
@@ -1239,15 +1248,6 @@ export default function Home() {
       if (preferenceData?.preferences) setDesignerPreferences(preferenceData.preferences);
     }).catch(() => undefined);
   }, []);
-
-  function ownerHeaders() {
-    let owner = window.localStorage.getItem("iks-book-studio-owner");
-    if (!owner) {
-      owner = makeId();
-      window.localStorage.setItem("iks-book-studio-owner", owner);
-    }
-    return { "x-book-studio-owner": owner };
-  }
 
   function requestHeaders() { return { "content-type": "application/json", ...ownerHeaders() }; }
 
