@@ -488,3 +488,8 @@
 .border-botanical-corners .book-border-thumbnail,.book-border-botanical-corners{border:1px solid #b6c1a7!important;box-shadow:inset 14px 14px 0 -12px #6c865d,inset -14px -14px 0 -12px #6c865d!important}
 .border-discovery-field-notes .book-border-thumbnail,.book-border-discovery-field-notes{border:3px solid #315b68!important;border-left:12px solid #d47b3e!important;box-shadow:inset 0 0 0 2px #f4eddc!important}
 @media(max-width:760px){.canva-steps,.canva-compare{grid-template-columns:1fr}.canva-compare figure>img,.canva-compare figure>div{height:240px}.canva-sheet-actions{opacity:1}.canva-workflow-modal>footer{flex-wrap:wrap}.canva-workflow-modal>footer button{flex:1}}
+
+/* Keep uploaded page art inside the sheet's stacking context: it must never sit behind the paper colour. */
+.designer-canvas-page .designer-background-layer,.designer-rendered-sheet .designer-background-layer{z-index:0;pointer-events:none}
+.designer-canvas-page .designer-watermark-layer,.designer-rendered-sheet .designer-render-watermark{z-index:1}
+.designer-canvas-page .designer-editable-content,.designer-rendered-sheet .designer-render-content{position:relative;z-index:2}
