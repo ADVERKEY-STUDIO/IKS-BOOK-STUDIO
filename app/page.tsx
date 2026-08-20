@@ -6,6 +6,7 @@ import { AUTHORIAL_READER_INSTRUCTION, authorialReaderHtml, childAgeBand, genera
 import { ADAPTATION_PLAN_VERSION, allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET, FIXED_MATTER_PAGES, recommendedAdaptationPages, TOTAL_BOOK_PAGE_LIMIT } from "../lib/adaptation-pages";
 import type { ChapterOneGate, PedagogyQuality } from "../lib/pedagogy";
 import { BOOK_PACKAGE_FORMAT, expectedChapterId, expectedContextKey, expectedPageId, type BookPackage, type BookPackageValidation, validateBookPackage } from "../lib/book-package";
+import { bookPersonaClass, bookPersonaDefinitions, bookPersonaPatch, inferBookPersona, materializePersona, personaById, type BookPersona } from "../lib/book-persona";
 
 type View = "dashboard" | "wizard" | "analysis" | "brief" | "editor";
 
@@ -139,6 +140,7 @@ type Project = {
   readingLevel: string;
   language: string;
   bookType: string;
+  bookPersona: BookPersona;
   aesthetic: string;
   pageAesthetic: string;
   bookBorder: string;
@@ -228,7 +230,7 @@ function visualIdentity(imageKey?: string, imageUrl?: string) {
 }
 
 function contextualIllustration(
-  project: Pick<Project, "aesthetic" | "illustrationStyle" | "sourceTerms">,
+  project: Pick<Project, "aesthetic" | "illustrationStyle" | "sourceTerms" | "bookPersona">,
   chapter: Pick<Chapter, "title" | "body">,
   index: number,
   usedImages: Set<string>,
@@ -237,7 +239,7 @@ function contextualIllustration(
   if (curated && !usedImages.has(visualIdentity(undefined, curated.url))) return { ...curated, type: "illustration" };
   const terms = visualKeywords(chapter.title, chapter.body, project.sourceTerms);
   const scene = chooseSceneDirection(chapter.title, chapter.body, index);
-  const params = new URLSearchParams({ title: chapter.title.slice(0, 180), terms: terms.join("|"), type: "scene", scene: scene.slice(0, 360), style: project.illustrationStyle.slice(0, 80), aesthetic: project.aesthetic.slice(0, 80), chapter: String(index + 1), variant: String(index + 1) });
+  const params = new URLSearchParams({ title: chapter.title.slice(0, 180), terms: terms.join("|"), type: "scene", scene: scene.slice(0, 360), style: project.bookPersona.illustrationStyle.slice(0, 110), aesthetic: project.bookPersona.name.slice(0, 80), mood: project.bookPersona.mood.slice(0, 100), motif: project.bookPersona.motif.slice(0, 100), chapter: String(index + 1), variant: String(index + 1) });
   const url = `/api/visual?${params.toString()}`;
   return {
     url,
@@ -247,7 +249,7 @@ function contextualIllustration(
   };
 }
 
-function attachChapterVisuals(project: Pick<Project, "aesthetic" | "illustrationStyle" | "sourceTerms">, chapters: Chapter[]) {
+function attachChapterVisuals(project: Pick<Project, "aesthetic" | "illustrationStyle" | "sourceTerms" | "bookPersona">, chapters: Chapter[]) {
   const usedImages = new Set<string>();
   return chapters.map((chapter, index) => {
     const existingIdentity = visualIdentity(chapter.imageKey, chapter.imageUrl);
@@ -294,6 +296,7 @@ let seedProject: Project = {
   readingLevel: "Confident independent reader",
   language: "English",
   bookType: "Illustrated children’s adaptation",
+  bookPersona: materializePersona(personaById("court-of-decisions"), "Chosen from this source’s emphasis on governance, statecraft, economy and strategy."),
   aesthetic: "Bright Explorer",
   pageAesthetic: "Playful Panels",
   bookBorder: "Lotus Arch",
@@ -405,12 +408,13 @@ const emptyProject: Project = {
   readingLevel: "Confident independent reader",
   language: "English",
   bookType: "Illustrated children’s adaptation",
-  aesthetic: "Bright Explorer",
-  pageAesthetic: "Playful Panels",
-  bookBorder: "Lotus Arch",
+  bookPersona: materializePersona(personaById("wisdom-and-ideas"), "A calm temporary identity until the source is analysed."),
+  aesthetic: "Young Scholar",
+  pageAesthetic: "Calm Editorial",
+  bookBorder: "No Border",
   pageWatermark: "Lotus Seal",
-  illustrationStyle: "Colourful educational illustration",
-  fontTheme: "Friendly rounded",
+  illustrationStyle: "Contemplative editorial scenes with quiet symbolism, natural materials and human scale",
+  fontTheme: "Clear Reader",
   imageFrequency: "Picture-rich — at least 1 per chapter",
   adaptation: "Faithful children’s adaptation",
   citationStyle: "Source notes for grown-ups",
@@ -836,13 +840,17 @@ function normalizeProject(saved: Project): Project {
   const { maxPages: _removedLegacyPageLimit, ...savedWithoutPageLimit } = saved as Project & { maxPages?: number };
   void _removedLegacyPageLimit;
   const cleanSaved = savedWithoutPageLimit as Project;
+  const persona = cleanSaved.bookPersona ?? inferBookPersona({ title: cleanSaved.title, sourcePreview: cleanSaved.sourcePreview, sourceTerms: cleanSaved.sourceTerms, sourceHeadings: cleanSaved.sourceHeadings, bookType: cleanSaved.bookType });
   const reader = childAudienceProfile(cleanSaved.audience ?? "");
   const writing = naturalWritingProfile(reader.value);
-  const design = childDesignWorld(cleanSaved.aesthetic ?? "");
-  const pages = pageAesthetic(cleanSaved.pageAesthetic ?? "");
-  const border = bookBorder(cleanSaved.bookBorder ?? "");
-  const watermark = pageWatermark(cleanSaved.pageWatermark ?? "");
-  const typography = typographyTheme(cleanSaved.fontTheme ?? "");
+  const design = childDesignWorld(cleanSaved.bookPersona ? cleanSaved.aesthetic : persona.aesthetic);
+  const savedPages = pageAesthetic(cleanSaved.pageAesthetic ?? "");
+  const pages = cleanSaved.bookPersona ? savedPages : pageAesthetic(persona.pageAesthetic);
+  const savedBorder = bookBorder(cleanSaved.bookBorder ?? "");
+  const border = cleanSaved.bookPersona ? savedBorder : bookBorder(persona.bookBorder);
+  const watermark = pageWatermark(cleanSaved.bookPersona ? cleanSaved.pageWatermark : persona.pageWatermark);
+  const savedTypography = typographyTheme(cleanSaved.fontTheme ?? "");
+  const typography = cleanSaved.bookPersona ? savedTypography : typographyTheme(persona.fontTheme);
   const childFirstSaved: Project = {
     ...emptyProject,
     ...cleanSaved,
@@ -850,6 +858,7 @@ function normalizeProject(saved: Project): Project {
     audience: reader.value,
     readingLevel: reader.readingLevel,
     bookType: "Illustrated children’s adaptation",
+    bookPersona: persona,
     adaptation: "Faithful children’s adaptation",
     citationStyle: "Source notes for grown-ups",
     learningFeatures: [...writing.learningFeatures],
@@ -857,7 +866,7 @@ function normalizeProject(saved: Project): Project {
     pageAesthetic: pages.value,
     bookBorder: border.value,
     pageWatermark: watermark.value,
-    illustrationStyle: design.illustrationStyle,
+    illustrationStyle: cleanSaved.bookPersona ? (cleanSaved.illustrationStyle || persona.illustrationStyle) : persona.illustrationStyle,
     fontTheme: typography.value,
     imageFrequency: reader.imageFrequency,
   };
@@ -913,7 +922,7 @@ function normalizeProject(saved: Project): Project {
     ...childFirstSaved,
     sourcePreview: cleanSaved.sourcePreview ?? "",
     sourceSections: cleanSaved.sourceSections ?? [],
-    illustrationStyle: cleanSaved.illustrationStyle ?? "Editorial watercolour",
+    illustrationStyle: childFirstSaved.illustrationStyle,
     fontTheme: typography.value,
     citationStyle: cleanSaved.citationStyle ?? "Source page notes",
     learningFeatures: [...writing.learningFeatures],
@@ -1157,7 +1166,9 @@ export default function Home() {
   const patchProject = (patch: Partial<Project>) => setProject((current) => {
     let next = { ...current, ...patch };
     if ("audience" in patch && !current.adaptationPlanConfirmed) next = { ...next, chapters: applyAutomaticAdaptationPlan(next.chapters, next.audience) };
-    if ("aesthetic" in patch || "illustrationStyle" in patch) return { ...next, chapters: attachChapterVisuals(next, next.chapters) };
+    const designChanged = ["aesthetic", "pageAesthetic", "bookBorder", "pageWatermark", "fontTheme", "illustrationStyle"].some((key) => key in patch);
+    if (designChanged && !("bookPersona" in patch)) next = { ...next, bookPersona: { ...current.bookPersona, aesthetic: next.aesthetic, pageAesthetic: next.pageAesthetic, bookBorder: next.bookBorder, pageWatermark: next.pageWatermark, fontTheme: next.fontTheme, illustrationStyle: next.illustrationStyle, autoSelected: false, rationale: "Customised by the publisher after source-led selection." } };
+    if (designChanged || "bookPersona" in patch) return { ...next, chapters: attachChapterVisuals(next, next.chapters) };
     return next;
   });
 
@@ -1168,6 +1179,7 @@ export default function Home() {
   }
 
   async function handleFile(event: ChangeEvent<HTMLInputElement>) {
+    // Legacy equivalent before Book Persona: const chapters = attachChapterVisuals({ ...project, sourceTerms: source.terms }, applyAutomaticAdaptationPlan(sourceChapters, project.audience, true))
     const file = event.target.files?.[0];
     if (!file) return;
     setSourceBusy(true);
@@ -1182,8 +1194,10 @@ export default function Home() {
       if (!response.ok || !data.source) throw new Error(data.error || "Upload failed");
       const source = data.source;
       const headings = source.headings.length ? source.headings : ["Opening chapter", "Core ideas", "Applications and examples", "Closing reflections"];
+      const persona = inferBookPersona({ title: file.name.replace(/\.[^.]+$/, ""), sourcePreview: source.preview, sourceTerms: source.terms, sourceHeadings: headings, bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
       const sourceChapters: Chapter[] = headings.map((title, index) => chapterFromContextPlan(title, index, source.sections[index], source.chapterPlans[index], project.audience));
-      const chapters = attachChapterVisuals({ ...project, sourceTerms: source.terms }, applyAutomaticAdaptationPlan(sourceChapters, project.audience, true));
+      const personaProject = { ...project, ...bookPersonaPatch(persona), sourceTerms: source.terms };
+      const chapters = attachChapterVisuals(personaProject, applyAutomaticAdaptationPlan(sourceChapters, project.audience, true));
       patchProject({
         source: source.name,
         sourceSize: source.size,
@@ -1195,6 +1209,7 @@ export default function Home() {
         sourceTerms: source.terms,
         sourceSections: source.sections,
         sourcePreview: source.preview,
+        ...bookPersonaPatch(persona),
         briefApproved: false,
         adaptationPlanConfirmed: false,
         adaptationPlanVersion: ADAPTATION_PLAN_VERSION,
@@ -1209,6 +1224,7 @@ export default function Home() {
   }
 
   async function refreshSource(file: File) {
+    // Legacy equivalent before Book Persona: chapters: attachChapterVisuals({ ...project, sourceTerms: source.terms }, reconcileOriginalChapters(project, titles, source.sections, source.chapterPlans))
     setSourceBusy(true);
     try {
       const form = new FormData();
@@ -1220,8 +1236,11 @@ export default function Home() {
       if (!response.ok || !data.source) throw new Error(data.error || "Source upload failed");
       const source = data.source;
       const titles = source.headings.length ? source.headings : project.sourceHeadings;
+      const persona = inferBookPersona({ title: project.title, sourcePreview: source.preview, sourceTerms: source.terms, sourceHeadings: titles, bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
+      const personaProject = { ...project, ...bookPersonaPatch(persona), sourceTerms: source.terms };
       const next = {
         ...project,
+        ...bookPersonaPatch(persona),
         source: source.name,
         sourceSize: source.size,
         sourceObjectKey: source.objectKey,
@@ -1235,7 +1254,7 @@ export default function Home() {
         adaptationPlanConfirmed: false,
         adaptationPlanVersion: ADAPTATION_PLAN_VERSION,
         briefApproved: false,
-        chapters: attachChapterVisuals({ ...project, sourceTerms: source.terms }, reconcileOriginalChapters(project, titles, source.sections, source.chapterPlans)),
+        chapters: attachChapterVisuals(personaProject, reconcileOriginalChapters(project, titles, source.sections, source.chapterPlans)),
       };
       setProject(next);
       await persistProject(next);
@@ -1287,8 +1306,11 @@ export default function Home() {
       const data = await response.json() as { source?: Omit<SourceResult, "name" | "size" | "objectKey">; error?: string };
       if (!response.ok || !data.source) throw new Error(data.error || "Source re-check failed");
       const titles = data.source.headings.length ? data.source.headings : next.sourceHeadings;
+      const persona = inferBookPersona({ title: next.title, sourcePreview: data.source.preview, sourceTerms: data.source.terms, sourceHeadings: titles, bookType: next.bookType }, projects.filter((item) => item.id !== next.id).map((item) => item.bookPersona?.signature).filter(Boolean));
+      const personaProject = { ...next, ...bookPersonaPatch(persona), sourceTerms: data.source.terms };
       next = {
         ...next,
+        ...bookPersonaPatch(persona),
         sourcePages: data.source.pages || next.sourcePages,
         sourceWords: data.source.words || next.sourceWords,
         sourceQuality: data.source.quality,
@@ -1299,7 +1321,7 @@ export default function Home() {
         adaptationPlanVersion: ADAPTATION_PLAN_VERSION,
         adaptationPlanConfirmed: needsContextPlan ? false : next.adaptationPlanConfirmed,
         briefApproved: needsContextPlan ? false : next.briefApproved,
-        chapters: attachChapterVisuals({ ...next, sourceTerms: data.source.terms }, reconcileOriginalChapters(next, titles, data.source.sections, data.source.chapterPlans)),
+        chapters: attachChapterVisuals(personaProject, reconcileOriginalChapters(next, titles, data.source.sections, data.source.chapterPlans)),
       };
       setProject(next);
       await persistProject(next);
@@ -1344,6 +1366,13 @@ BOOK AND CHAPTER CONTEXT
 - Language: ${project.language}
 - Chapter focus: ${active.context || chapterText.slice(0, 1700)}
 - Essential concepts to represent: ${visualTerms.join(", ") || "the central idea of the chapter"}
+
+BOOK PERSONA
+${project.bookPersona.name} · ${project.bookPersona.family}
+Mood: ${project.bookPersona.mood}
+Recurring motif: ${project.bookPersona.motif}
+Illustration contract: ${project.bookPersona.illustrationStyle}
+Cover/composition language: ${project.bookPersona.coverStyle}
 
 NARRATIVE SCENE DIRECTION
 - Scene concept: ${sceneDirection}
@@ -1533,6 +1562,7 @@ OUTPUT REQUIREMENTS
         typography: project.fontTheme,
         border: project.bookBorder,
         watermark: project.pageWatermark,
+        bookPersona: project.bookPersona,
       },
       chapters: project.chapters.map((chapter, index) => ({
         chapterId: expectedChapterId(index + 1),
@@ -1666,6 +1696,7 @@ OUTPUT REQUIREMENTS
       language: snapshot.language,
       adaptation: snapshot.adaptation,
       learningFeatures: snapshot.learningFeatures,
+      bookPersona: snapshot.bookPersona,
       aesthetic: snapshot.aesthetic,
       illustrationStyle: snapshot.illustrationStyle,
       imageFrequency: snapshot.imageFrequency,
@@ -2146,10 +2177,13 @@ const glimpsePages = [
   { value: "activity", label: "Activity page" },
 ] as const;
 
-function BookGlimpse({ project, focus }: { project: Project; focus: "reader" | "design" }) {
+function PersonaPicker({ project, onSelect }: { project: Project; onSelect: (persona: BookPersona) => void }) {
+  return <section className="persona-picker"><div className="persona-recommendation"><div><p className="choice-label">SOURCE-LED BOOK IDENTITY</p><h3>{project.bookPersona.name}</h3><p>{project.bookPersona.tagline}</p><small>{project.bookPersona.rationale}</small></div><div className="persona-swatches">{Object.values(project.bookPersona.palette).map((colour) => <i style={{ background: colour }} key={colour}/>)}</div></div><div className="persona-cards">{bookPersonaDefinitions.map((persona) => <button type="button" className={project.bookPersona.id === persona.id ? "selected" : ""} onClick={() => onSelect(materializePersona(persona, "Selected by the publisher for this edition.", false))} key={persona.id}><span>{persona.family}</span><strong>{persona.name}</strong><small>{persona.description}</small></button>)}</div></section>;
+}
+
+function BookGlimpse({ project, focus, onPersona }: { project: Project; focus: "reader" | "design"; onPersona?: (persona: BookPersona) => void }) {
   const [previewPage, setPreviewPage] = useState<(typeof glimpsePages)[number]["value"]>("chapter");
   const reader = childAudienceProfile(project.audience);
-  const writing = naturalWritingProfile(project.audience);
   const design = childDesignWorld(project.aesthetic);
   const pages = pageAesthetic(project.pageAesthetic);
   const border = bookBorder(project.bookBorder);
@@ -2162,16 +2196,18 @@ function BookGlimpse({ project, focus }: { project: Project; focus: "reader" | "
   const watermarkClass = normalizedTitle(watermark.value).replace(/[^a-z]+/g, "-");
   const typographyClass = normalizedTitle(typography.value).replace(/[^a-z]+/g, "-");
   const ageClass = reader.value.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "");
-  return <aside className={`book-glimpse world-${worldClass} page-aesthetic-${pageClass} book-border-${borderClass} page-watermark-${watermarkClass} typography-${typographyClass} age-${ageClass}`} aria-live="polite">
+  const personaClass = bookPersonaClass(project.bookPersona);
+  return <aside className={`book-glimpse ${personaClass} world-${worldClass} page-aesthetic-${pageClass} book-border-${borderClass} page-watermark-${watermarkClass} typography-${typographyClass} age-${ageClass}`} aria-live="polite">
     <header><div><p className="eyebrow">LIVE BOOK & PAGE GLIMPSE</p><h2>See every important page before you build</h2></div><span>{focus === "reader" ? reader.value : `${pages.label} · ${border.label} · ${watermark.label}`}</span></header>
+    {focus === "design" && onPersona && <PersonaPicker project={project} onSelect={onPersona}/>}
     <nav className="glimpse-tabs" aria-label="Preview a page type">{glimpsePages.map((item) => <button type="button" className={previewPage === item.value ? "active" : ""} onClick={() => setPreviewPage(item.value)} key={item.value}>{item.label}</button>)}</nav>
     <div className="glimpse-spread">
-      <div className="glimpse-cover"><small>AN ILLUSTRATED BOOK FOR</small><strong>{reader.value.replace("Ages ", "AGES ")}</strong><div className="cover-symbol"><i/><i/><i/></div><h3>{project.title === "Untitled adaptation" ? "YOUR NEW BOOK" : project.title}</h3><span>{design.label}</span></div>
+      <div className="glimpse-cover"><small>{project.bookPersona.family.toUpperCase()}</small><strong>{reader.value.replace("Ages ", "AGES ")}</strong><div className="cover-symbol"><i/><i/><i/></div><h3>{project.title === "Untitled adaptation" ? "YOUR NEW BOOK" : project.title}</h3><span>{project.bookPersona.name}</span></div>
       <div className={`glimpse-page glimpse-page-${previewPage}`}>
         {previewPage === "chapter" && <><span>CHAPTER 01</span><h3>{chapterTitle}</h3><div className="glimpse-illustration" aria-hidden="true"><i/><b>✦</b><i/></div><b className="glimpse-hook">A NEW IDEA BEGINS</b><p>{glimpseSample(project)}</p></>}
         {previewPage === "reading" && <><span>UNDERSTANDING THE IDEA</span><h3>How the parts connect</h3><b className="glimpse-hook">NATURAL WRITING FOR {reader.value.toUpperCase()}</b><p>{glimpseSample(project)}</p><p className="glimpse-second-paragraph">The next example gives the idea a clear shape and connects it to the chapter as a whole.</p><div className="glimpse-word"><b>WORD HELPER</b><span>Context means the ideas and events around a topic.</span></div></>}
-        {previewPage === "visual" && <><span>LOOK CLOSER</span><h3>A picture of the big idea</h3><div className="glimpse-concept-map" aria-label="Example concept map"><b>{chapterTitle.split(/\s+/).slice(0, 2).join(" ")}</b><i>People</i><i>Ideas</i><i>Choices</i></div><p className="glimpse-caption">Every chapter receives a different context-based illustration, map, timeline, tree or diagram.</p></>}
-        {previewPage === "activity" && <><span>{writing.activityLabel}</span><h3>Pause, connect and create</h3><div className="glimpse-activity-card"><b>YOUR CHALLENGE</b><p>{writing.activity}</p><ol><li>Find one important idea.</li><li>Connect it to an example.</li><li>Share what you discovered.</li></ol></div></>}
+        {previewPage === "visual" && <><span>LOOK CLOSER</span><h3>A picture of the big idea</h3><div className="glimpse-concept-map persona-scene" aria-label="Example narrative scene"><b>✦</b><i/><i/><i/></div><p className="glimpse-caption">{project.bookPersona.illustrationStyle}. Every chapter scene is rebuilt from its own people, place, objects and central action.</p></>}
+        {previewPage === "activity" && <><span>{project.bookPersona.activityLabel}</span><h3>{project.bookPersona.sectionLabels[2]}</h3><div className="glimpse-activity-card"><b>{project.bookPersona.activityLabel}</b><p>{project.bookPersona.activityPrompt}</p><ol><li>Find one important idea.</li><li>Connect it to an example.</li><li>Share what you discovered.</li></ol></div></>}
       </div>
     </div>
     <footer><span><b>Aa</b>{typography.label}</span><span><b>▣</b>{pages.label}</span><span><b>⌑</b>{border.label} border</span><span><b>◉</b>{watermark.label}</span></footer>
@@ -2193,8 +2229,8 @@ function Wizard({ step, project, sourceBusy, onPatch, onFile, onBack, onNext }: 
       <p className="eyebrow">STEP {step + 1} OF 4 · AGES 7–15</p><h1>{["Choose the source.", "Choose the child reader.", "Choose the book world.", "Review your children’s book."][step]}</h1><p className="lead">{["Upload the book you are authorised to adapt.", "Pick one age band. Vocabulary, sentence length, explanation depth and text size adjust automatically.", "Choose a complete visual system and see the page before building the adaptation.", "These child-first choices guide every generated chapter and illustration."][step]}</p>
       {step === 0 && <section className="form-card"><label className={`upload ${sourceBusy ? "busy" : ""}`}><input type="file" accept=".pdf,.docx,.txt,.md" onChange={onFile} disabled={sourceBusy}/><span>{sourceBusy ? "…" : "↑"}</span><strong>{sourceBusy ? "Reading and analysing your book…" : project.source}</strong><small>{sourceBusy ? "Large PDFs can take a short while" : "Click to choose a PDF, DOCX or TXT book (maximum 30 MB)"}</small></label><div className="fields two"><label>New book title<input value={project.title} onChange={(e) => onPatch({ title: e.target.value })}/></label><label>Source book<input value={project.source} readOnly/></label></div></section>}
       {step === 1 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">READER AGE</p><div className="choice-cards">{childAudienceProfiles.map((profile) => <button className={project.audience === profile.value ? "choice selected" : "choice"} onClick={() => onPatch(audiencePatch(profile.value))} key={profile.value}><span>{profile.value}</span><strong>{profile.label}</strong><small>{profile.description}</small><i>“{profile.sample}”</i></button>)}</div><div className="language-choice"><span>BOOK LANGUAGE</span>{["English", "Hindi", "English + Hindi"].map((language) => <button className={project.language === language ? "selected" : ""} onClick={() => onPatch({ language })} key={language}>{language}</button>)}</div><div className="auto-settings"><b>Natural writing is automatic</b><span>{project.learningFeatures.join(" · ")}</span><small>The studio changes vocabulary, sentence length, explanation depth and reflection for the selected age. There are no separate writing modes.</small></div></div><BookGlimpse project={project} focus="reader"/></section>}
-      {step === 2 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">ILLUSTRATION WORLD</p><div className="design-world-cards">{childDesignWorlds.map((world) => <button className={`${project.aesthetic === world.value ? "selected " : ""}design-world world-${normalizedTitle(world.value).replace(/[^a-z]+/g, "-")}`} onClick={() => onPatch(designWorldPatch(world.value))} key={world.value}><span className="world-thumbnail"><i/><b>Ab</b><i/></span><strong>{world.label}</strong><small>{world.description}</small><em>{world.illustrationStyle}</em></button>)}</div><div className="page-aesthetic-section"><p className="choice-label">PAGE AESTHETIC · APPLIES TO EVERY PAGE</p><div className="page-aesthetic-cards">{pageAesthetics.map((aesthetic) => { const aestheticClass = normalizedTitle(aesthetic.value).replace(/[^a-z]+/g, "-"); return <button className={`${project.pageAesthetic === aesthetic.value ? "selected " : ""}page-aesthetic-choice aesthetic-${aestheticClass}`} onClick={() => onPatch(pageAestheticPatch(aesthetic.value))} key={aesthetic.value}><span className="page-aesthetic-thumbnail"><i/><b>Chapter</b><i/><i/><i/></span><strong>{aesthetic.label}</strong><small>{aesthetic.description}</small><em>{aesthetic.detail}</em></button>; })}</div></div><div className="book-border-section"><p className="choice-label">BOOK BORDER · MIX WITH ANY PAGE AESTHETIC</p><div className="book-border-cards">{bookBorders.map((border) => { const borderClass = normalizedTitle(border.value).replace(/[^a-z]+/g, "-"); return <button className={`${project.bookBorder === border.value ? "selected " : ""}book-border-choice border-${borderClass}`} onClick={() => onPatch(bookBorderPatch(border.value))} key={border.value}><span className="book-border-thumbnail"><i/><b>Chapter</b><i/><i/><i/></span><strong>{border.label}</strong><small>{border.description}</small><em>{border.detail}</em></button>; })}</div></div><div className="auto-settings"><b>Visual guarantee</b><span>One unique image, page aesthetic and chosen border in every chapter</span><small>If a literal scene is unsuitable, the app creates a relevant map, timeline, tree, cycle or relationship diagram. Use the live tabs to inspect the chapter, reading, visual and activity pages.</small></div></div><BookGlimpse project={project} focus="design"/></section>}
-      {step === 3 && <><section className="brief-review child-review"><div><span>SOURCE</span><strong>{project.source}</strong></div><div><span>CHILD READER</span><strong>{project.audience} · {project.readingLevel}</strong></div><div><span>BOOK</span><strong>{project.bookType}</strong></div><div><span>WRITING</span><strong>Natural age-based writing · {project.language}</strong></div><div><span>ILLUSTRATION WORLD</span><strong>{project.aesthetic} · {project.illustrationStyle}</strong></div><div><span>PAGE AESTHETIC</span><strong>{project.pageAesthetic} · applied to every page</strong></div><div><span>BOOK BORDER</span><strong>{project.bookBorder} · applied to every physical page</strong></div><div><span>PAGE WATERMARK</span><strong>{project.pageWatermark} · subtle background design</strong></div><div><span>LENGTH</span><strong>Shortest clear length · never padded · under 100 pages</strong></div></section><BookGlimpse project={project} focus="design"/></>}
+      {step === 2 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">ILLUSTRATION WORLD</p><div className="design-world-cards">{childDesignWorlds.map((world) => <button className={`${project.aesthetic === world.value ? "selected " : ""}design-world world-${normalizedTitle(world.value).replace(/[^a-z]+/g, "-")}`} onClick={() => onPatch(designWorldPatch(world.value))} key={world.value}><span className="world-thumbnail"><i/><b>Ab</b><i/></span><strong>{world.label}</strong><small>{world.description}</small><em>{world.illustrationStyle}</em></button>)}</div><div className="page-aesthetic-section"><p className="choice-label">PAGE AESTHETIC · APPLIES TO EVERY PAGE</p><div className="page-aesthetic-cards">{pageAesthetics.map((aesthetic) => { const aestheticClass = normalizedTitle(aesthetic.value).replace(/[^a-z]+/g, "-"); return <button className={`${project.pageAesthetic === aesthetic.value ? "selected " : ""}page-aesthetic-choice aesthetic-${aestheticClass}`} onClick={() => onPatch(pageAestheticPatch(aesthetic.value))} key={aesthetic.value}><span className="page-aesthetic-thumbnail"><i/><b>Chapter</b><i/><i/><i/></span><strong>{aesthetic.label}</strong><small>{aesthetic.description}</small><em>{aesthetic.detail}</em></button>; })}</div></div><div className="book-border-section"><p className="choice-label">BOOK BORDER · MIX WITH ANY PAGE AESTHETIC</p><div className="book-border-cards">{bookBorders.map((border) => { const borderClass = normalizedTitle(border.value).replace(/[^a-z]+/g, "-"); return <button className={`${project.bookBorder === border.value ? "selected " : ""}book-border-choice border-${borderClass}`} onClick={() => onPatch(bookBorderPatch(border.value))} key={border.value}><span className="book-border-thumbnail"><i/><b>Chapter</b><i/><i/><i/></span><strong>{border.label}</strong><small>{border.description}</small><em>{border.detail}</em></button>; })}</div></div><div className="auto-settings"><b>Visual guarantee</b><span>One unique image, page aesthetic and chosen border in every chapter</span><small>Every image is a chapter-specific narrative scene—never a map, Venn diagram or generic concept graphic. Use the live tabs to inspect the chapter, reading, visual and activity pages.</small></div></div><BookGlimpse project={project} focus="design" onPersona={(persona) => onPatch(bookPersonaPatch(persona))}/></section>}
+      {step === 3 && <><section className="brief-review child-review"><div><span>SOURCE</span><strong>{project.source}</strong></div><div><span>CHILD READER</span><strong>{project.audience} · {project.readingLevel}</strong></div><div><span>BOOK</span><strong>{project.bookType}</strong></div><div><span>WRITING</span><strong>Natural age-based writing · {project.language}</strong></div><div><span>ILLUSTRATION WORLD</span><strong>{project.aesthetic} · {project.illustrationStyle}</strong></div><div><span>PAGE AESTHETIC</span><strong>{project.pageAesthetic} · applied to every page</strong></div><div><span>BOOK BORDER</span><strong>{project.bookBorder} · applied to every physical page</strong></div><div><span>PAGE WATERMARK</span><strong>{project.pageWatermark} · subtle background design</strong></div><div><span>LENGTH</span><strong>Shortest clear length · never padded · under 100 pages</strong></div></section><BookGlimpse project={project} focus="design" onPersona={(persona) => onPatch(bookPersonaPatch(persona))}/></>}
       {step === 2 && <TypographyPicker project={project} onPatch={onPatch}/>}
       {step === 2 && <WatermarkPicker project={project} onPatch={onPatch}/>}
       <footer className="wizard-footer"><button className="secondary" onClick={onBack}>← Back</button><button className="primary" onClick={onNext} disabled={sourceBusy || (step === 0 && project.source === "No source selected")}>{step === 3 ? "Detect original chapters" : "Continue"} →</button></footer>
@@ -2240,7 +2276,7 @@ function Editor({ project, active, activeId, allocated, draftBusy, onSelect, edi
   return <main className="editor-layout">
     <label className="editor-typography-select">Typography<select value={project.fontTheme} onChange={(event) => onPatchProject(typographyPatch(event.target.value))}>{typographyThemes.map((theme) => <option key={theme.value}>{theme.value}</option>)}</select></label>
     <aside className="chapters"><header><p className="eyebrow">BOOK STRUCTURE</p><button onClick={onAddChapter} aria-label="Add chapter">＋</button></header><div className="front-matter"><span>FM</span><div><b>Front matter</b><small>Cover · Contents · Preface</small></div></div>{project.chapters.map((chapter) => { const state = chapterGenerationState(chapter); return <button className={chapter.id === activeId ? "chapter active" : "chapter"} onClick={() => onSelect(chapter.id)} key={chapter.id}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small className={`chapter-generation-state generation-${normalizedTitle(state).replace(/[^a-z]+/g, "-")}`}>{state}{chapter.generationUsage?.totalTokens ? ` · ${chapter.generationUsage.totalTokens.toLocaleString()} tokens` : ""}</small></div></button>; })}<div className="page-budget"><span><b>{allocated}</b> planned pages</span><small>Natural length · 100-page safety ceiling</small></div></aside>
-    <section className="canvas"><nav className="editor-tools"><div><button onClick={() => document.execCommand("bold")}><b>B</b></button><button onClick={() => document.execCommand("italic")}><i>I</i></button><button onClick={() => document.execCommand("formatBlock", false, "h2")}>H2</button><button onClick={() => document.execCommand("insertUnorderedList")}>• List</button></div><div className="chapter-meter"><span>{active.pages} target pages</span><i><b style={{ width: active.status === "planned" ? "18%" : "67%" }}/></i><span className="always-editable">Always editable</span></div></nav><div className="page-stage"><article className={`paper font-${fontClass} world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")} page-aesthetic-${pageClass} book-border-${borderClass} age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}${active.imageUrl ? " has-chapter-image" : ""}`}><header><span>{project.title}</span><span>{project.audience}</span></header><div className="ornament">✦</div><div key={active.id} ref={editorRef} className="book-copy" contentEditable suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: authorialReaderHtml(active.body) }}/>{active.imageUrl && <figure className="chapter-image"><img src={active.imageUrl} alt={active.imageAlt || active.imageCaption || active.title}/><figcaption>{active.imageCaption || active.title}</figcaption></figure>}<footer><span>{project.title}</span><span>{active.id}</span></footer></article></div><button className="save-float" onClick={onSaveBody}>✓ Save chapter</button></section>
+    <section className="canvas"><nav className="editor-tools"><div><button onClick={() => document.execCommand("bold")}><b>B</b></button><button onClick={() => document.execCommand("italic")}><i>I</i></button><button onClick={() => document.execCommand("formatBlock", false, "h2")}>H2</button><button onClick={() => document.execCommand("insertUnorderedList")}>• List</button></div><div className="chapter-meter"><span>{active.pages} target pages</span><i><b style={{ width: active.status === "planned" ? "18%" : "67%" }}/></i><span className="always-editable">Always editable</span></div></nav><div className="page-stage"><article className={`paper ${bookPersonaClass(project.bookPersona)} font-${fontClass} world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")} page-aesthetic-${pageClass} book-border-${borderClass} age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}${active.imageUrl ? " has-chapter-image" : ""}`}><header><span>{project.title}</span><span>{project.audience}</span></header><div className="ornament">✦</div><div key={active.id} ref={editorRef} className="book-copy" contentEditable suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: authorialReaderHtml(active.body) }}/>{active.imageUrl && <figure className="chapter-image"><img src={active.imageUrl} alt={active.imageAlt || active.imageCaption || active.title}/><figcaption>{active.imageCaption || active.title}</figcaption></figure>}<footer><span>{project.title}</span><span>{active.id}</span></footer></article></div><button className="save-float" onClick={onSaveBody}>✓ Save chapter</button></section>
     <aside className="assistant"><nav><button className={tab === "ai" ? "active" : ""} onClick={() => setTab("ai")}>✦<span>AI EDIT</span></button><button className={tab === "design" ? "active" : ""} onClick={() => setTab("design")}>◈<span>DESIGN</span></button><button className={tab === "sources" ? "active" : ""} onClick={() => setTab("sources")}>⌕<span>SOURCES</span></button></nav><div className="assistant-body">
       {tab === "ai" && <><div className="assistant-title"><span>✦</span><div><b>Automatic quality editor</b><small>The website checks and repairs each chapter before saving it.</small></div></div><div className="request-control-card"><b>QUALITY FEEDBACK LOOP</b><span>Usually 1 Nemotron pass · maximum 3 only when meaningful content fails</span><small>Mechanical formatting is local · quota errors stop immediately · no fourth automatic request</small></div><div className={`generation-status-card generation-${normalizedTitle(chapterGenerationState(active)).replace(/[^a-z]+/g, "-")}`}><b>{chapterGenerationState(active)}</b><span>{active.generationUsage?.totalTokens ? `Total project history for this chapter: ${active.generationUsage.totalTokens.toLocaleString()} tokens · ${active.generationUsage.requests} request${active.generationUsage.requests === 1 ? "" : "s"}` : "No Nemotron usage recorded yet"}</span>{active.generationError && <small>{active.generationError}</small>}</div>{active.importValidated ? <div className="package-lock-report"><b>✓ STRUCTURED PACKAGE VERIFIED</b><p>{active.importedPages?.length || active.pages} page IDs are locked to Chapter {active.id}. Its text and images were imported without automatic redistribution.</p>{active.importedPages && <ol>{active.importedPages.map((page) => <li key={page.pageId}><span>{page.pageId}</span><b>{page.purpose}</b><i>{page.imageUrl ? "image linked" : "text"}</i></li>)}</ol>}</div> : active.pedagogyQuality ? <div className={`pedagogy-report ${active.pedagogyQuality.status === "passed" ? "" : "needs-review"}`}><header><div><b>{active.pedagogyQuality.status === "passed" ? "✓ READY FOR CHILDREN" : "HUMAN REVIEW REQUIRED"}</b><span>{pedagogyAverage(active.pedagogyQuality)}/100</span></div><p>{active.pedagogyQuality.summary}</p></header><div className="score-grid">{Object.entries(active.pedagogyQuality.scores).map(([name, score]) => <span key={name}><b>{score}</b>{qualityScoreLabels[name] || name}</span>)}</div><div className="quality-checks">{active.pedagogyQuality.checks.map((check) => <p key={check}>{active.pedagogyQuality?.status === "passed" ? "✓" : "•"} {check}</p>)}</div></div> : <div className="pedagogy-pending"><b>Waiting for the automated workflow</b><p>Use Build this book above. Drafting, local checks and up to two targeted feedback repairs happen automatically.</p></div>}<p className="selection-tip">This chapter has <b>{chapterWordCount(active).toLocaleString()} words</b>. Every edit keeps the voice direct and authorial for the selected age.</p><div className="ai-list">{["Simplify language", "Shorten selection", "Expand with examples", "Make age-appropriate", "Improve storytelling", "Check factual accuracy", "Suggest an illustration"].map((action) => <button onClick={() => onAi(action)} key={action}><span>✦</span>{action}<i>→</i></button>)}</div><div className="memory-box"><p className="eyebrow">EDITORIAL MEMORY</p><p>{project.editorialPreferences.length ? project.editorialPreferences.join(" · ") : "No saved preferences yet"}</p><button onClick={() => onRemember("book")}>＋ Remember for this book</button><button onClick={() => onRemember("designer")}>＋ Remember for future books</button></div></>}
       {tab === "design" && <><div className="assistant-title"><span>◈</span><div><b>Book design</b><small>Every chapter receives a context-read narrative scene—not a diagram.</small></div></div><div className="design-controls"><div className="visual-status"><b>{active.visualType === "uploaded" ? "✓ Finished chapter illustration" : "Scene direction ready"}</b><span>{active.visualType === "uploaded" ? "Your uploaded image will be used in the book" : "Built from this chapter’s people, place, objects and central action"}</span></div><button className="primary full scene-prompt-button" onClick={() => onAi("Suggest an illustration")}>✦ Create this chapter illustration</button><small className="scene-workflow-help">The studio prepares a complete narrative-scene prompt. Generate it in ChatGPT, then upload the finished image below.</small><label>Illustration world<select value={project.aesthetic} onChange={(e) => onPatchProject(designWorldPatch(e.target.value))}>{childDesignWorlds.map((world) => <option key={world.value}>{world.value}</option>)}</select></label><label>Page aesthetic<select value={project.pageAesthetic} onChange={(e) => onPatchProject(pageAestheticPatch(e.target.value))}>{pageAesthetics.map((aesthetic) => <option key={aesthetic.value}>{aesthetic.value}</option>)}</select></label><label>Book border<select value={project.bookBorder} onChange={(e) => onPatchProject(bookBorderPatch(e.target.value))}>{bookBorders.map((border) => <option key={border.value}>{border.value}</option>)}</select></label><label>Page watermark<select value={project.pageWatermark} onChange={(e) => onPatchProject(pageWatermarkPatch(e.target.value))}>{pageWatermarks.map((watermark) => <option key={watermark.value}>{watermark.value}</option>)}</select></label><div className="design-summary"><b>{project.pageAesthetic} · {project.bookBorder} · {project.pageWatermark}</b><span>{project.illustrationStyle} · {project.fontTheme} · {project.imageFrequency}</span></div><label className="image-upload">Upload finished chapter scene<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && onUploadImage(e.target.files[0])}/></label>{active.imageUrl && <label>Image caption<input value={active.imageCaption || ""} onChange={(e) => onUpdateChapter(active.id, { imageCaption: e.target.value })}/></label>}</div></>}
@@ -2481,7 +2517,7 @@ function Preview({ project, exportBusy, pdfProgress, onClose, onDownload }: { pr
   const [selectedChapterId, setSelectedChapterId] = useState(project.chapters[0]?.id ?? 1);
   const printable = useMemo(() => printableChapters(project.chapters), [project.chapters]);
   const unresolved = project.chapters.filter((chapter) => !isPublishApproved(chapter));
-  const worldClass = `world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")}`;
+  const worldClass = `${bookPersonaClass(project.bookPersona)} world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")}`;
   const pageClass = `page-aesthetic-${normalizedTitle(project.pageAesthetic).replace(/[^a-z]+/g, "-")}`;
   const borderClass = `book-border-${normalizedTitle(project.bookBorder).replace(/[^a-z]+/g, "-")}`;
   const ageClass = `age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}`;
@@ -2502,7 +2538,6 @@ function Preview({ project, exportBusy, pdfProgress, onClose, onDownload }: { pr
     return chapter.imageUrl && !shareIllustration ? [...text, { kind: "chapter" as const, chapter, body: "", pageIndex: pages.length, pageCount, imageUrl: chapter.imageUrl, imageCaption: chapter.imageCaption, imageAlt: chapter.imageAlt }] : text;
   });
   const sheets: ({ kind: "cover" | "contents" | "back" } | (typeof chapterSheets)[number])[] = [{ kind: "cover" }, { kind: "contents" }, ...chapterSheets, { kind: "back" }];
-  useEffect(() => { if (pageIndex >= sheets.length) setPageIndex(Math.max(0, sheets.length - 1)); }, [pageIndex, sheets.length]);
   const renderSheet = (sheet: (typeof sheets)[number], key: string) => {
     const base = `book-sheet ${worldClass} ${pageClass} ${borderClass}`;
     if (sheet.kind === "cover") return <article className={`${base} preview-cover`} key={key}><div className="cover-edition">IKS BOOK STUDIO · {project.audience.toUpperCase()}</div><h1>{project.title}</h1><span>An illustrated book shaped from your source</span><b>✦</b>{unresolved.length > 0 && <small className="draft-status">Working preview · {unresolved.length} chapter{unresolved.length === 1 ? "" : "s"} still in progress</small>}</article>;
@@ -2513,7 +2548,7 @@ function Preview({ project, exportBusy, pdfProgress, onClose, onDownload }: { pr
     const waitingForContent = chapterWordCount(sheet.chapter) < 45 && !sheet.chapter.importValidated;
     return <article className={`${base} preview-page chapter-preview ${ageClass}${image ? " chapter-visual-sheet" : ""}${combined ? " chapter-text-visual-sheet" : ""}`} key={key}><header className="print-chapter-header"><span>CHAPTER {sheet.chapter.id}</span><span>PAGE {sheet.pageIndex + 1} OF {sheet.pageCount}</span></header>{sheet.pageIndex === 0 && <h2>{sheet.chapter.title}</h2>}{sheet.pageIndex > 0 && !image && <p className="continued-title">{sheet.chapter.title} · continued</p>}{sheet.body && <div className="preview-body" dangerouslySetInnerHTML={{ __html: sheet.body }}/>} {waitingForContent && sheet.pageIndex === 0 && <div className="unfinished-page-note"><b>Chapter in progress</b><span>Generated content will appear here automatically. You can still preview and download the complete book layout now.</span></div>}{sheet.imageUrl && <figure className="chapter-image"><img src={sheet.imageUrl} alt={sheet.imageAlt || sheet.imageCaption || sheet.chapter.title}/><figcaption>{sheet.imageCaption || sheet.chapter.title}</figcaption></figure>}<footer className="sheet-number"><span>{project.title}</span><span>{sheet.pageIndex + 1}</span></footer></article>;
   };
-  const current = sheets[pageIndex];
+  const current = sheets[Math.min(pageIndex, Math.max(0, sheets.length - 1))];
   const currentChapter = current?.kind === "chapter" ? current.chapter.id : current?.kind === "contents" ? -1 : 0;
   const selectedChapterSheets = chapterSheets.filter((sheet) => sheet.chapter.id === selectedChapterId);
   const selectedChapter = project.chapters.find((chapter) => chapter.id === selectedChapterId) ?? project.chapters[0];
@@ -2547,7 +2582,7 @@ function LegacyPreview({ project, draftBusy, onFill, onRefresh, onClose, onPrint
   const staleChapters = project.chapters.filter((chapter) => !chapter.importValidated && chapterGenerationState(chapter) !== "Designer handoff" && chapterWordCount(chapter) >= 350 && chapter.generationProfile !== selectedProfile);
   const unreviewedChapters = project.chapters.filter((chapter) => !chapter.importValidated && chapter.pedagogyQuality?.status !== "passed" && chapterGenerationState(chapter) !== "Designer handoff");
   const printable = useMemo(() => printableChapters(project.chapters), [project.chapters]);
-  const worldClass = `world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")}`;
+  const worldClass = `${bookPersonaClass(project.bookPersona)} world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")}`;
   const pageClass = `page-aesthetic-${normalizedTitle(project.pageAesthetic).replace(/[^a-z]+/g, "-")}`;
   const borderClass = `book-border-${normalizedTitle(project.bookBorder).replace(/[^a-z]+/g, "-")}`;
   const ageClass = `age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}`;

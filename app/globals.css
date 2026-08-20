@@ -383,3 +383,62 @@
 .unfinished-page-note span{color:#746d62;font:500 10px/1.5 ui-sans-serif,system-ui}
 .pdf-render-stack .draft-status{display:block}
 @media(max-width:900px){.book-preview-backdrop{padding:0}.preview-v2{width:100vw;height:100vh;border-radius:0}.preview-main-header h2{max-width:55vw;font-size:19px}.preview-availability{padding-inline:16px}.preview-mode-bar{padding-inline:10px}.preview-v2>.preview-toolbar{overflow-x:auto;justify-content:flex-start}.preview-toolbar select{min-width:240px}.zoom-controls{flex:none}.page-thumbnails{display:none}.single-page-stage{padding:18px 10px 80px}.continuous-book-stage{padding:24px 12px 90px}.whole-book-label{min-width:260px}.preview-mode-switch button span{display:none}}
+
+/* Source-led Book Persona system */
+.persona-picker{padding:14px 16px;border-bottom:1px solid #ded5c7;background:#f8f3ea}
+.persona-recommendation{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px;border-left:4px solid var(--persona-accent,#b78d36);background:#fffdf8}
+.persona-recommendation h3{margin:2px 0 4px;color:var(--persona-ink,#263631);font:700 20px/1.1 Georgia,serif}
+.persona-recommendation p{margin:0 0 4px;color:#514d46;font-size:11px}
+.persona-recommendation small{color:#777168;font-size:9px}
+.persona-swatches{display:flex;flex:none;gap:5px}.persona-swatches i{width:24px;height:34px;border:2px solid #fff;border-radius:3px;box-shadow:0 0 0 1px #d2c8b9}
+.persona-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:8px}
+.persona-cards button{display:flex;min-height:74px;flex-direction:column;align-items:flex-start;gap:3px;padding:10px;border:1px solid #ddd3c4;border-radius:4px;background:#fffdf9;color:#243a34;text-align:left}
+.persona-cards button:hover{border-color:var(--persona-accent,#b78d36);background:#fff}
+.persona-cards button.selected{border-color:var(--persona-accent,#b78d36);box-shadow:inset 4px 0 var(--persona-accent,#b78d36)}
+.persona-cards span{color:var(--persona-accent,#a94d2d);font-size:7px;font-weight:900;letter-spacing:.1em;text-transform:uppercase}.persona-cards strong{font:700 11px/1.2 Georgia,serif}.persona-cards small{color:#756f65;font-size:8px;line-height:1.35}
+
+.book-persona-court-of-decisions{--persona-ink:#172c46;--persona-accent:#bd5c3a;--persona-support:#c99a3d;--persona-paper:#f7edda;--persona-wash:#dbe3e5}
+.book-persona-theatre-of-feelings{--persona-ink:#542345;--persona-accent:#d27a32;--persona-support:#b74e5b;--persona-paper:#fff3df;--persona-wash:#f4d9d6}
+.book-persona-discovery-fieldbook{--persona-ink:#123f5b;--persona-accent:#ef7c3d;--persona-support:#2e9b89;--persona-paper:#f3f7e9;--persona-wash:#d8eee9}
+.book-persona-living-history-chronicle{--persona-ink:#3b2e2b;--persona-accent:#a94d2d;--persona-support:#496a78;--persona-paper:#f4e6ce;--persona-wash:#ead8be}
+.book-persona-wisdom-and-ideas{--persona-ink:#263631;--persona-accent:#b78d36;--persona-support:#7b907b;--persona-paper:#f5f0df;--persona-wash:#e1e7d8}
+.book-persona-folk-story-caravan{--persona-ink:#173d42;--persona-accent:#c94732;--persona-support:#e0a52f;--persona-paper:#fff0cd;--persona-wash:#cfe5dd}
+.book-persona-makers-workshop{--persona-ink:#294151;--persona-accent:#c46834;--persona-support:#d5a735;--persona-paper:#f7ead5;--persona-wash:#d9e3e2}
+
+.book-glimpse[class*="book-persona-"]{--studio-green:var(--persona-ink);--studio-terra:var(--persona-accent);--studio-gold:var(--persona-support)}
+.book-glimpse[class*="book-persona-"] .glimpse-cover{background:var(--persona-ink);color:var(--persona-paper)}
+.book-glimpse[class*="book-persona-"] .glimpse-page{background:linear-gradient(145deg,var(--persona-paper),#fffdf8);color:var(--persona-ink)}
+.book-glimpse[class*="book-persona-"] .glimpse-page h3,.book-glimpse[class*="book-persona-"] .glimpse-hook{color:var(--persona-ink)}
+.book-persona-theatre-of-feelings .glimpse-cover{border-radius:48% 48% 4px 4px!important;text-align:center}.book-persona-theatre-of-feelings .cover-symbol{transform:rotate(45deg)}
+.book-persona-discovery-fieldbook .glimpse-cover{background:linear-gradient(135deg,var(--persona-ink) 0 62%,var(--persona-support) 62% 68%,var(--persona-accent) 68%)!important}.book-persona-discovery-fieldbook .glimpse-page{background-image:linear-gradient(#2e9b890d 1px,transparent 1px),linear-gradient(90deg,#2e9b890d 1px,transparent 1px);background-size:18px 18px}
+.book-persona-living-history-chronicle .glimpse-cover{box-shadow:inset 0 0 0 7px var(--persona-support),inset 0 0 0 10px var(--persona-paper)}
+.book-persona-wisdom-and-ideas .glimpse-cover{justify-content:center!important;text-align:center}.book-persona-wisdom-and-ideas .cover-symbol{opacity:.35}
+.book-persona-folk-story-caravan .glimpse-cover{background:repeating-linear-gradient(135deg,var(--persona-ink) 0 22px,#205159 22px 44px)!important;border:8px solid var(--persona-accent)}
+.book-persona-makers-workshop .glimpse-cover{background:linear-gradient(180deg,var(--persona-ink) 0 72%,var(--persona-accent) 72% 84%,var(--persona-support) 84%)!important}
+
+.preview-v2 .book-sheet[class*="book-persona-"]{background-color:var(--persona-paper);color:var(--persona-ink)}
+.preview-v2 .book-sheet[class*="book-persona-"] .print-chapter-header{border-color:var(--persona-ink);color:var(--persona-accent)}
+.preview-v2 .book-sheet[class*="book-persona-"]>h2,.preview-v2 .book-sheet[class*="book-persona-"] .preview-body h2,.preview-v2 .book-sheet[class*="book-persona-"] .preview-body h3{color:var(--persona-ink)}
+.preview-v2 .preview-cover[class*="book-persona-"]{background:var(--persona-ink)!important}
+.preview-v2 .preview-cover[class*="book-persona-"] .cover-edition,.preview-v2 .preview-cover[class*="book-persona-"]>b{color:var(--persona-support)}
+.preview-v2 .preview-cover.book-persona-court-of-decisions{background:linear-gradient(115deg,#172c46 0 68%,#bd5c3a 68% 71%,#c99a3d 71%)!important}
+.preview-v2 .preview-cover.book-persona-theatre-of-feelings{align-items:center;justify-content:center;text-align:center;background:radial-gradient(ellipse at 50% 115%,#b74e5b 0 34%,#542345 35% 70%,#35172c 71%)!important}.preview-v2 .preview-cover.book-persona-theatre-of-feelings h1{text-align:center}.preview-v2 .preview-cover.book-persona-theatre-of-feelings:after{left:50%;bottom:68px;width:180px;height:4px;transform:translateX(-50%);background:#d27a32}
+.preview-v2 .preview-cover.book-persona-discovery-fieldbook{justify-content:flex-start;padding-top:200px;background-color:#123f5b!important;background-image:linear-gradient(30deg,#2e9b89 12%,transparent 12.5%,transparent 87%,#ef7c3d 87.5%),linear-gradient(150deg,#2e9b89 12%,transparent 12.5%,transparent 87%,#ef7c3d 87.5%)!important}.preview-v2 .preview-cover.book-persona-discovery-fieldbook:after{left:88px;top:150px;width:240px;height:8px;background:#ef7c3d}
+.preview-v2 .preview-cover.book-persona-living-history-chronicle{justify-content:center;padding:120px;background:#3b2e2b!important;box-shadow:inset 0 0 0 26px #a94d2d,inset 0 0 0 31px #f4e6ce}.preview-v2 .preview-cover.book-persona-living-history-chronicle h1{padding-top:35px;border-top:1px solid #f4e6ce}
+.preview-v2 .preview-cover.book-persona-wisdom-and-ideas{align-items:center;justify-content:center;text-align:center;background:linear-gradient(#263631,#1d2a26)!important}.preview-v2 .preview-cover.book-persona-wisdom-and-ideas h1{text-align:center;max-width:530px}.preview-v2 .preview-cover.book-persona-wisdom-and-ideas:after{left:50%;bottom:110px;width:72px;height:2px;transform:translateX(-50%);background:#b78d36}
+.preview-v2 .preview-cover.book-persona-folk-story-caravan{padding:115px;background:repeating-linear-gradient(135deg,#173d42 0 46px,#205159 46px 92px)!important;box-shadow:inset 0 0 0 22px #c94732,inset 0 0 0 32px #e0a52f}.preview-v2 .preview-cover.book-persona-folk-story-caravan h1{max-width:520px;font-family:ui-rounded,"Arial Rounded MT Bold",sans-serif}
+.preview-v2 .preview-cover.book-persona-makers-workshop{background:linear-gradient(180deg,#294151 0 70%,#c46834 70% 83%,#d5a735 83%)!important}.preview-v2 .preview-cover.book-persona-makers-workshop:after{left:88px;bottom:205px;width:380px;height:12px;background:#d5a735}
+.preview-v2 .book-persona-discovery-fieldbook.preview-page{background-image:linear-gradient(#2e9b890a 1px,transparent 1px),linear-gradient(90deg,#2e9b890a 1px,transparent 1px);background-size:28px 28px}
+.preview-v2 .book-persona-folk-story-caravan.preview-page{box-shadow:inset 0 0 0 10px var(--persona-accent),inset 0 0 0 15px var(--persona-support)}
+.preview-v2 .book-persona-living-history-chronicle.preview-page{box-shadow:inset 0 0 0 4px #a94d2d33}
+.paper[class*="book-persona-"]{background-color:var(--persona-paper);color:var(--persona-ink)}
+.paper[class*="book-persona-"] header,.paper[class*="book-persona-"] footer{border-color:var(--persona-support);color:var(--persona-accent)}
+.paper[class*="book-persona-"] .book-copy h1,.paper[class*="book-persona-"] .book-copy h2,.paper[class*="book-persona-"] .book-copy h3{color:var(--persona-ink)}
+.paper[class*="book-persona-"] .lesson-promise,.paper[class*="book-persona-"] .learning-goals,.paper[class*="book-persona-"] .takeaway{border-color:var(--persona-accent);background:color-mix(in srgb,var(--persona-wash) 65%,white)}
+.paper.book-persona-discovery-fieldbook{background-image:linear-gradient(#2e9b8908 1px,transparent 1px),linear-gradient(90deg,#2e9b8908 1px,transparent 1px);background-size:28px 28px}
+.paper.book-persona-folk-story-caravan{box-shadow:inset 0 0 0 8px var(--persona-accent),inset 0 0 0 13px var(--persona-support),0 22px 50px #2c312d18}
+.glimpse-concept-map.persona-scene{position:relative;overflow:hidden;background:linear-gradient(180deg,var(--persona-wash) 0 58%,var(--persona-support) 59% 64%,var(--persona-paper) 65%);border-color:var(--persona-accent)}
+.glimpse-concept-map.persona-scene:before{content:"";position:absolute;left:12%;bottom:17%;width:72%;height:26%;border-radius:48% 52% 35% 40%;background:var(--persona-support);opacity:.28}
+.glimpse-concept-map.persona-scene b{z-index:2;display:grid;width:34px;height:34px;place-items:center;border-radius:50%;background:var(--persona-accent);color:white}
+.glimpse-concept-map.persona-scene i{z-index:2;width:22px;height:38px;border:0;border-radius:50% 50% 35% 35%;background:var(--persona-ink);font-size:0}.glimpse-concept-map.persona-scene i:nth-of-type(2){height:46px;background:var(--persona-accent)}.glimpse-concept-map.persona-scene i:nth-of-type(3){background:var(--persona-support)}
+@media(max-width:900px){.persona-cards{grid-template-columns:1fr}.persona-recommendation{align-items:flex-start;flex-direction:column}}

@@ -1,4 +1,5 @@
 import { authorialReaderHtml } from "./child-summary.ts";
+import { bookPersonaPrompt, type BookPersona } from "./book-persona.ts";
 
 export type TeachingVocabulary = { term: string; meaning: string };
 
@@ -500,13 +501,14 @@ PRIVATE CHAPTER MATERIAL:
 ${sourceMaterial}`;
 }
 
-export function efficientChapterPrompt({ title, audience, language, targetPages = 5, sourceMaterial, strictChapterOneTrial = false }: { title: string; audience: string; language: string; targetPages?: number; sourceMaterial: string; strictChapterOneTrial?: boolean }) {
+export function efficientChapterPrompt({ title, audience, language, targetPages = 5, sourceMaterial, strictChapterOneTrial = false, bookPersona }: { title: string; audience: string; language: string; targetPages?: number; sourceMaterial: string; strictChapterOneTrial?: boolean; bookPersona?: BookPersona }) {
   const budget = chapterWordBudget(audience, targetPages);
   const minimumWords = budget.minimum;
   const maximumWords = budget.maximum;
   return `You are both the senior author and final quality editor for one chapter of a children’s textbook for ${audience} in ${language}.
 
 CHAPTER: ${title}
+${bookPersonaPrompt(bookPersona)}
 HARD LENGTH CONTRACT: The complete reader-facing chapter must contain ${minimumWords}–${maximumWords} words across ${targetPages} comfortable illustrated pages. Aim for ${budget.aimMinimum}–${budget.aimMaximum} words and never exceed ${maximumWords} words. A response below ${minimumWords} words is incomplete and will be rejected. Develop explanations instead of padding or repeating ideas.${strictChapterOneTrial ? " This is the measured single-request trial, so obey the length contract exactly." : ""}
 
 Work efficiently in one pass. Silently identify the central question, choose only 4–6 essential ideas, arrange them in prerequisite order, verify every factual claim against the private chapter material, write the complete lesson, and quality-review it before returning JSON. Do not output your hidden plan.
@@ -532,13 +534,14 @@ PRIVATE CHAPTER MATERIAL:
 ${sourceMaterial}`;
 }
 
-export function feedbackRevisionPrompt({ title, audience, language, targetPages, sourceMaterial, draft, failures, attempt }: { title: string; audience: string; language: string; targetPages: number; sourceMaterial: string; draft: TeachingChapter; failures: string[]; attempt: 2 | 3 }) {
+export function feedbackRevisionPrompt({ title, audience, language, targetPages, sourceMaterial, draft, failures, attempt, bookPersona }: { title: string; audience: string; language: string; targetPages: number; sourceMaterial: string; draft: TeachingChapter; failures: string[]; attempt: 2 | 3; bookPersona?: BookPersona }) {
   const budget = chapterWordBudget(audience, targetPages);
   return `You are performing targeted quality pass ${attempt} of 3 for a publishable children's textbook chapter. Preserve every sound part of the draft. Change only what the local evaluator identified, but return one complete corrected chapter object so the website can validate it safely.
 
 CHAPTER: ${title}
 READER: ${audience}
 LANGUAGE: ${language}
+${bookPersonaPrompt(bookPersona)}
 LENGTH: ${budget.minimum}–${budget.maximum} words; aim for ${budget.aimMinimum}–${budget.aimMaximum}.
 
 EXACT FEEDBACK FROM THE PREVIOUS PASS:

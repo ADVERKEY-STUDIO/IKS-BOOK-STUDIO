@@ -7,6 +7,7 @@ import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Para
 import { authorialReaderHtml, generationProfileKey } from "../lib/child-summary";
 import { allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET, recommendedAdaptationPages } from "../lib/adaptation-pages";
 import { efficientChapterPrompt, evaluateChapterOneGate, evaluateTeachingChapter, feedbackRevisionPrompt, fitTeachingChapterLocally, localPedagogyScores, normalizeTeachingChapter, renderTeachingChapter, type ChapterOneGate, type PedagogyQuality, type PedagogyScores, type TeachingChapter } from "../lib/pedagogy";
+import type { BookPersona } from "../lib/book-persona";
 
 interface Env {
   ASSETS: Fetcher;
@@ -59,6 +60,7 @@ type DraftProjectInput = {
   language?: string;
   adaptation?: string;
   learningFeatures?: string[];
+  bookPersona?: BookPersona;
   aesthetic?: string;
   illustrationStyle?: string;
   imageFrequency?: string;
@@ -563,7 +565,7 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
   const language = project.language || "English";
   const initial = await openRouterStructured<{ chapter: TeachingChapter }>(
     env,
-    efficientChapterPrompt({ title: chapter.title, audience, language, targetPages: chapter.pages, sourceMaterial }),
+    efficientChapterPrompt({ title: chapter.title, audience, language, targetPages: chapter.pages, sourceMaterial, bookPersona: project.bookPersona }),
     2800,
   );
   let draft = normalizeTeachingChapter(initial.data.chapter, chapter.title);
@@ -592,6 +594,7 @@ async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: Dra
         draft,
         failures: meaningfulFailures,
         attempt,
+        bookPersona: project.bookPersona,
       }), attempt === 2 ? 2400 : 2000);
     } catch (error) {
       if (error instanceof TeachingEngineError) {
