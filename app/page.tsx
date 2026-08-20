@@ -145,6 +145,7 @@ type DesignerPageRevision = {
   html: string;
   intentionalBlank: boolean;
   deleted: boolean;
+  layoutLocked: boolean;
   backgroundColor: string;
   backgroundImageUrl?: string;
   backgroundImageKey?: string;
@@ -2727,7 +2728,7 @@ function designerBasePages(project: Project): DesignerBasePage[] {
 }
 
 function defaultDesignerRevision(html = ""): DesignerPageRevision {
-  return { html, intentionalBlank: false, deleted: false, backgroundColor: "#fffdf8", watermarkText: "", watermarkOpacity: .12, watermarkRotation: -25, contentVisible: true, watermarkVisible: true, fontFamily: "Georgia, serif", fontSize: 15, textColor: "#243b34", lineHeight: 1.55, letterSpacing: 0, paragraphSpacing: 11, columns: 1, columnGap: 28, pagePadding: 60, borderStyle: "none", borderColor: "#b4863e", borderWidth: 2, borderInset: 10, borderRadius: 0, backgroundSize: "cover", backgroundPosition: "center", backgroundOpacity: 1, watermarkRepeat: false, watermarkX: 50, watermarkY: 50, savedAt: new Date().toISOString() };
+  return { html, intentionalBlank: false, deleted: false, layoutLocked: false, backgroundColor: "#fffdf8", watermarkText: "", watermarkOpacity: .12, watermarkRotation: -25, contentVisible: true, watermarkVisible: true, fontFamily: "Georgia, serif", fontSize: 15, textColor: "#243b34", lineHeight: 1.55, letterSpacing: 0, paragraphSpacing: 11, columns: 1, columnGap: 28, pagePadding: 60, borderStyle: "none", borderColor: "#b4863e", borderWidth: 2, borderInset: 10, borderRadius: 0, backgroundSize: "cover", backgroundPosition: "center", backgroundOpacity: 1, watermarkRepeat: false, watermarkX: 50, watermarkY: 50, savedAt: new Date().toISOString() };
 }
 
 function hydrateDesignerRevision(revision: Partial<DesignerPageRevision> | undefined, html = ""): DesignerPageRevision {
@@ -2742,6 +2743,34 @@ const designerStyleKeys: (keyof DesignerPageRevision)[] = ["backgroundColor", "b
 
 function designerStyleFrom(revision: DesignerPageRevision) {
   return Object.fromEntries(designerStyleKeys.map((key) => [key, revision[key]])) as Partial<DesignerPageRevision>;
+}
+
+function designerFlowBody(html: string) {
+  const previewBody = html.match(/<div class=["']preview-body["'][^>]*>([\s\S]*?)<\/div>/i)?.[1];
+  const figures = html.match(/<figure\b[^>]*>[\s\S]*?<\/figure>/gi) ?? [];
+  if (previewBody !== undefined) return `${previewBody}${figures.join("")}`;
+  return html
+    .replace(/<header\b[^>]*>[\s\S]*?<\/header>/gi, "")
+    .replace(/<footer\b[^>]*>[\s\S]*?<\/footer>/gi, "")
+    .replace(/<p class=["']continued-title["'][^>]*>[\s\S]*?<\/p>/gi, "")
+    .replace(/<h2\b[^>]*>[\s\S]*?<\/h2>/i, "")
+    .trim();
+}
+
+function designerChapterPageHtml(project: Project, chapter: Chapter, body: string, pageIndex: number, pageCount: number) {
+  return `<header><span>CHAPTER ${chapter.id}</span><span>PAGE ${pageIndex + 1} OF ${pageCount}</span></header>${pageIndex === 0 ? `<h2>${escapeHtml(chapter.title)}</h2>` : `<p class="continued-title">${escapeHtml(chapter.title)} · continued</p>`}<div class="preview-body">${body}</div><footer>${escapeHtml(project.title)}</footer>`;
+}
+
+function designerPageFill(html: string, audience: string, firstPage: boolean) {
+  const age = childAgeBand(audience);
+  const capacity = (age === "7-9" ? 2550 : age === "13-15" ? 3000 : 2750) * (firstPage ? .78 : 1);
+  const text = readerTextLength(designerFlowBody(html));
+  const imageWeight = (html.match(/<img\b/gi) ?? []).length * 850;
+  const ratio = Math.max(0, Math.round(((text + imageWeight) / capacity) * 100));
+  if (ratio > 104) return { ratio, label: "Overflowing", tone: "overflow" };
+  if (ratio >= 72) return { ratio, label: "Balanced", tone: "balanced" };
+  if (ratio >= 52) return { ratio, label: "Room available", tone: "room" };
+  return { ratio, label: "Too empty", tone: "empty" };
 }
 
 function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Project; onClose: () => void; onPreview: () => void; onCommit: (next: Project) => Promise<void> }) {
@@ -2762,32 +2791,54 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   const [undoStack, setUndoStack] = useState<DesignerPageRevision[]>([]);
   const [redoStack, setRedoStack] = useState<DesignerPageRevision[]>([]);
   const [issues, setIssues] = useState<string[]>([]);
+  const [bookIssues, setBookIssues] = useState<{ slotId: string; label: string; issue: string }[]>([]);
   const [pendingBackground, setPendingBackground] = useState<{ key: string; url: string; fileName: string } | null>(null);
   const editor = useRef<HTMLDivElement>(null);
+  const bookEditors = useRef(new Map<string, HTMLDivElement>());
+  const liveBookHtml = useRef<Record<string, string>>({});
+  const liveBookDrafts = useRef<Record<string, DesignerPageRevision>>({});
+  const [dirtyPages, setDirtyPages] = useState<string[]>([]);
   const selectedNode = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const nextSaved = savedPages.find((page) => page.slotId === selected?.slotId);
-    setDraft(hydrateDesignerRevision(nextSaved, selected?.html));
+    const next = hydrateDesignerRevision(nextSaved, selected?.html);
+    const liveDraft = liveBookDrafts.current[selected?.slotId ?? ""];
+    setDraft(liveDraft ?? { ...next, html: liveBookHtml.current[selected?.slotId ?? ""] ?? next.html });
     setUndoStack([]); setRedoStack([]); setIssues([]); setPendingBackground(null); setSelectedObject("page"); selectedNode.current = null;
   }, [selectedId]);
 
   const currentSnapshot = () => ({ ...draft, html: editor.current?.innerHTML ?? draft.html });
+  const revisionFor = (page: (typeof allPages)[number]) => {
+    const stored = savedPages.find((item) => item.slotId === page.slotId);
+    const base = liveBookDrafts.current[page.slotId] ?? hydrateDesignerRevision(stored, page.html);
+    const html = liveBookHtml.current[page.slotId] ?? base.html;
+    return page.slotId === selectedId ? { ...draft, html } : { ...base, html };
+  };
+  const rememberLiveHtml = (slotId: string, html: string) => {
+    liveBookHtml.current[slotId] = html;
+    setDirtyPages((current) => current.includes(slotId) ? current : [...current, slotId]);
+  };
   const changeDraft = (patch: Partial<DesignerPageRevision>, remember = true) => {
     if (remember) setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]);
     setRedoStack([]);
-    setDraft((current) => ({ ...current, ...patch }));
+    setDraft((current) => {
+      const next = { ...current, ...patch };
+      liveBookDrafts.current[selectedId] = next;
+      return next;
+    });
+    setDirtyPages((current) => current.includes(selectedId) ? current : [...current, selectedId]);
   };
   const undo = () => {
     const previous = undoStack.at(-1); if (!previous) return;
     setRedoStack((stack) => [...stack, { ...draft, html: editor.current?.innerHTML ?? draft.html }]);
-    setUndoStack((stack) => stack.slice(0, -1)); setDraft(previous);
+    setUndoStack((stack) => stack.slice(0, -1)); liveBookDrafts.current[selectedId] = previous; setDraft(previous);
   };
   const redo = () => {
     const next = redoStack.at(-1); if (!next) return;
-    setUndoStack((stack) => [...stack, draft]); setRedoStack((stack) => stack.slice(0, -1)); setDraft(next);
+    setUndoStack((stack) => [...stack, draft]); setRedoStack((stack) => stack.slice(0, -1)); liveBookDrafts.current[selectedId] = next; setDraft(next);
   };
-  const command = (name: string, value?: string) => { setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]); setRedoStack([]); editor.current?.focus(); document.execCommand(name, false, value); setMessage("Text formatting changed. Save the page when ready."); };
+  const command = (name: string, value?: string) => { setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]); setRedoStack([]); editor.current?.focus(); document.execCommand(name, false, value); if (editor.current) rememberLiveHtml(selectedId, editor.current.innerHTML); setMessage("Text formatting changed. Save the whole book when ready."); };
   const uploadAsset = async (file: File) => {
     const form = new FormData(); form.set("file", file); form.set("projectId", project.id);
     const response = await fetch("/api/image", { method: "POST", headers: ownerHeaders(), body: form });
@@ -2804,7 +2855,80 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
       const revision = { ...revisionToSave, html, savedAt: new Date().toISOString() };
       const replacement = makeOverride(selected, revision, saved);
       const next = { ...project, designerPages: [...savedPages.filter((page) => page.slotId !== selected.slotId), replacement], designerPageOrder: order };
-      await onCommit(next); setDraft(replacement); setUndoStack([]); setRedoStack([]); setMessage("Saved. Preview and PDF now use this edition.");
+      await onCommit(next); liveBookDrafts.current[selected.slotId] = replacement; setDraft(replacement); setUndoStack([]); setRedoStack([]); setMessage("Saved. Preview and PDF now use this edition.");
+    } finally { setBusy(false); }
+  };
+  const saveWholeBook = async () => {
+    setBusy(true);
+    try {
+      const replacements = new Map(savedPages.map((page) => [page.slotId, page]));
+      const changed = new Set([...dirtyPages, selectedId]);
+      orderedPages.forEach((page) => {
+        if (!changed.has(page.slotId)) return;
+        const existing = replacements.get(page.slotId);
+        const revision = { ...revisionFor(page), html: bookEditors.current.get(page.slotId)?.innerHTML ?? revisionFor(page).html, savedAt: new Date().toISOString() };
+        replacements.set(page.slotId, makeOverride(page, revision, existing));
+      });
+      const next = { ...project, designerPages: [...replacements.values()], designerPageOrder: order };
+      await onCommit(next);
+      setDirtyPages([]);
+      setUndoStack([]); setRedoStack([]);
+      setMessage(`Whole book saved. Preview and PDF now use all ${orderedPages.length} pages.`);
+    } finally { setBusy(false); }
+  };
+
+  const balanceLayout = async (scope: "chapter" | "book") => {
+    const targetChapterIds = scope === "book" ? project.chapters.map((chapter) => chapter.id) : selected.chapterId ? [selected.chapterId] : [];
+    if (!targetChapterIds.length) { setMessage("Choose a chapter page before balancing this chapter."); return; }
+    setBusy(true);
+    try {
+      const replacements = new Map(savedPages.map((page) => [page.slotId, page]));
+      let nextOrder = [...order];
+      let balanced = 0;
+      let locked = 0;
+      for (const chapterId of targetChapterIds) {
+        const chapter = project.chapters.find((item) => item.id === chapterId);
+        const chapterPages = orderedPages.filter((page) => page.chapterId === chapterId && page.kind !== "custom" || page.chapterId === chapterId && page.kind === "custom");
+        if (!chapter || !chapterPages.length) continue;
+        const revisions = chapterPages.map((page) => ({ page, revision: revisionFor(page) })).filter(({ revision }) => !revision.deleted && !revision.intentionalBlank);
+        if (revisions.some(({ revision }) => revision.layoutLocked)) { locked += 1; continue; }
+        const combined = revisions.map(({ page, revision }) => designerFlowBody(bookEditors.current.get(page.slotId)?.innerHTML ?? revision.html)).join("");
+        const figures = combined.match(/<figure\b[^>]*>[\s\S]*?<\/figure>/gi) ?? [];
+        const flowingText = combined.replace(/<figure\b[^>]*>[\s\S]*?<\/figure>/gi, "");
+        let bodies = paginateReaderHtml(flowingText, project.audience);
+        if (figures.length) {
+          const last = bodies.at(-1) ?? "";
+          if (readerTextLength(last) < 1450) bodies[bodies.length - 1] = `${last}${figures.join("")}`;
+          else bodies.push(figures.join(""));
+        }
+        const existingIds = chapterPages.map((page) => page.slotId);
+        const insertion = Math.max(0, Math.min(...existingIds.map((slotId) => nextOrder.indexOf(slotId)).filter((index) => index >= 0)));
+        const firstStyle = revisions[0]?.revision ?? defaultDesignerRevision();
+        const nextIds: string[] = [];
+        bodies.forEach((body, pageIndex) => {
+          const existingDescriptor = chapterPages[pageIndex];
+          const slotId = existingDescriptor?.slotId ?? `custom-flow-${chapterId}-${pageIndex + 1}-${Date.now().toString(36)}`;
+          const descriptor = existingDescriptor ?? { slotId, label: `Chapter ${chapterId} · page ${pageIndex + 1}`, kind: "custom" as const, chapterId, pageIndex, html: "" };
+          const existing = replacements.get(slotId);
+          const revision = { ...firstStyle, deleted: false, intentionalBlank: false, layoutLocked: false, html: designerChapterPageHtml(project, chapter, body, pageIndex, bodies.length), savedAt: new Date().toISOString() };
+          replacements.set(slotId, makeOverride(descriptor, revision, existing));
+          liveBookHtml.current[slotId] = revision.html;
+          nextIds.push(slotId);
+        });
+        chapterPages.slice(bodies.length).forEach((page) => {
+          const existing = replacements.get(page.slotId);
+          replacements.set(page.slotId, makeOverride(page, { ...revisionFor(page), deleted: true, savedAt: new Date().toISOString() }, existing));
+        });
+        nextOrder = nextOrder.filter((slotId) => !existingIds.includes(slotId));
+        nextOrder.splice(insertion, 0, ...nextIds);
+        balanced += 1;
+      }
+      const next = { ...project, designerPages: [...replacements.values()], designerPageOrder: nextOrder };
+      await onCommit(next);
+      setDirtyPages([]);
+      setMessage(`${balanced} chapter${balanced === 1 ? "" : "s"} balanced locally.${locked ? ` ${locked} locked chapter${locked === 1 ? " was" : "s were"} preserved.` : ""} Empty space was reduced without using AI tokens.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? `Layout balancing failed: ${error.message}` : "Layout balancing failed.");
     } finally { setBusy(false); }
   };
   const uploadBackground = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -2846,7 +2970,7 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
         const next = { ...project, designerPages: [...replacements.values()], designerPageOrder: order };
         await onCommit(next);
         const selectedReplacement = replacements.get(selected.slotId);
-        if (selectedReplacement) setDraft(selectedReplacement);
+        if (selectedReplacement) { liveBookDrafts.current[selected.slotId] = selectedReplacement; setDraft(selectedReplacement); }
         setUndoStack([]); setRedoStack([]);
         setMessage(`Background applied to all ${allPages.length} pages and saved.`);
       }
@@ -2899,11 +3023,12 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
     if (node) { selectedNode.current = node; node.classList.add("designer-object-selected"); const kind = node.tagName === "IMG" ? "image" : "text box"; setSelectedObject(kind); setPanel(kind === "image" ? "image" : "text"); }
     else { selectedNode.current = null; setSelectedObject("page"); }
   };
-  const mutateObject = (property: string, value: string) => { const node = selectedNode.current; if (!node || node.dataset.designerLocked === "true") return; setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]); setRedoStack([]); (node.style as unknown as Record<string, string>)[property] = value; setMessage(`${selectedObject} updated.`); };
-  const moveObject = (x: number, y: number) => { const node = selectedNode.current; if (!node || node.dataset.designerLocked === "true") return; node.style.position = "relative"; node.style.left = `${(parseFloat(node.style.left) || 0) + x}px`; node.style.top = `${(parseFloat(node.style.top) || 0) + y}px`; };
-  const duplicateObject = () => { const node = selectedNode.current; if (!node) return; const clone = node.cloneNode(true) as HTMLElement; clone.classList.remove("designer-object-selected"); node.after(clone); };
-  const deleteObject = () => { selectedNode.current?.remove(); selectedNode.current = null; setSelectedObject("page"); };
-  const addTextBox = () => { editor.current?.insertAdjacentHTML("beforeend", '<div class="designer-free-text" style="position:relative;padding:12px;border:1px solid #d7cbb8;min-height:48px">Edit this text box</div>'); setMessage("Text box added. Select it to move, resize or style it."); };
+  const mutateObject = (property: string, value: string) => { const node = selectedNode.current; if (!node || node.dataset.designerLocked === "true") return; setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]); setRedoStack([]); (node.style as unknown as Record<string, string>)[property] = value; if (editor.current) rememberLiveHtml(selectedId, editor.current.innerHTML); setMessage(`${selectedObject} updated.`); };
+  const captureSelectedPageHtml = () => { if (editor.current) rememberLiveHtml(selectedId, editor.current.innerHTML); };
+  const moveObject = (x: number, y: number) => { const node = selectedNode.current; if (!node || node.dataset.designerLocked === "true") return; node.style.position = "relative"; node.style.left = `${(parseFloat(node.style.left) || 0) + x}px`; node.style.top = `${(parseFloat(node.style.top) || 0) + y}px`; captureSelectedPageHtml(); };
+  const duplicateObject = () => { const node = selectedNode.current; if (!node) return; const clone = node.cloneNode(true) as HTMLElement; clone.classList.remove("designer-object-selected"); node.after(clone); captureSelectedPageHtml(); };
+  const deleteObject = () => { selectedNode.current?.remove(); selectedNode.current = null; setSelectedObject("page"); captureSelectedPageHtml(); };
+  const addTextBox = () => { editor.current?.insertAdjacentHTML("beforeend", '<div class="designer-free-text" style="position:relative;padding:12px;border:1px solid #d7cbb8;min-height:48px">Edit this text box</div>'); captureSelectedPageHtml(); setMessage("Text box added. Select it to move, resize or style it."); };
   const runPreflight = () => {
     const found: string[] = []; const root = editor.current;
     if (draft.deleted) found.push("This page is removed from the final book.");
@@ -2914,23 +3039,56 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
     root?.querySelectorAll<HTMLElement>("*").forEach((node) => { const box = node.getBoundingClientRect(); const page = root.getBoundingClientRect(); if (box.right > page.right + 2 || box.left < page.left - 2) found.push("An object crosses the print-safe page boundary."); });
     setIssues([...new Set(found)]); setPanel("preflight"); setMessage(found.length ? `${found.length} preflight item${found.length === 1 ? "" : "s"} found.` : "Preflight passed for this page.");
   };
+  const runBookPreflight = () => {
+    const found: { slotId: string; label: string; issue: string }[] = [];
+    orderedPages.forEach((page) => {
+      const revision = revisionFor(page);
+      if (revision.deleted || revision.intentionalBlank || page.kind !== "chapter") return;
+      const html = bookEditors.current.get(page.slotId)?.innerHTML ?? revision.html;
+      const fill = designerPageFill(html, project.audience, page.pageIndex === 0);
+      if (fill.tone === "empty") found.push({ slotId: page.slotId, label: page.label, issue: `Only ${fill.ratio}% filled — balance this chapter.` });
+      if (fill.tone === "overflow") found.push({ slotId: page.slotId, label: page.label, issue: `${fill.ratio}% filled — content may be clipped.` });
+      if (/<h[23][^>]*>[^<]*<\/h[23]>\s*$/i.test(designerFlowBody(html))) found.push({ slotId: page.slotId, label: page.label, issue: "Heading is separated from its paragraph." });
+    });
+    setBookIssues(found); setPanel("preflight");
+    setMessage(found.length ? `${found.length} whole-book layout issue${found.length === 1 ? "" : "s"} found.` : "Whole-book preflight passed. No accidental empty or overflowing pages found.");
+  };
+  const selectAndReveal = (slotId: string) => {
+    setSelectedId(slotId);
+    requestAnimationFrame(() => document.getElementById(`designer-flow-${slotId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  };
+  const jumpToChapter = (chapterId: number) => {
+    const page = orderedPages.find((item) => item.chapterId === chapterId && !revisionFor(item).deleted);
+    if (page) selectAndReveal(page.slotId);
+  };
+  const pageStyleFor = (revision: DesignerPageRevision) => ({
+    fontFamily: revision.fontFamily,
+    fontSize: `${revision.fontSize}px`,
+    color: revision.textColor,
+    lineHeight: revision.lineHeight,
+    letterSpacing: `${revision.letterSpacing}px`,
+    columnCount: revision.columns,
+    columnGap: `${revision.columnGap}px`,
+    padding: `${revision.pagePadding}px`,
+    "--designer-paragraph-space": `${revision.paragraphSpacing}px`,
+  }) as CSSProperties;
   const backgroundStyle = { backgroundImage: draft.backgroundImageUrl ? `url(${draft.backgroundImageUrl})` : undefined, backgroundSize: draft.backgroundSize === "repeat" ? "auto" : draft.backgroundSize, backgroundRepeat: draft.backgroundSize === "repeat" ? "repeat" : "no-repeat", backgroundPosition: draft.backgroundPosition, opacity: draft.backgroundOpacity };
   const contentStyle = { fontFamily: draft.fontFamily, fontSize: `${draft.fontSize}px`, color: draft.textColor, lineHeight: draft.lineHeight, letterSpacing: `${draft.letterSpacing}px`, columnCount: draft.columns, columnGap: `${draft.columnGap}px`, padding: `${draft.pagePadding}px`, "--designer-paragraph-space": `${draft.paragraphSpacing}px` } as CSSProperties;
   const borderStyle = draft.borderStyle === "none" ? undefined : { inset: `${draft.borderInset}px`, border: `${draft.borderWidth}px ${draft.borderStyle} ${draft.borderColor}`, borderRadius: `${draft.borderRadius}px` };
   if (!selected) return null;
   return <div className="modal-backdrop designer-backdrop"><section className="designer-studio designer-studio-pro" role="dialog" aria-modal="true" aria-label="Designer Studio">
-    <header><div><p className="eyebrow">FINAL PRODUCTION</p><h2>Designer Studio</h2><span>Typography, objects, imagery and print controls—without changing source writing or AI history.</span></div><div><button className="secondary" onClick={runPreflight}>Run preflight</button><button className="secondary" onClick={onPreview}>Preview book</button><button className="primary" onClick={() => void saveRevision()} disabled={busy}>{busy ? "Saving…" : "Save page"}</button><button className="designer-close" onClick={onClose} aria-label="Close Designer Studio">×</button></div></header>
-    <div className="designer-status"><span>◆</span><b>{message}</b><i>{selected.label} · {selectedObject}</i></div>
-    <div className="designer-workspace"><aside className="designer-pages"><div className="designer-page-actions"><button onClick={() => void addBlankPage()}>＋ Blank</button><button onClick={() => void duplicatePage()}>Duplicate</button></div>{orderedPages.map((page, index) => { const state = savedPages.find((item) => item.slotId === page.slotId); return <button key={page.slotId} className={page.slotId === selectedId ? "active" : ""} onClick={() => setSelectedId(page.slotId)}><span>{index + 1}</span><div><b>{page.label}</b><small>{state?.deleted ? "Removed" : state?.intentionalBlank ? "Intentional blank" : state ? "Designer edited" : "Studio page"}</small></div></button>; })}</aside>
-    <main className="designer-stage"><nav className="designer-toolbar"><button onClick={undo} disabled={!undoStack.length} title="Undo">↶</button><button onClick={redo} disabled={!redoStack.length} title="Redo">↷</button><select aria-label="Selected text font" defaultValue="Georgia" onChange={(event) => command("fontName", event.target.value)}><option>Georgia</option><option>Arial</option><option>Verdana</option><option>Trebuchet MS</option><option>Times New Roman</option><option>Noto Serif</option><option>Noto Sans Devanagari</option></select><select aria-label="Selected text size" defaultValue="3" onChange={(event) => command("fontSize", event.target.value)}><option value="1">Small</option><option value="3">Body</option><option value="5">Subheading</option><option value="7">Title</option></select><button onClick={() => command("bold")}><b>B</b></button><button onClick={() => command("italic")}><i>I</i></button><button onClick={() => command("underline")}><u>U</u></button><button onClick={() => command("insertUnorderedList")}>• List</button><button onClick={() => command("justifyLeft")}>Left</button><button onClick={() => command("justifyCenter")}>Centre</button><button onClick={() => command("justifyRight")}>Right</button><label title="Text colour"><input type="color" defaultValue="#243b34" onChange={(event) => command("foreColor", event.target.value)}/></label><label title="Highlight"><input type="color" defaultValue="#f6e6ad" onChange={(event) => command("hiliteColor", event.target.value)}/></label><button onClick={addTextBox}>＋ Text box</button></nav>
-      <div className="designer-canvas-wrap"><article className={`designer-canvas-page${draft.intentionalBlank ? " blank" : ""}${draft.deleted ? " deleted" : ""}`} style={{ backgroundColor: draft.backgroundColor }}><div className="designer-background-layer" style={backgroundStyle}/><div className="designer-border-layer" style={borderStyle}/><div className={`designer-watermark-layer${draft.watermarkRepeat ? " repeat" : ""}`} style={{ opacity: draft.watermarkOpacity, left: `${draft.watermarkX}%`, top: `${draft.watermarkY}%`, transform: `translate(-50%,-50%) rotate(${draft.watermarkRotation}deg)`, display: draft.watermarkVisible ? "grid" : "none" }}>{Array.from({ length: draft.watermarkRepeat ? 6 : 1 }, (_, index) => <span key={index}>{draft.watermarkImageUrl && <img src={draft.watermarkImageUrl} alt="Custom watermark"/>}{draft.watermarkText}</span>)}</div>{!draft.intentionalBlank && draft.contentVisible && <div ref={editor} className="designer-editable-content" style={contentStyle} contentEditable suppressContentEditableWarning onClick={selectCanvasObject} dangerouslySetInnerHTML={{ __html: draft.html }}/>} {draft.deleted && <div className="designer-deleted-overlay">REMOVED FROM BOOK</div>}</article>{pendingBackground && <div className="designer-background-choice" role="dialog" aria-modal="true" aria-labelledby="background-choice-title"><img src={pendingBackground.url} alt="Uploaded background preview"/><div><p className="eyebrow">BACKGROUND READY</p><h3 id="background-choice-title">Where should this background be used?</h3><span>{pendingBackground.fileName}</span><div className="designer-background-choice-actions"><button onClick={() => void applyUploadedBackground("page")} disabled={busy}>This page only</button><button className="primary" onClick={() => void applyUploadedBackground("book")} disabled={busy}>All pages</button></div><button className="designer-choice-cancel" onClick={() => { setPendingBackground(null); setMessage("Background choice cancelled. The current design was not changed."); }} disabled={busy}>Cancel</button></div></div>}</div>
+    <header><div><p className="eyebrow">FINAL PRODUCTION</p><h2>Whole-book Designer</h2><span>Edit, balance and inspect the complete book in one continuous workspace.</span></div><div><button className="secondary" onClick={runBookPreflight}>Check whole book</button><button className="secondary" onClick={() => void balanceLayout("book")} disabled={busy}>Balance layout</button><button className="secondary" onClick={onPreview}>Preview book</button><button className="primary" onClick={() => void saveWholeBook()} disabled={busy}>{busy ? "Saving…" : "Save whole book"}</button><button className="designer-close" onClick={onClose} aria-label="Close Designer Studio">×</button></div></header>
+    <div className="designer-status"><span>◆</span><b>{message}</b><i>{dirtyPages.length ? `${dirtyPages.length} unsaved page${dirtyPages.length === 1 ? "" : "s"}` : `${orderedPages.filter((page) => !revisionFor(page).deleted).length} pages`} · {selected.label}</i></div>
+    <div className="designer-workspace designer-book-workspace"><aside className="designer-pages designer-book-nav"><div className="designer-page-actions"><button onClick={() => void addBlankPage()}>＋ Blank page</button><button onClick={() => void duplicatePage()}>Duplicate</button></div><p className="designer-nav-label">BOOK SECTIONS</p>{orderedPages.filter((page) => page.kind === "cover" || page.kind === "contents").map((page) => <button key={page.slotId} className={page.slotId === selectedId ? "active" : ""} onClick={() => selectAndReveal(page.slotId)}><span>{page.kind === "cover" ? "C" : "T"}</span><div><b>{page.label}</b><small>Book matter</small></div></button>)}{project.chapters.map((chapter) => { const pages = orderedPages.filter((page) => page.chapterId === chapter.id && !revisionFor(page).deleted); const hasIssue = pages.some((page) => ["empty", "overflow"].includes(designerPageFill(liveBookHtml.current[page.slotId] ?? revisionFor(page).html, project.audience, page.pageIndex === 0).tone)); return <button key={chapter.id} className={selected.chapterId === chapter.id ? "active" : ""} onClick={() => jumpToChapter(chapter.id)}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small>{pages.length} page{pages.length === 1 ? "" : "s"}{hasIssue ? " · check spacing" : " · balanced"}</small></div></button>; })}{orderedPages.filter((page) => page.kind === "back").map((page) => <button key={page.slotId} className={page.slotId === selectedId ? "active" : ""} onClick={() => selectAndReveal(page.slotId)}><span>B</span><div><b>{page.label}</b><small>Book matter</small></div></button>)}</aside>
+    <main className="designer-stage"><nav className="designer-toolbar designer-book-toolbar"><button onClick={undo} disabled={!undoStack.length} title="Undo selected page">↶</button><button onClick={redo} disabled={!redoStack.length} title="Redo selected page">↷</button><select aria-label="Selected text font" defaultValue="Georgia" onChange={(event) => command("fontName", event.target.value)}><option>Georgia</option><option>Arial</option><option>Verdana</option><option>Trebuchet MS</option><option>Times New Roman</option><option>Noto Serif</option><option>Noto Sans Devanagari</option></select><select aria-label="Selected text size" defaultValue="3" onChange={(event) => command("fontSize", event.target.value)}><option value="1">Small</option><option value="3">Body</option><option value="5">Subheading</option><option value="7">Title</option></select><button onClick={() => command("bold")}><b>B</b></button><button onClick={() => command("italic")}><i>I</i></button><button onClick={() => command("underline")}><u>U</u></button><button onClick={() => command("insertUnorderedList")}>• List</button><button onClick={() => command("justifyLeft")}>Left</button><button onClick={() => command("justifyCenter")}>Centre</button><button onClick={() => command("justifyRight")}>Right</button><label title="Text colour"><input type="color" defaultValue="#243b34" onChange={(event) => command("foreColor", event.target.value)}/></label><label title="Highlight"><input type="color" defaultValue="#f6e6ad" onChange={(event) => command("hiliteColor", event.target.value)}/></label><button onClick={addTextBox}>＋ Text box</button><button className="balance-chapter-button" onClick={() => void balanceLayout("chapter")} disabled={!selected.chapterId || busy}>Balance this chapter</button></nav>
+      <div className="designer-canvas-wrap designer-whole-book-canvas" aria-label="Editable whole book">{orderedPages.filter((page) => !revisionFor(page).deleted).map((page, index) => { const revision = revisionFor(page); const fill = page.kind === "chapter" ? designerPageFill(liveBookHtml.current[page.slotId] ?? revision.html, project.audience, page.pageIndex === 0) : { ratio: 100, label: "Designed page", tone: "balanced" }; const pageBackground = { backgroundImage: revision.backgroundImageUrl ? `url(${revision.backgroundImageUrl})` : undefined, backgroundSize: revision.backgroundSize === "repeat" ? "auto" : revision.backgroundSize, backgroundRepeat: revision.backgroundSize === "repeat" ? "repeat" : "no-repeat", backgroundPosition: revision.backgroundPosition, opacity: revision.backgroundOpacity }; const pageBorder = revision.borderStyle === "none" ? undefined : { inset: `${revision.borderInset}px`, border: `${revision.borderWidth}px ${revision.borderStyle} ${revision.borderColor}`, borderRadius: `${revision.borderRadius}px` }; return <section className={`designer-flow-page${page.slotId === selectedId ? " selected" : ""}`} id={`designer-flow-${page.slotId}`} key={page.slotId}><div className="designer-flow-page-meta"><span>PAGE {index + 1}</span><b>{page.label}</b><button className={`page-fill-badge ${fill.tone}`} onClick={() => { setSelectedId(page.slotId); setPanel("preflight"); }}>{fill.label} · {fill.ratio}%</button></div><article className={`designer-canvas-page${revision.intentionalBlank ? " blank" : ""}`} style={{ backgroundColor: revision.backgroundColor }} onMouseDown={() => setSelectedId(page.slotId)}><div className="designer-background-layer" style={pageBackground}/><div className="designer-border-layer" style={pageBorder}/><div className={`designer-watermark-layer${revision.watermarkRepeat ? " repeat" : ""}`} style={{ opacity: revision.watermarkOpacity, left: `${revision.watermarkX}%`, top: `${revision.watermarkY}%`, transform: `translate(-50%,-50%) rotate(${revision.watermarkRotation}deg)`, display: revision.watermarkVisible ? "grid" : "none" }}>{Array.from({ length: revision.watermarkRepeat ? 6 : 1 }, (_, watermarkIndex) => <span key={watermarkIndex}>{revision.watermarkImageUrl && <img src={revision.watermarkImageUrl} alt="Custom watermark"/>}{revision.watermarkText}</span>)}</div>{!revision.intentionalBlank && revision.contentVisible && <div ref={(node) => { if (node) { bookEditors.current.set(page.slotId, node); if (page.slotId === selectedId) editor.current = node; } else bookEditors.current.delete(page.slotId); }} className="designer-editable-content" style={pageStyleFor(revision)} contentEditable suppressContentEditableWarning onFocus={() => setSelectedId(page.slotId)} onInput={(event) => rememberLiveHtml(page.slotId, event.currentTarget.innerHTML)} onClick={selectCanvasObject} dangerouslySetInnerHTML={{ __html: liveBookHtml.current[page.slotId] ?? revision.html }}/>}</article>{revision.intentionalBlank && <div className="intentional-blank-label">INTENTIONAL BLANK PAGE</div>}</section>; })}{pendingBackground && <div className="designer-background-choice" role="dialog" aria-modal="true" aria-labelledby="background-choice-title"><img src={pendingBackground.url} alt="Uploaded background preview"/><div><p className="eyebrow">BACKGROUND READY</p><h3 id="background-choice-title">Where should this background be used?</h3><span>{pendingBackground.fileName}</span><div className="designer-background-choice-actions"><button onClick={() => void applyUploadedBackground("page")} disabled={busy}>This page only</button><button className="primary" onClick={() => void applyUploadedBackground("book")} disabled={busy}>All pages</button></div><button className="designer-choice-cancel" onClick={() => { setPendingBackground(null); setMessage("Background choice cancelled. The current design was not changed."); }} disabled={busy}>Cancel</button></div></div>}</div>
     </main>
     <aside className="designer-controls designer-inspector"><nav>{(["page","text","image","layers","preflight"] as const).map((name) => <button key={name} className={panel === name ? "active" : ""} onClick={() => setPanel(name)}>{name}</button>)}</nav>
-      {panel === "page" && <><section><h3>Page structure</h3><label className="designer-check"><input type="checkbox" checked={draft.intentionalBlank} onChange={(event) => changeDraft({ intentionalBlank: event.target.checked })}/> Intentional blank</label><label className="designer-check"><input type="checkbox" checked={draft.deleted} onChange={(event) => changeDraft({ deleted: event.target.checked })}/> Remove from final book</label><div className="designer-row"><button onClick={() => void movePage(-1)}>Move up</button><button onClick={() => void movePage(1)}>Move down</button></div></section><section><h3>Page layout</h3><label>Margins <span>{draft.pagePadding}px</span><input type="range" min="28" max="100" value={draft.pagePadding} onChange={(event) => changeDraft({ pagePadding: Number(event.target.value) })}/></label><label>Columns<select value={draft.columns} onChange={(event) => changeDraft({ columns: Number(event.target.value) })}><option value="1">One</option><option value="2">Two</option></select></label><label>Column gap <span>{draft.columnGap}px</span><input type="range" min="12" max="60" value={draft.columnGap} onChange={(event) => changeDraft({ columnGap: Number(event.target.value) })}/></label></section><section><h3>Page border</h3><label>Style<select value={draft.borderStyle} onChange={(event) => changeDraft({ borderStyle: event.target.value as DesignerPageRevision["borderStyle"] })}><option value="none">None</option><option value="solid">Single</option><option value="double">Double</option><option value="dashed">Decorative dashed</option></select></label><div className="designer-row"><label>Colour<input type="color" value={draft.borderColor} onChange={(event) => changeDraft({ borderColor: event.target.value })}/></label><label>Width<input type="number" min="1" max="12" value={draft.borderWidth} onChange={(event) => changeDraft({ borderWidth: Number(event.target.value) })}/></label></div><label>Inset <span>{draft.borderInset}px</span><input type="range" min="0" max="50" value={draft.borderInset} onChange={(event) => changeDraft({ borderInset: Number(event.target.value) })}/></label><label>Corner radius <span>{draft.borderRadius}px</span><input type="range" min="0" max="60" value={draft.borderRadius} onChange={(event) => changeDraft({ borderRadius: Number(event.target.value) })}/></label></section><section><h3>Background</h3><label>Colour<input type="color" value={draft.backgroundColor} onChange={(event) => changeDraft({ backgroundColor: event.target.value })}/></label><label className="designer-upload">{busy ? "Uploading background…" : "Upload background"}<input type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={(event) => void uploadBackground(event)}/></label><p className="designer-help">After upload, choose whether to use the background on this page only or throughout the whole book.</p><label>Fit<select value={draft.backgroundSize} onChange={(event) => changeDraft({ backgroundSize: event.target.value as DesignerPageRevision["backgroundSize"] })}><option value="cover">Cover</option><option value="contain">Contain</option><option value="auto">Original size</option><option value="repeat">Tile</option></select></label><label>Opacity <span>{Math.round(draft.backgroundOpacity * 100)}%</span><input type="range" min="0" max="1" step=".05" value={draft.backgroundOpacity} onChange={(event) => changeDraft({ backgroundOpacity: Number(event.target.value) })}/></label>{draft.backgroundImageUrl && <button onClick={() => changeDraft({ backgroundImageKey: undefined, backgroundImageUrl: undefined })}>Remove background</button>}</section></>}
+      {panel === "page" && <><section><h3>Page structure</h3><label className="designer-check"><input type="checkbox" checked={draft.intentionalBlank} onChange={(event) => changeDraft({ intentionalBlank: event.target.checked })}/> Intentional blank</label><label className="designer-check"><input type="checkbox" checked={draft.layoutLocked} onChange={(event) => changeDraft({ layoutLocked: event.target.checked })}/> Lock this page during reflow</label><label className="designer-check"><input type="checkbox" checked={draft.deleted} onChange={(event) => changeDraft({ deleted: event.target.checked })}/> Remove from final book</label><div className="designer-row"><button onClick={() => void movePage(-1)}>Move up</button><button onClick={() => void movePage(1)}>Move down</button></div>{selected.chapterId && <button className="primary" onClick={() => void balanceLayout("chapter")} disabled={busy || draft.layoutLocked}>Balance this chapter</button>}</section><section><h3>Page layout</h3><label>Margins <span>{draft.pagePadding}px</span><input type="range" min="28" max="100" value={draft.pagePadding} onChange={(event) => changeDraft({ pagePadding: Number(event.target.value) })}/></label><label>Columns<select value={draft.columns} onChange={(event) => changeDraft({ columns: Number(event.target.value) })}><option value="1">One</option><option value="2">Two</option></select></label><label>Column gap <span>{draft.columnGap}px</span><input type="range" min="12" max="60" value={draft.columnGap} onChange={(event) => changeDraft({ columnGap: Number(event.target.value) })}/></label></section><section><h3>Page border</h3><label>Style<select value={draft.borderStyle} onChange={(event) => changeDraft({ borderStyle: event.target.value as DesignerPageRevision["borderStyle"] })}><option value="none">None</option><option value="solid">Single</option><option value="double">Double</option><option value="dashed">Decorative dashed</option></select></label><div className="designer-row"><label>Colour<input type="color" value={draft.borderColor} onChange={(event) => changeDraft({ borderColor: event.target.value })}/></label><label>Width<input type="number" min="1" max="12" value={draft.borderWidth} onChange={(event) => changeDraft({ borderWidth: Number(event.target.value) })}/></label></div><label>Inset <span>{draft.borderInset}px</span><input type="range" min="0" max="50" value={draft.borderInset} onChange={(event) => changeDraft({ borderInset: Number(event.target.value) })}/></label><label>Corner radius <span>{draft.borderRadius}px</span><input type="range" min="0" max="60" value={draft.borderRadius} onChange={(event) => changeDraft({ borderRadius: Number(event.target.value) })}/></label></section><section><h3>Background</h3><label>Colour<input type="color" value={draft.backgroundColor} onChange={(event) => changeDraft({ backgroundColor: event.target.value })}/></label><label className="designer-upload">{busy ? "Uploading background…" : "Upload background"}<input type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={(event) => void uploadBackground(event)}/></label><p className="designer-help">After upload, choose whether to use the background on this page only or throughout the whole book.</p><label>Fit<select value={draft.backgroundSize} onChange={(event) => changeDraft({ backgroundSize: event.target.value as DesignerPageRevision["backgroundSize"] })}><option value="cover">Cover</option><option value="contain">Contain</option><option value="auto">Original size</option><option value="repeat">Tile</option></select></label><label>Opacity <span>{Math.round(draft.backgroundOpacity * 100)}%</span><input type="range" min="0" max="1" step=".05" value={draft.backgroundOpacity} onChange={(event) => changeDraft({ backgroundOpacity: Number(event.target.value) })}/></label>{draft.backgroundImageUrl && <button onClick={() => changeDraft({ backgroundImageKey: undefined, backgroundImageUrl: undefined })}>Remove background</button>}</section></>}
       {panel === "text" && <><section><h3>Typography</h3><label>Page font<select value={draft.fontFamily} onChange={(event) => changeDraft({ fontFamily: event.target.value })}><option value="Georgia, serif">Editorial Serif</option><option value="Arial, sans-serif">Clear Sans</option><option value="'Trebuchet MS', sans-serif">Friendly Reader</option><option value="'Noto Serif', serif">Sanskrit Scholar</option><option value="'Noto Sans Devanagari', sans-serif">Devanagari Sans</option></select></label><div className="designer-row"><label>Size<input type="number" min="9" max="34" value={draft.fontSize} onChange={(event) => changeDraft({ fontSize: Number(event.target.value) })}/></label><label>Colour<input type="color" value={draft.textColor} onChange={(event) => changeDraft({ textColor: event.target.value })}/></label></div><label>Line height <span>{draft.lineHeight.toFixed(2)}</span><input type="range" min="1" max="2.2" step=".05" value={draft.lineHeight} onChange={(event) => changeDraft({ lineHeight: Number(event.target.value) })}/></label><label>Letter spacing <span>{draft.letterSpacing}px</span><input type="range" min="-1" max="5" step=".1" value={draft.letterSpacing} onChange={(event) => changeDraft({ letterSpacing: Number(event.target.value) })}/></label><label>Paragraph spacing <span>{draft.paragraphSpacing}px</span><input type="range" min="0" max="35" value={draft.paragraphSpacing} onChange={(event) => changeDraft({ paragraphSpacing: Number(event.target.value) })}/></label></section><section><h3>Selected text box</h3><p className="designer-help">Select a custom text box on the page, then move, resize, layer or lock it.</p><div className="object-nudge"><button onClick={() => moveObject(0,-5)}>↑</button><button onClick={() => moveObject(-5,0)}>←</button><button onClick={() => moveObject(5,0)}>→</button><button onClick={() => moveObject(0,5)}>↓</button></div><label>Width<input type="range" min="120" max="520" defaultValue="360" onChange={(event) => mutateObject("width", `${event.target.value}px`)}/></label><label>Padding<input type="range" min="0" max="40" defaultValue="12" onChange={(event) => mutateObject("padding", `${event.target.value}px`)}/></label><div className="designer-row"><button onClick={() => mutateObject("zIndex", "4")}>Bring front</button><button onClick={() => mutateObject("zIndex", "0")}>Send back</button></div><div className="designer-row"><button onClick={duplicateObject}>Duplicate</button><button onClick={deleteObject}>Delete</button></div><button onClick={() => { if (!selectedNode.current) return; selectedNode.current.dataset.designerLocked = selectedNode.current.dataset.designerLocked === "true" ? "false" : "true"; }}>Lock / unlock object</button></section></>}
       {panel === "image" && <section><h3>Selected image</h3><p className="designer-help">Click an image on the page to edit it. Changes are stored inside the page edition.</p><label>Width<input type="range" min="80" max="520" defaultValue="420" onChange={(event) => mutateObject("width", `${event.target.value}px`)}/></label><label>Height<input type="range" min="80" max="520" defaultValue="300" onChange={(event) => mutateObject("height", `${event.target.value}px`)}/></label><label>Crop / fit<select defaultValue="contain" onChange={(event) => mutateObject("objectFit", event.target.value)}><option value="contain">Fit</option><option value="cover">Fill and crop</option><option value="fill">Stretch</option></select></label><label>Focal position<select defaultValue="center" onChange={(event) => mutateObject("objectPosition", event.target.value)}><option value="center">Centre</option><option value="top">Top</option><option value="bottom">Bottom</option><option value="left">Left</option><option value="right">Right</option></select></label><label>Opacity<input type="range" min="0.1" max="1" step=".05" defaultValue="1" onChange={(event) => mutateObject("opacity", event.target.value)}/></label><label>Rounded corners<input type="range" min="0" max="80" defaultValue="0" onChange={(event) => mutateObject("borderRadius", `${event.target.value}px`)}/></label><label>Border width<input type="range" min="0" max="16" defaultValue="0" onChange={(event) => mutateObject("borderWidth", `${event.target.value}px`)}/></label><label>Border colour<input type="color" defaultValue="#173f37" onChange={(event) => { mutateObject("borderColor", event.target.value); mutateObject("borderStyle", "solid"); }}/></label><label>Rotation<input type="range" min="-30" max="30" defaultValue="0" onChange={(event) => mutateObject("transform", `rotate(${event.target.value}deg)`)}/></label><label>Shadow<select defaultValue="none" onChange={(event) => mutateObject("boxShadow", event.target.value)}><option value="none">None</option><option value="0 6px 16px #0003">Soft</option><option value="0 12px 28px #0005">Strong</option></select></label><div className="designer-row"><button onClick={() => mutateObject("float", "left")}>Wrap right</button><button onClick={() => mutateObject("float", "right")}>Wrap left</button></div><div className="designer-row"><button onClick={() => mutateObject("transform", "scaleX(-1)")}>Flip horizontal</button><button onClick={() => mutateObject("transform", "scaleY(-1)")}>Flip vertical</button></div><div className="object-nudge"><button onClick={() => moveObject(0,-5)}>↑</button><button onClick={() => moveObject(-5,0)}>←</button><button onClick={() => moveObject(5,0)}>→</button><button onClick={() => moveObject(0,5)}>↓</button></div><label className="designer-upload">Replace image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={async (event) => { const file = event.target.files?.[0]; if (!file || selectedNode.current?.tagName !== "IMG") return; const image = await uploadAsset(file); (selectedNode.current as HTMLImageElement).src = image.url; }}/></label><label>Alternative text<input placeholder="Describe this image" onChange={(event) => { if (selectedNode.current?.tagName === "IMG") selectedNode.current.setAttribute("alt", event.target.value); }}/></label><label>Caption<input placeholder="Image caption" onChange={(event) => { const figure = selectedNode.current?.closest("figure"); const caption = figure?.querySelector("figcaption"); if (caption) caption.textContent = event.target.value; }}/></label><div className="designer-row"><button onClick={duplicateObject}>Duplicate</button><button onClick={deleteObject}>Remove</button></div><button onClick={() => { if (!selectedNode.current) return; selectedNode.current.dataset.designerLocked = selectedNode.current.dataset.designerLocked === "true" ? "false" : "true"; }}>Lock / unlock image</button></section>}
       {panel === "layers" && <><section><h3>Layers</h3><label className="designer-check"><input type="checkbox" checked={draft.contentVisible} onChange={(event) => changeDraft({ contentVisible: event.target.checked })}/> Content and objects</label><label className="designer-check"><input type="checkbox" checked={draft.watermarkVisible} onChange={(event) => changeDraft({ watermarkVisible: event.target.checked })}/> Watermark</label><label className="designer-check"><input type="checkbox" checked={Boolean(draft.backgroundImageUrl)} onChange={(event) => !event.target.checked && changeDraft({ backgroundImageUrl: undefined, backgroundImageKey: undefined })}/> Background image</label></section><section><h3>Watermark</h3><label>Text<input value={draft.watermarkText} onChange={(event) => changeDraft({ watermarkText: event.target.value })}/></label><label className="designer-upload">Upload logo<input type="file" accept="image/png,image/jpeg,image/webp" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; const image = await uploadAsset(file); changeDraft({ watermarkImageKey: image.key, watermarkImageUrl: image.url }); }}/></label><label>Opacity<input type="range" min="0" max=".7" step=".01" value={draft.watermarkOpacity} onChange={(event) => changeDraft({ watermarkOpacity: Number(event.target.value) })}/></label><label>Rotation<input type="range" min="-90" max="90" value={draft.watermarkRotation} onChange={(event) => changeDraft({ watermarkRotation: Number(event.target.value) })}/></label><label>Horizontal position<input type="range" min="10" max="90" value={draft.watermarkX} onChange={(event) => changeDraft({ watermarkX: Number(event.target.value) })}/></label><label>Vertical position<input type="range" min="10" max="90" value={draft.watermarkY} onChange={(event) => changeDraft({ watermarkY: Number(event.target.value) })}/></label><label className="designer-check"><input type="checkbox" checked={draft.watermarkRepeat} onChange={(event) => changeDraft({ watermarkRepeat: event.target.checked })}/> Repeat watermark</label></section><section><h3>Page versions</h3><button onClick={() => void restorePrevious()} disabled={!saved?.history.length}>Restore previous</button><button onClick={() => void resetPage()}>Restore Studio page</button></section></>}
-      {panel === "preflight" && <><section><h3>Print preflight</h3>{issues.length ? <ul className="preflight-issues">{issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : <div className="preflight-pass">✓ No page problems detected</div>}<button onClick={runPreflight}>Check again</button></section><section><h3>Apply design</h3><p className="designer-help">Copies visual settings only. Text and images stay unique.</p><button onClick={() => void applyStyle("page")}>Apply to this page</button>{selected.chapterId && <button onClick={() => void applyStyle("chapter")}>Apply to this chapter</button>}<button onClick={() => void applyStyle("book")}>Apply to whole book</button></section><section><h3>Reusable styles</h3><div className="style-presets"><button onClick={() => changeDraft({ fontFamily: "Georgia, serif", fontSize: 15, lineHeight: 1.55, backgroundColor: "#fffdf8", borderStyle: "double", borderColor: "#b4863e" })}>Scholar</button><button onClick={() => changeDraft({ fontFamily: "'Trebuchet MS', sans-serif", fontSize: 16, lineHeight: 1.65, backgroundColor: "#fff8e8", borderStyle: "solid", borderColor: "#d17b43", borderRadius: 18 })}>Storybook</button><button onClick={() => changeDraft({ fontFamily: "Arial, sans-serif", fontSize: 14, lineHeight: 1.5, backgroundColor: "#ffffff", borderStyle: "none" })}>Minimal</button></div>{(project.designerPresets ?? []).map((preset) => <button key={preset.id} onClick={() => changeDraft(preset.style)}>{preset.name}</button>)}<button onClick={() => void savePreset()}>Save current style</button></section></>}
+      {panel === "preflight" && <><section><h3>Whole-book preflight</h3>{bookIssues.length ? <ul className="preflight-issues book-preflight-issues">{bookIssues.map((item) => <li key={`${item.slotId}-${item.issue}`}><b>{item.label}</b><span>{item.issue}</span><button onClick={() => selectAndReveal(item.slotId)}>Go to page</button></li>)}</ul> : <div className="preflight-pass">✓ No accidental empty or overflowing pages detected</div>}<button onClick={runBookPreflight}>Check whole book</button><button onClick={() => void balanceLayout("book")} disabled={busy}>Balance whole book</button></section><section><h3>Selected page check</h3>{issues.length ? <ul className="preflight-issues">{issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : <p className="designer-help">Use this check for image resolution and print boundaries on the selected page.</p>}<button onClick={runPreflight}>Check selected page</button></section><section><h3>Apply design</h3><p className="designer-help">Copies visual settings only. Text and images stay unique.</p><button onClick={() => void applyStyle("page")}>Apply to this page</button>{selected.chapterId && <button onClick={() => void applyStyle("chapter")}>Apply to this chapter</button>}<button onClick={() => void applyStyle("book")}>Apply to whole book</button></section><section><h3>Reusable styles</h3><div className="style-presets"><button onClick={() => changeDraft({ fontFamily: "Georgia, serif", fontSize: 15, lineHeight: 1.55, backgroundColor: "#fffdf8", borderStyle: "double", borderColor: "#b4863e" })}>Scholar</button><button onClick={() => changeDraft({ fontFamily: "'Trebuchet MS', sans-serif", fontSize: 16, lineHeight: 1.65, backgroundColor: "#fff8e8", borderStyle: "solid", borderColor: "#d17b43", borderRadius: 18 })}>Storybook</button><button onClick={() => changeDraft({ fontFamily: "Arial, sans-serif", fontSize: 14, lineHeight: 1.5, backgroundColor: "#ffffff", borderStyle: "none" })}>Minimal</button></div>{(project.designerPresets ?? []).map((preset) => <button key={preset.id} onClick={() => changeDraft(preset.style)}>{preset.name}</button>)}<button onClick={() => void savePreset()}>Save current style</button></section></>}
     </aside></div>
   </section></div>;
 }

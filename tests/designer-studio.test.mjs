@@ -79,6 +79,38 @@ test("background upload asks for page or whole-book scope", () => {
   assert.match(css, /\.designer-background-choice/);
 });
 
+test("Designer Studio exposes the complete book as one editable flowing workspace", () => {
+  assert.match(page, /Whole-book Designer/);
+  assert.match(page, /designer-whole-book-canvas/);
+  assert.match(page, /orderedPages\.filter\(\(page\) => !revisionFor\(page\)\.deleted\)\.map/);
+  assert.match(page, /Save whole book/);
+  assert.match(page, /saveWholeBook/);
+  assert.match(page, /liveBookHtml/);
+  assert.match(page, /rememberLiveHtml/);
+  assert.match(css, /\.designer-whole-book-canvas/);
+  assert.match(css, /\.designer-flow-page\.selected/);
+});
+
+test("whole-book layout balancing is local, scoped and preserves locked pages", () => {
+  assert.match(page, /balanceLayout = async \(scope: "chapter" \| "book"\)/);
+  assert.match(page, /paginateReaderHtml\(flowingText, project\.audience\)/);
+  assert.match(page, /layoutLocked/);
+  assert.match(page, /Lock this page during reflow/);
+  assert.match(page, /Balance this chapter/);
+  assert.match(page, /Balance layout/);
+  assert.match(page, /without using AI tokens/);
+});
+
+test("whole-book preflight reports fill problems with page navigation", () => {
+  assert.match(page, /designerPageFill/);
+  assert.match(page, /runBookPreflight/);
+  assert.match(page, /Only \$\{fill\.ratio\}% filled/);
+  assert.match(page, /content may be clipped/);
+  assert.match(page, />Go to page</);
+  assert.match(css, /\.page-fill-badge\.empty/);
+  assert.match(css, /\.page-fill-badge\.overflow/);
+});
+
 test("Preview and PDF consume saved designer pages and custom ordering", () => {
   assert.match(page, /project\.designerPageOrder \?\? \[\]/);
   assert.match(page, /renderDesignerSheet/);
