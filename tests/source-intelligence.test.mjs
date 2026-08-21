@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { classifySource, ocrEstimate, outlineForMode, pdfChunkRanges, validateOutline } from "../lib/source-intelligence.ts";
+import { classifySource, ocrEstimate, outlineForMode, pdfChunkRanges, SAFE_OCR_CHUNK_BYTES, SAFE_OCR_CHUNK_PAGES, validateOutline } from "../lib/source-intelligence.ts";
 
 const page = fs.readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
 const worker = fs.readFileSync(new URL("../worker/index.ts", import.meta.url), "utf8");
@@ -13,12 +13,14 @@ test("scanned, mixed, and searchable sources are classified without AI", () => {
 });
 
 test("large PDFs are split into bounded physical page ranges", () => {
-  const ranges = pdfChunkRanges(125, 10);
-  assert.equal(ranges.length, 13);
-  assert.deepEqual(ranges[0], { startPage: 1, endPage: 10, index: 0 });
-  assert.deepEqual(ranges.at(-1), { startPage: 121, endPage: 125, index: 12 });
+  const ranges = pdfChunkRanges(125, SAFE_OCR_CHUNK_PAGES);
+  assert.equal(ranges.length, 32);
+  assert.deepEqual(ranges[0], { startPage: 1, endPage: 4, index: 0 });
+  assert.deepEqual(ranges.at(-1), { startPage: 125, endPage: 125, index: 31 });
+  assert.equal(SAFE_OCR_CHUNK_BYTES, 3_250_000);
   assert.match(page, /PDFDocument\.load/);
-  assert.match(worker, /file\.size > 28 \* 1024 \* 1024/);
+  assert.match(page, /prepareRange\(startPage, midpoint\)/);
+  assert.match(worker, /SAFE_OCR_CHUNK_BYTES \+ 250_000/);
 });
 
 test("generic fallback chapters are rejected", () => {
@@ -40,9 +42,17 @@ test("outline review can choose major Parts or detailed chapters", () => {
 
 test("scan OCR is explicit and shows the accurate-parser estimate", () => {
   assert.equal(ocrEstimate(125), .25);
-  assert.match(page, /Try free OCR first/);
-  assert.match(page, /Use accurate scan OCR/);
+  assert.match(page, /Analyse source with Nemotron/);
+  assert.match(page, /Use free parser/);
   assert.match(worker, /plugins: \[\{ id: "file-parser"/);
+});
+
+test("OCR batches are cached before one text-only Nemotron outline pass", () => {
+  assert.match(page, /\/api\/source\/ocr-chunk/);
+  assert.match(worker, /chunk\.ocrPageTexts = result\.pageTexts/);
+  assert.match(worker, /sourceStructureEvidence\(manifest\)/);
+  assert.match(worker, /openRouterOutlineFromOcr/);
+  assert.match(worker, /Every source page is cached/);
 });
 
 test("scanned chapter generation sends only overlapping verified chunks", () => {

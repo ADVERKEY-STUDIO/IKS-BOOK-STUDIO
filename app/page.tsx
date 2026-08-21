@@ -7,7 +7,7 @@ import { ADAPTATION_PLAN_VERSION, allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET
 import type { ChapterOneGate, PedagogyQuality } from "../lib/pedagogy";
 import { BOOK_PACKAGE_FORMAT, expectedChapterId, expectedContextKey, expectedPageId, type BookPackage, type BookPackageValidation, validateBookPackage } from "../lib/book-package";
 import { bookPersonaClass, bookPersonaDefinitions, bookPersonaPatch, inferBookPersona, materializePersona, personaById, type BookPersona } from "../lib/book-persona";
-import { outlineForMode, pdfChunkRanges, type OutlineMode, type SourceIntelligence, type SourceOutlineItem } from "../lib/source-intelligence";
+import { outlineForMode, pdfChunkRanges, SAFE_OCR_CHUNK_BYTES, SAFE_OCR_CHUNK_PAGES, type OutlineMode, type SourceIntelligence, type SourceOutlineItem } from "../lib/source-intelligence";
 
 type View = "dashboard" | "wizard" | "analysis" | "brief" | "editor";
 
@@ -1046,8 +1046,8 @@ function ownerHeaders() {
 }
 
 async function uploadSourceForAnalysis(file: File, projectId: string, audience: string, onProgress?: (progress: number) => void): Promise<SourceResult> {
-  const isLargePdf = file.type === "application/pdf" && file.size > 24 * 1024 * 1024;
-  if (!isLargePdf) {
+  const shouldChunkPdf = file.type === "application/pdf" && file.size > SAFE_OCR_CHUNK_BYTES;
+  if (!shouldChunkPdf) {
     const form = new FormData();
     form.set("file", file);
     form.set("projectId", projectId);
@@ -1060,27 +1060,43 @@ async function uploadSourceForAnalysis(file: File, projectId: string, audience: 
   const { PDFDocument } = await import("pdf-lib");
   const original = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true, updateMetadata: false });
   const uploadId = makeId();
-  const ranges = pdfChunkRanges(original.getPageCount(), 10);
-  const chunks: Array<{ key: string; startPage: number; endPage: number; size: number; pageTexts: string[] }> = [];
-  for (const range of ranges) {
+  const initialRanges = pdfChunkRanges(original.getPageCount(), SAFE_OCR_CHUNK_PAGES);
+  const prepared: Array<{ startPage: number; endPage: number; bytes: Uint8Array }> = [];
+  async function prepareRange(startPage: number, endPage: number): Promise<void> {
     const part = await PDFDocument.create();
-    const indices = Array.from({ length: range.endPage - range.startPage + 1 }, (_, index) => range.startPage - 1 + index);
+    const indices = Array.from({ length: endPage - startPage + 1 }, (_, index) => startPage - 1 + index);
     const copied = await part.copyPages(original, indices);
     copied.forEach((page) => part.addPage(page));
     const bytes = await part.save({ useObjectStreams: true });
-    if (bytes.byteLength > 28 * 1024 * 1024) throw new Error(`Pages ${range.startPage}–${range.endPage} contain unusually large scans. Compress the PDF once, then upload it again.`);
+    if (bytes.byteLength > SAFE_OCR_CHUNK_BYTES && startPage < endPage) {
+      const midpoint = Math.floor((startPage + endPage) / 2);
+      await prepareRange(startPage, midpoint);
+      await prepareRange(midpoint + 1, endPage);
+      return;
+    }
+    if (bytes.byteLength > SAFE_OCR_CHUNK_BYTES && startPage === endPage) {
+      throw new Error(`Source page ${startPage} is too large for reliable OCR. Export that page at a smaller image size, then upload the PDF again.`);
+    }
+    prepared.push({ startPage, endPage, bytes });
+  }
+  for (const range of initialRanges) await prepareRange(range.startPage, range.endPage);
+  prepared.sort((a, b) => a.startPage - b.startPage);
+  const chunks: Array<{ key: string; startPage: number; endPage: number; size: number; pageTexts: string[] }> = [];
+  for (let chunkIndex = 0; chunkIndex < prepared.length; chunkIndex += 1) {
+    const range = prepared[chunkIndex];
+    const bytes = range.bytes;
     const form = new FormData();
-    form.set("file", new File([bytes], `source-${range.startPage}-${range.endPage}.pdf`, { type: "application/pdf" }));
+    form.set("file", new File([bytes.slice().buffer], `source-${range.startPage}-${range.endPage}.pdf`, { type: "application/pdf" }));
     form.set("projectId", projectId);
     form.set("uploadId", uploadId);
-    form.set("index", String(range.index));
+    form.set("index", String(chunkIndex));
     form.set("startPage", String(range.startPage));
     form.set("endPage", String(range.endPage));
     const response = await fetch("/api/source/chunk", { method: "POST", headers: ownerHeaders(), body: form });
     const data = await response.json() as { chunk?: typeof chunks[number]; error?: string };
     if (!response.ok || !data.chunk) throw new Error(data.error || `Could not upload pages ${range.startPage}–${range.endPage}`);
     chunks.push(data.chunk);
-    onProgress?.(Math.round((range.index + 1) / ranges.length * 75));
+    onProgress?.(Math.round((chunkIndex + 1) / prepared.length * 75));
   }
   const response = await fetch("/api/source/finalize", { method: "POST", headers: { "content-type": "application/json", ...ownerHeaders() }, body: JSON.stringify({ projectId, uploadId, name: file.name, size: file.size, pages: original.getPageCount(), chunks, audience }) });
   const data = await response.json() as { source?: SourceResult; error?: string };
@@ -1403,15 +1419,29 @@ export default function Home() {
   async function runSourceOcr(engine: "cloudflare-ai" | "mistral-ocr") {
     if (!project.sourceObjectKey) return notify("Upload the source first");
     setSourceBusy(true);
-    patchProject({ sourceIntelligence: { ...(project.sourceIntelligence as SourceIntelligence), status: "reading-contents", progress: 38, message: engine === "mistral-ocr" ? "Accurate OCR is reading the contents pages…" : "Free OCR is reading the contents pages…", ocrEngine: engine } });
+    const totalBatches = Math.max(1, project.sourceIntelligence?.ocrBatchesTotal || 1);
+    let latest = { ...(project.sourceIntelligence as SourceIntelligence), status: "reading-contents" as const, progress: 25, message: `${engine === "mistral-ocr" ? "Accurate" : "Free"} OCR is preparing ${totalBatches} safe batch${totalBatches === 1 ? "" : "es"}…`, ocrEngine: engine, ocrBatchesTotal: totalBatches };
+    patchProject({ sourceIntelligence: latest });
     try {
+      for (let chunkIndex = 0; chunkIndex < totalBatches; chunkIndex += 1) {
+        latest = { ...latest, currentBatchLabel: `Batch ${chunkIndex + 1} of ${totalBatches}`, message: `Reading source batch ${chunkIndex + 1} of ${totalBatches}. Completed batches remain cached.` };
+        patchProject({ sourceIntelligence: latest });
+        const batchResponse = await fetch("/api/source/ocr-chunk", { method: "POST", headers: requestHeaders(), body: JSON.stringify({ sourceObjectKey: project.sourceObjectKey, engine, chunkIndex }) });
+        const batchData = await batchResponse.json() as { sourceIntelligence?: SourceIntelligence; error?: string; code?: string; cached?: boolean };
+        if (!batchResponse.ok || !batchData.sourceIntelligence) throw new Error(batchData.error || `OCR stopped at batch ${chunkIndex + 1}`);
+        latest = batchData.sourceIntelligence;
+        patchProject({ sourceIntelligence: latest });
+      }
+      latest = { ...latest, progress: 70, message: "OCR is cached. Nemotron is detecting Parts, chapters and physical page ranges…", currentBatchLabel: "Structure analysis" };
+      patchProject({ sourceIntelligence: latest });
       const response = await fetch("/api/source/intelligence", { method: "POST", headers: requestHeaders(), body: JSON.stringify({ sourceObjectKey: project.sourceObjectKey, engine }) });
       const data = await response.json() as { sourceIntelligence?: SourceIntelligence; error?: string; code?: string };
-      if (!response.ok || !data.sourceIntelligence) throw new Error(data.error || "OCR could not detect the source outline");
+      if (!response.ok || !data.sourceIntelligence) throw new Error(data.error || "Nemotron could not detect the source outline");
       patchProject({ sourceIntelligence: data.sourceIntelligence });
-      notify("Source outline detected. Review the names and page ranges.");
+      notify("Nemotron detected the source outline. Review the names and page ranges.");
     } catch (error) {
-      patchProject({ sourceIntelligence: { ...(project.sourceIntelligence as SourceIntelligence), status: "ocr-required", progress: 22, message: error instanceof Error ? error.message : "OCR could not detect the outline", lastError: error instanceof Error ? error.message : "OCR failed" } });
+      const message = error instanceof Error ? error.message : "OCR could not detect the outline";
+      patchProject({ sourceIntelligence: { ...latest, status: /quota|credit/i.test(message) ? "paused" : "ocr-required", message, lastError: message } });
       notify(error instanceof Error ? error.message : "OCR failed");
     } finally { setSourceBusy(false); }
   }
@@ -2428,7 +2458,7 @@ function Wizard({ step, project, sourceBusy, sourceProgress, onPatch, onFile, on
     <aside className="step-rail"><p>CHILDREN’S EDITION</p>{wizardSteps.map((label, index) => <div className={index <= step ? "active" : ""} key={label}><span>{index < step ? "✓" : index + 1}</span><b>{label}</b></div>)}<blockquote>Built first for children aged 7–15. Adult publishing choices will return in a later edition.</blockquote></aside>
     <main className="wizard-main">
       <p className="eyebrow">STEP {step + 1} OF 4 · AGES 7–15</p><h1>{["Choose the source.", "Choose the child reader.", "Choose the book world.", "Review your children’s book."][step]}</h1><p className="lead">{["Upload the book you are authorised to adapt.", "Pick one age band. Vocabulary, sentence length, explanation depth and text size adjust automatically.", "Choose a complete visual system and see the page before building the adaptation.", "These child-first choices guide every generated chapter and illustration."][step]}</p>
-      {step === 0 && <section className="form-card"><label className={`upload ${sourceBusy ? "busy" : ""}`}><input type="file" accept=".pdf,.docx,.txt,.md" onChange={onFile} disabled={sourceBusy}/><span>{sourceBusy ? `${sourceProgress || "…"}${sourceProgress ? "%" : ""}` : "↑"}</span><strong>{sourceBusy ? "Securely uploading and classifying your book…" : project.source}</strong><small>{sourceBusy ? "Large scanned PDFs are split into safe 10-page chunks; progress is preserved" : "Choose a PDF, DOCX or TXT book. Large PDFs are uploaded safely in chunks."}</small></label><div className="fields two"><label>New book title<input value={project.title} onChange={(e) => onPatch({ title: e.target.value })}/></label><label>Source book<input value={project.source} readOnly/></label></div></section>}
+      {step === 0 && <section className="form-card"><label className={`upload ${sourceBusy ? "busy" : ""}`}><input type="file" accept=".pdf,.docx,.txt,.md" onChange={onFile} disabled={sourceBusy}/><span>{sourceBusy ? `${sourceProgress || "…"}${sourceProgress ? "%" : ""}` : "↑"}</span><strong>{sourceBusy ? "Securely uploading and classifying your book…" : project.source}</strong><small>{sourceBusy ? "Scanned PDFs are divided adaptively by pages and parser-safe file size; progress is preserved" : "Choose a PDF, DOCX or TXT book. Large and scanned PDFs are prepared as safe, resumable OCR batches."}</small></label><div className="fields two"><label>New book title<input value={project.title} onChange={(e) => onPatch({ title: e.target.value })}/></label><label>Source book<input value={project.source} readOnly/></label></div></section>}
       {step === 1 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">READER AGE</p><div className="choice-cards">{childAudienceProfiles.map((profile) => <button className={project.audience === profile.value ? "choice selected" : "choice"} onClick={() => onPatch(audiencePatch(profile.value))} key={profile.value}><span>{profile.value}</span><strong>{profile.label}</strong><small>{profile.description}</small><i>“{profile.sample}”</i></button>)}</div><div className="language-choice"><span>BOOK LANGUAGE</span>{["English", "Hindi", "English + Hindi"].map((language) => <button className={project.language === language ? "selected" : ""} onClick={() => onPatch({ language })} key={language}>{language}</button>)}</div><div className="auto-settings"><b>Natural writing is automatic</b><span>{project.learningFeatures.join(" · ")}</span><small>The studio changes vocabulary, sentence length, explanation depth and reflection for the selected age. There are no separate writing modes.</small></div></div><BookGlimpse project={project} focus="reader"/></section>}
       {step === 2 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">ILLUSTRATION WORLD</p><div className="design-world-cards">{childDesignWorlds.map((world) => <button className={`${project.aesthetic === world.value ? "selected " : ""}design-world world-${normalizedTitle(world.value).replace(/[^a-z]+/g, "-")}`} onClick={() => onPatch(designWorldPatch(world.value))} key={world.value}><span className="world-thumbnail"><i/><b>Ab</b><i/></span><strong>{world.label}</strong><small>{world.description}</small><em>{world.illustrationStyle}</em></button>)}</div><div className="page-aesthetic-section"><p className="choice-label">PAGE AESTHETIC · APPLIES TO EVERY PAGE</p><div className="page-aesthetic-cards">{pageAesthetics.map((aesthetic) => { const aestheticClass = normalizedTitle(aesthetic.value).replace(/[^a-z]+/g, "-"); return <button className={`${project.pageAesthetic === aesthetic.value ? "selected " : ""}page-aesthetic-choice aesthetic-${aestheticClass}`} onClick={() => onPatch(pageAestheticPatch(aesthetic.value))} key={aesthetic.value}><span className="page-aesthetic-thumbnail"><i/><b>Chapter</b><i/><i/><i/></span><strong>{aesthetic.label}</strong><small>{aesthetic.description}</small><em>{aesthetic.detail}</em></button>; })}</div></div><div className="book-border-section"><p className="choice-label">BOOK BORDER · MIX WITH ANY PAGE AESTHETIC</p><div className="book-border-cards">{bookBorders.map((border) => { const borderClass = normalizedTitle(border.value).replace(/[^a-z]+/g, "-"); return <button className={`${project.bookBorder === border.value ? "selected " : ""}book-border-choice border-${borderClass}`} onClick={() => onPatch(bookBorderPatch(border.value))} key={border.value}><span className="book-border-thumbnail"><i/><b>Chapter</b><i/><i/><i/></span><strong>{border.label}</strong><small>{border.description}</small><em>{border.detail}</em></button>; })}</div></div><div className="auto-settings"><b>Visual guarantee</b><span>One unique image, page aesthetic and chosen border in every chapter</span><small>Every image is a chapter-specific narrative scene—never a map, Venn diagram or generic concept graphic. Use the live tabs to inspect the chapter, reading, visual and activity pages.</small></div></div><BookGlimpse project={project} focus="design" onPersona={(persona) => onPatch(bookPersonaPatch(persona))}/></section>}
       {step === 3 && <><section className="brief-review child-review"><div><span>SOURCE</span><strong>{project.source}</strong></div><div><span>CHILD READER</span><strong>{project.audience} · {project.readingLevel}</strong></div><div><span>BOOK</span><strong>{project.bookType}</strong></div><div><span>WRITING</span><strong>Natural age-based writing · {project.language}</strong></div><div><span>ILLUSTRATION WORLD</span><strong>{project.aesthetic} · {project.illustrationStyle}</strong></div><div><span>PAGE AESTHETIC</span><strong>{project.pageAesthetic} · applied to every page</strong></div><div><span>BOOK BORDER</span><strong>{project.bookBorder} · applied to every physical page</strong></div><div><span>PAGE WATERMARK</span><strong>{project.pageWatermark} · subtle background design</strong></div><div><span>LENGTH</span><strong>Shortest clear length · never padded · under 100 pages</strong></div></section><BookGlimpse project={project} focus="design" onPersona={(persona) => onPatch(bookPersonaPatch(persona))}/></>}
@@ -2457,8 +2487,8 @@ function Analysis({ project, sourceBusy, onPatch, onBack, onContinue, onRunOcr, 
     </section>
     <section className="stats"><div><span>SOURCE PAGES</span><strong>{project.sourcePages || intelligence?.totalPages || "—"}</strong></div><div><span>PDF TYPE</span><strong>{intelligence?.sourceKind || "searchable"}</strong></div><div><span>STRUCTURE FOUND</span><strong>{intelligence?.outline.length || headings.length || "Pending"}</strong></div><div><span>ANALYSIS</span><strong>{intelligence?.progress ?? (headings.length ? 100 : 0)}%</strong></div></section>
     {requiresOcr && <section className="ocr-choice-card">
-      <div><p className="eyebrow">SCAN DETECTED</p><h2>Read the contents before generating anything</h2><p>{intelligence?.message || "The PDF does not contain enough searchable text."}</p><ul><li>Only the front-matter chunk is analysed first.</li><li>The complete 125-page file is never sent in one request.</li><li>Chapter generation later uses only that chapter’s verified page range.</li></ul></div>
-      <div className="ocr-options"><button disabled={sourceBusy} onClick={() => void onRunOcr("cloudflare-ai")}><b>Try free OCR first</b><span>No OCR charge · best for a quick contents-page pass</span></button><button disabled={sourceBusy} onClick={() => void onRunOcr("mistral-ocr")}><b>Use accurate scan OCR</b><span>Estimated parser cost: about ${intelligence?.ocrCostEstimateUsd?.toFixed(2) || "0.25"} for the full source; this first pass reads only front matter</span></button></div>
+      <div><p className="eyebrow">SCAN DETECTED</p><h2>Read every page, then let Nemotron detect the real structure</h2><p>{intelligence?.message || "The PDF does not contain enough searchable text."}</p><ul><li>The scan is divided by both page count and parser-safe file size.</li><li>Every successful OCR batch is cached and never charged twice when resumed.</li><li>Nemotron receives compact structural evidence after OCR—not the oversized PDF.</li><li>Chapter writing later receives only that chapter’s verified cached pages.</li></ul></div>
+      <div className="ocr-options"><div className="source-analysis-budget"><span><b>{intelligence?.ocrBatchesCompleted || 0}</b> / {intelligence?.ocrBatchesTotal || 1} OCR batches cached</span><span><b>{intelligence?.ocrPagesCached || 0}</b> / {intelligence?.totalPages || project.sourcePages} source pages read</span><span><b>{intelligence?.structureRequestCount || 0}</b> Nemotron structure request{intelligence?.structureRequestCount === 1 ? "" : "s"}</span></div><button className="recommended" disabled={sourceBusy} onClick={() => void onRunOcr("mistral-ocr")}><b>{sourceBusy ? "Analysing source…" : "Analyse source with Nemotron"}</b><span>Accurate scanned-text extraction · cached batches · one final structure request · estimated OCR cost about ${intelligence?.ocrCostEstimateUsd?.toFixed(2) || "0.25"}</span></button><button disabled={sourceBusy} onClick={() => void onRunOcr("cloudflare-ai")}><b>Use free parser</b><span>Lower cost, but less reliable for photographed or difficult scans</span></button></div>
       {intelligence?.lastError && <p className="source-error">{intelligence.lastError}</p>}
     </section>}
     {reviewingOutline && <section className="outline-review-card">

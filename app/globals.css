@@ -510,3 +510,7 @@
 .designer-render-canvas .designer-background-layer{z-index:0}
 .designer-render-canvas .designer-render-watermark{z-index:1}
 .designer-render-canvas .designer-render-content{position:relative;z-index:2}
+
+/* Resumable OCR + Nemotron source intelligence */
+.source-analysis-budget{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line);background:#fff}.source-analysis-budget span{padding:11px 9px;margin:0!important;border-right:1px solid var(--line);text-align:center;font:8px/1.35 Arial,sans-serif!important}.source-analysis-budget span:last-child{border-right:0}.source-analysis-budget b{display:block;font:18px/1 Georgia,serif!important;color:var(--forest);margin-bottom:4px}.ocr-options button.recommended{background:var(--forest);color:#fff;border-color:var(--forest)}.ocr-options button.recommended span{color:#dcebe2}.ocr-options button.recommended:hover{background:#1c5045;border-color:#1c5045}
+@media(max-width:800px){.source-analysis-budget{grid-template-columns:1fr}.source-analysis-budget span{border-right:0;border-bottom:1px solid var(--line)}.source-analysis-budget span:last-child{border-bottom:0}}

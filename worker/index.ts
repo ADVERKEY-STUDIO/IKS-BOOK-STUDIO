@@ -8,7 +8,7 @@ import { authorialReaderHtml, generationProfileKey } from "../lib/child-summary"
 import { allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET, recommendedAdaptationPages } from "../lib/adaptation-pages";
 import { efficientChapterPrompt, evaluateChapterOneGate, evaluateTeachingChapter, feedbackRevisionPrompt, fitTeachingChapterLocally, localPedagogyScores, normalizeTeachingChapter, renderTeachingChapter, type ChapterOneGate, type PedagogyQuality, type PedagogyScores, type TeachingChapter } from "../lib/pedagogy";
 import type { BookPersona } from "../lib/book-persona";
-import { classifySource, ocrEstimate, validateOutline, type SourceIntelligence, type SourceOutlineItem } from "../lib/source-intelligence";
+import { classifySource, ocrEstimate, SAFE_OCR_CHUNK_BYTES, validateOutline, type SourceIntelligence, type SourceOutlineItem } from "../lib/source-intelligence";
 
 interface Env {
   ASSETS: Fetcher;
@@ -130,7 +130,17 @@ async function extractSourcePages(bytes: ArrayBuffer, extension: string) {
   return { text, pageTexts: [text], pages: 0 };
 }
 
-type SourceChunk = { key: string; startPage: number; endPage: number; size: number; pageTexts: string[] };
+type SourceChunk = {
+  key: string;
+  startPage: number;
+  endPage: number;
+  size: number;
+  pageTexts: string[];
+  ocrPageTexts?: string[];
+  ocrEngine?: "cloudflare-ai" | "mistral-ocr";
+  ocrCompletedAt?: string;
+  outlineEvidence?: string[];
+};
 type SourceManifest = { version: 1; name: string; size: number; pages: number; chunks: SourceChunk[]; sourceIntelligence: SourceIntelligence };
 
 function isSourceManifestKey(key: string) { return key.endsWith("/manifest.json"); }
@@ -150,7 +160,9 @@ async function extractStoredSource(env: Env, key: string, sourceName: string) {
     return { ...(await extractSourcePages(await source.arrayBuffer(), sourceExtension(sourceName))), manifest: null };
   }
   const pageTexts: string[] = [];
-  for (const chunk of manifest.chunks.sort((a, b) => a.startPage - b.startPage)) pageTexts.push(...chunk.pageTexts);
+  for (const chunk of manifest.chunks.sort((a, b) => a.startPage - b.startPage)) {
+    pageTexts.push(...(chunk.ocrPageTexts?.length ? chunk.ocrPageTexts : chunk.pageTexts));
+  }
   return { text: pageTexts.join("\n\n"), pageTexts, pages: manifest.pages, manifest };
 }
 
@@ -954,7 +966,7 @@ async function sourceChunkApi(request: Request, env: Env) {
   const form = await request.formData();
   const file = form.get("file");
   if (!(file instanceof File)) return json({ error: "A PDF chunk is required" }, 400);
-  if (file.size > 28 * 1024 * 1024) return json({ error: "This chunk is too large. Use fewer pages per chunk." }, 413);
+  if (file.size > SAFE_OCR_CHUNK_BYTES + 250_000) return json({ error: "This OCR batch is too large. Book Studio will divide it into fewer pages when you upload again." }, 413);
   const projectId = String(form.get("projectId") || "").replace(/[^a-zA-Z0-9_-]/g, "");
   const uploadId = String(form.get("uploadId") || "").replace(/[^a-zA-Z0-9_-]/g, "");
   const index = Math.max(0, Number(form.get("index") || 0));
@@ -992,6 +1004,11 @@ async function sourceFinalizeApi(request: Request, env: Env) {
     outline: [],
     ocrCostEstimateUsd: ocrEstimate(payload.pages),
     cacheKey: `${payload.uploadId}:${payload.pages}:${payload.size || 0}`,
+    ocrBatchesTotal: payload.chunks.length,
+    ocrBatchesCompleted: 0,
+    ocrPagesCached: 0,
+    structureRequestCount: 0,
+    estimatedNemotronRequests: payload.chunks.length + 1,
   };
   const objectKey = `${ownerPrefix}manifest.json`;
   const chapterPlans = classification.sourceKind === "searchable" ? chapterContextPlans(analysis.headings, pageTexts, payload.audience) : [];
@@ -1001,7 +1018,7 @@ async function sourceFinalizeApi(request: Request, env: Env) {
   return json({ source: { name: payload.name, size: payload.size || 0, objectKey, pages: payload.pages, ...analysis, sections, chapterPlans, sourceIntelligence, quality: classification.sourceKind === "searchable" ? "Good" : "OCR required — outline not yet confirmed" } });
 }
 
-async function openRouterPdfOutline(env: Env, file: R2ObjectBody, filename: string, engine: "cloudflare-ai" | "mistral-ocr", totalPages: number) {
+async function openRouterOcrChunk(env: Env, file: R2ObjectBody, filename: string, engine: "cloudflare-ai" | "mistral-ocr", startPage: number, endPage: number) {
   const key = typeof env.OPENROUTER_API_KEY === "string" ? env.OPENROUTER_API_KEY.trim() : "";
   if (!key) throw new TeachingEngineError("OPENROUTER_API_KEY is not configured as a server secret.", 503, "authentication");
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -1010,10 +1027,12 @@ async function openRouterPdfOutline(env: Env, file: R2ObjectBody, filename: stri
     body: JSON.stringify({
       model: env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL,
       temperature: 0,
-      max_tokens: 2600,
+      max_completion_tokens: 8000,
+      reasoning: { effort: "none", exclude: true },
+      response_format: { type: "json_object" },
       plugins: [{ id: "file-parser", pdf: { engine } }],
       messages: [{ role: "user", content: [
-        { type: "text", text: `Read the contents/front-matter pages of this scanned book. Return JSON only with one field named outline. Preserve exact printed Part and chapter titles. Each item must contain id, type (part or chapter), title, sourceStartPage, sourceEndPage, confidence from 0 to 1, included, and optional parentId. Infer physical PDF page ranges cautiously within 1-${totalPages}. Include both the major Parts and their child chapters when visible. Never invent generic headings.` },
+        { type: "text", text: `OCR this small scanned PDF batch faithfully. It represents physical PDF pages ${startPage}-${endPage}. Return JSON only with a pages array. Return exactly one entry per physical page, in order, with fields physicalPage, text, and headings. text must preserve the readable source wording and paragraph order; do not summarise, adapt, explain or invent missing words. headings is an array of exact visible Part, chapter, section or contents-entry headings. When a word is unreadable, write [unclear].` },
         { type: "file", file: { filename, file_data: bufferDataUrl(await file.arrayBuffer()) } },
       ] }],
     }),
@@ -1021,11 +1040,95 @@ async function openRouterPdfOutline(env: Env, file: R2ObjectBody, filename: stri
   if (!response.ok) {
     const detail = (await response.text()).slice(0, 360);
     if (response.status === 429 || response.status === 402) throw new TeachingEngineError("OCR paused because the provider quota or credit limit was reached. Resume after the quota resets.", response.status, "quota-exhausted", false, true);
-    throw new TeachingEngineError(`The ${engine === "mistral-ocr" ? "accurate" : "free"} OCR pass failed (${response.status}). ${detail}`, 502, "ocr-provider");
+    const sizeHint = response.status === 400 ? ` Pages ${startPage}-${endPage} were rejected by the parser; re-uploading will divide the scan into smaller adaptive batches.` : "";
+    throw new TeachingEngineError(`The ${engine === "mistral-ocr" ? "accurate" : "free"} OCR pass failed (${response.status}).${sizeHint} ${detail}`, 502, "ocr-provider");
   }
   const result = await response.json() as { choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } };
-  const parsed = parseJsonObject<{ outline: SourceOutlineItem[] }>(result.choices?.[0]?.message?.content || "");
+  const parsed = parseJsonObject<{ pages?: Array<{ physicalPage?: number; text?: string; headings?: string[] }> }>(result.choices?.[0]?.message?.content || "");
+  const expectedPages = endPage - startPage + 1;
+  const pages = Array.isArray(parsed.pages) ? parsed.pages.slice(0, expectedPages) : [];
+  if (pages.length !== expectedPages || pages.some((page) => typeof page.text !== "string")) {
+    throw new TeachingEngineError(`OCR returned ${pages.length} page records for physical pages ${startPage}-${endPage}; ${expectedPages} were required. This batch was not cached.`, 422, "malformed-ocr");
+  }
+  return {
+    pageTexts: pages.map((page) => cleanSourceText(page.text || "")),
+    outlineEvidence: pages.map((page, index) => [`PDF PAGE ${startPage + index}`, ...(page.headings || [])].join(" | ")),
+    usage: result.usage || {},
+  };
+}
+
+function sourceStructureEvidence(manifest: SourceManifest) {
+  const pages = manifest.chunks
+    .sort((a, b) => a.startPage - b.startPage)
+    .flatMap((chunk) => (chunk.ocrPageTexts || chunk.pageTexts).map((text, index) => ({
+      page: chunk.startPage + index,
+      text: cleanSourceText(text),
+      headings: chunk.outlineEvidence?.[index] || "",
+    })));
+  return pages.map(({ page, text, headings }) => {
+    const allowance = page <= 24 ? 2200 : 520;
+    return `PDF PAGE ${page}\n${headings}\n${text.slice(0, allowance)}`;
+  }).join("\n\n").slice(0, 100_000);
+}
+
+async function openRouterOutlineFromOcr(env: Env, manifest: SourceManifest) {
+  const key = typeof env.OPENROUTER_API_KEY === "string" ? env.OPENROUTER_API_KEY.trim() : "";
+  if (!key) throw new TeachingEngineError("OPENROUTER_API_KEY is not configured as a server secret.", 503, "authentication");
+  const evidence = sourceStructureEvidence(manifest);
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: { authorization: `Bearer ${key}`, "content-type": "application/json", "HTTP-Referer": "https://iks-book-studio.chatgpt.site", "X-Title": "IKS Book Studio Source Structure" },
+    body: JSON.stringify({
+      model: env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL,
+      temperature: 0,
+      max_completion_tokens: 3400,
+      reasoning: { effort: "none", exclude: true },
+      response_format: { type: "json_object" },
+      messages: [{ role: "user", content: `You are the source-structure editor for a publishing workflow. Analyse only the OCR evidence below. Return JSON only with an outline array. Preserve exact printed titles. Each item must contain id, type (part, chapter or section), title, sourceStartPage, sourceEndPage, confidence from 0 to 1, included, and optional parentId. Physical ranges must stay within 1-${manifest.pages}. Include both major Parts and child chapters when supported. Use contents entries plus later title-page evidence to map printed numbers to physical PDF pages. Never invent generic headings. If a boundary is uncertain, lower confidence rather than inventing certainty.\n\n${evidence}` }],
+    }),
+  });
+  if (!response.ok) {
+    if (response.status === 429 || response.status === 402) throw new TeachingEngineError("Nemotron structure analysis paused because the provider quota or credit limit was reached. Cached OCR remains saved.", response.status, "quota-exhausted", false, true);
+    throw new TeachingEngineError(`Nemotron could not analyse the cached OCR structure (${response.status}).`, 502, "structure-provider");
+  }
+  const result = await response.json() as { choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } };
+  const parsed = parseJsonObject<{ outline?: SourceOutlineItem[] }>(result.choices?.[0]?.message?.content || "");
   return { outline: parsed.outline || [], usage: result.usage || {} };
+}
+
+async function sourceOcrChunkApi(request: Request, env: Env) {
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const payload = await request.json() as { sourceObjectKey?: string; engine?: "cloudflare-ai" | "mistral-ocr"; chunkIndex?: number };
+  if (!payload.sourceObjectKey) return json({ error: "The stored source is missing" }, 400);
+  const ownerPrefix = `sources/${ownerKey(request)}/`;
+  if (!payload.sourceObjectKey.startsWith(ownerPrefix)) return json({ error: "The source does not belong to this project" }, 403);
+  const manifest = await readSourceManifest(env, payload.sourceObjectKey);
+  if (!manifest) return json({ error: "Re-upload this scan once so Book Studio can create safe page chunks." }, 409);
+  const engine = payload.engine === "mistral-ocr" ? "mistral-ocr" : "cloudflare-ai";
+  const chunkIndex = Math.max(0, Math.floor(Number(payload.chunkIndex) || 0));
+  const chunk = manifest.chunks[chunkIndex];
+  if (!chunk) return json({ error: "This OCR batch does not exist" }, 404);
+  if (chunk.ocrPageTexts?.length && chunk.ocrEngine === engine) {
+    return json({ cached: true, batch: { index: chunkIndex, startPage: chunk.startPage, endPage: chunk.endPage }, sourceIntelligence: manifest.sourceIntelligence });
+  }
+  const object = await env.BUCKET.get(chunk.key);
+  if (!object) return json({ error: `Source pages ${chunk.startPage}-${chunk.endPage} are unavailable` }, 404);
+  try {
+    const result = await openRouterOcrChunk(env, object, `${manifest.name}-pages-${chunk.startPage}-${chunk.endPage}.pdf`, engine, chunk.startPage, chunk.endPage);
+    chunk.ocrPageTexts = result.pageTexts;
+    chunk.outlineEvidence = result.outlineEvidence;
+    chunk.ocrEngine = engine;
+    chunk.ocrCompletedAt = new Date().toISOString();
+    const completed = manifest.chunks.filter((item) => item.ocrPageTexts?.length && item.ocrEngine === engine).length;
+    const pagesCached = manifest.chunks.filter((item) => item.ocrPageTexts?.length && item.ocrEngine === engine).reduce((sum, item) => sum + (item.endPage - item.startPage + 1), 0);
+    const total = manifest.chunks.length;
+    manifest.sourceIntelligence = { ...manifest.sourceIntelligence, status: "reading-contents", ocrEngine: engine, ocrBatchesTotal: total, ocrBatchesCompleted: completed, ocrPagesCached: pagesCached, pagesProcessed: pagesCached, progress: Math.min(68, 25 + Math.round(completed / Math.max(1, total) * 43)), currentBatchLabel: `PDF pages ${chunk.startPage}-${chunk.endPage}`, message: completed === total ? "Every source page is cached. Nemotron is ready to detect the book structure." : `Reading scan batch ${completed} of ${total}. Successful batches are saved.` };
+    await env.BUCKET.put(payload.sourceObjectKey, JSON.stringify(manifest), { httpMetadata: { contentType: "application/json" }, customMetadata: { originalName: manifest.name } });
+    return json({ cached: false, batch: { index: chunkIndex, startPage: chunk.startPage, endPage: chunk.endPage }, sourceIntelligence: manifest.sourceIntelligence, usage: result.usage });
+  } catch (error) {
+    if (error instanceof TeachingEngineError) return json({ error: error.message, code: error.code }, error.status);
+    return json({ error: error instanceof Error ? error.message : "OCR could not read this batch" }, 502);
+  }
 }
 
 async function sourceIntelligenceApi(request: Request, env: Env) {
@@ -1035,21 +1138,20 @@ async function sourceIntelligenceApi(request: Request, env: Env) {
   const ownerPrefix = `sources/${ownerKey(request)}/`;
   if (!payload.sourceObjectKey.startsWith(ownerPrefix)) return json({ error: "The source does not belong to this project" }, 403);
   const manifest = await readSourceManifest(env, payload.sourceObjectKey);
-  if (!manifest) return json({ error: "Re-upload this scan once so Book Studio can create safe page chunks." }, 409);
+  if (!manifest) return json({ error: "Re-upload this scan once so Book Studio can create safe OCR batches." }, 409);
   const engine = payload.engine === "mistral-ocr" ? "mistral-ocr" : "cloudflare-ai";
-  const frontMatter = manifest.chunks[0];
-  const object = frontMatter ? await env.BUCKET.get(frontMatter.key) : null;
-  if (!object) return json({ error: "The first source chunk is unavailable" }, 404);
+  const missing = manifest.chunks.filter((chunk) => !chunk.ocrPageTexts?.length || chunk.ocrEngine !== engine);
+  if (missing.length) return json({ error: `${missing.length} OCR batch${missing.length === 1 ? " is" : "es are"} still unread. Resume source analysis first.`, code: "ocr-incomplete", sourceIntelligence: manifest.sourceIntelligence }, 409);
   try {
-    const result = await openRouterPdfOutline(env, object, `${manifest.name}-front-matter.pdf`, engine, manifest.pages);
+    const result = await openRouterOutlineFromOcr(env, manifest);
     const validated = validateOutline(result.outline, manifest.pages);
     if (validated.errors.length) return json({ error: validated.errors.join(" "), code: "low-confidence-outline", sourceIntelligence: { ...manifest.sourceIntelligence, status: "ocr-required", lastError: validated.errors.join(" ") } }, 422);
-    manifest.sourceIntelligence = { ...manifest.sourceIntelligence, status: "outline-review", ocrEngine: engine, outline: validated.outline, progress: 72, pagesProcessed: frontMatter.endPage, message: `${validated.outline.length} source divisions found. Review their names and page ranges before generation.` };
+    manifest.sourceIntelligence = { ...manifest.sourceIntelligence, status: "outline-review", ocrEngine: engine, outline: validated.outline, progress: 78, pagesProcessed: manifest.pages, ocrBatchesTotal: manifest.chunks.length, ocrBatchesCompleted: manifest.chunks.length, ocrPagesCached: manifest.pages, structureRequestCount: (manifest.sourceIntelligence.structureRequestCount || 0) + 1, currentBatchLabel: undefined, lastError: undefined, message: `${validated.outline.length} source divisions found from cached OCR. Review their exact names and physical page ranges before generation.` };
     await env.BUCKET.put(payload.sourceObjectKey, JSON.stringify(manifest), { httpMetadata: { contentType: "application/json" }, customMetadata: { originalName: manifest.name } });
     return json({ sourceIntelligence: manifest.sourceIntelligence, usage: result.usage });
   } catch (error) {
     if (error instanceof TeachingEngineError) return json({ error: error.message, code: error.code }, error.status);
-    return json({ error: error instanceof Error ? error.message : "OCR could not read this source" }, 502);
+    return json({ error: error instanceof Error ? error.message : "Nemotron could not detect this source structure" }, 502);
   }
 }
 
@@ -1072,7 +1174,7 @@ async function sourceApi(request: Request, env: Env) {
   const { text, pageTexts, pages } = await extractSourcePages(bytes, extension);
   const analysis = analyseText(text);
   const classification = classifySource(pageTexts, pages || pageTexts.length);
-  const sourceIntelligence: SourceIntelligence = { version: 1, status: classification.sourceKind === "searchable" ? "ready" : "ocr-required", sourceKind: classification.sourceKind, totalPages: pages, fileSizeBytes: file.size, searchablePageRatio: classification.searchablePageRatio, pagesProcessed: pageTexts.length, progress: classification.sourceKind === "searchable" ? 100 : 22, message: classification.sourceKind === "searchable" ? "Searchable text and chapter structure detected." : "This PDF is scanned or only partly searchable. OCR is required before chapter generation.", structureMode: "parts", outline: [], ocrCostEstimateUsd: ocrEstimate(pages) };
+  const sourceIntelligence: SourceIntelligence = { version: 1, status: classification.sourceKind === "searchable" ? "ready" : "ocr-required", sourceKind: classification.sourceKind, totalPages: pages, fileSizeBytes: file.size, searchablePageRatio: classification.searchablePageRatio, pagesProcessed: pageTexts.length, progress: classification.sourceKind === "searchable" ? 100 : 22, message: classification.sourceKind === "searchable" ? "Searchable text and chapter structure detected." : "This PDF is scanned or only partly searchable. OCR is required before chapter generation.", structureMode: "parts", outline: [], ocrCostEstimateUsd: ocrEstimate(pages), ocrBatchesTotal: 1, ocrBatchesCompleted: 0, ocrPagesCached: 0, structureRequestCount: 0, estimatedNemotronRequests: 2 };
   if (extension === "pdf" && classification.sourceKind !== "searchable") {
     const chunkKey = objectKey;
     objectKey = `${chunkKey.replace(/\/[^/]+$/, "")}/${crypto.randomUUID()}/manifest.json`;
@@ -1149,13 +1251,16 @@ async function draftApi(request: Request, env: Env) {
         const end = chapter.sourceEndPage || start;
         const relevant = extracted.manifest.chunks.filter((chunk) => chunk.endPage >= start && chunk.startPage <= end);
         if (!relevant.length) throw new TeachingEngineError("No uploaded scan chunk overlaps this verified chapter range.", 422, "missing-source-range");
-        const files = [];
-        for (const chunk of relevant.slice(0, 3)) {
-          const object = await env.BUCKET.get(chunk.key);
-          if (object) files.push({ name: `${project.source}-pp-${chunk.startPage}-${chunk.endPage}.pdf`, bytes: await object.arrayBuffer() });
+        const hasCachedOcr = relevant.every((chunk) => chunk.ocrPageTexts?.length);
+        if (!hasCachedOcr) {
+          const files = [];
+          for (const chunk of relevant.slice(0, 3)) {
+            const object = await env.BUCKET.get(chunk.key);
+            if (object) files.push({ name: `${project.source}-pp-${chunk.startPage}-${chunk.endPage}.pdf`, bytes: await object.arrayBuffer() });
+          }
+          if (!files.length) throw new TeachingEngineError("The scan pages for this chapter are unavailable.", 404, "missing-source-range");
+          scannedInitial = await openRouterScannedChapter(env, files, chapter, project);
         }
-        if (!files.length) throw new TeachingEngineError("The scan pages for this chapter are unavailable.", 404, "missing-source-range");
-        scannedInitial = await openRouterScannedChapter(env, files, chapter, project);
       }
       const built = await buildPedagogicalDraft(env, extracted.pageTexts, chapter, index, project.chapters.length, project, scannedInitial);
       chapters.push(built.chapter);
@@ -1224,6 +1329,7 @@ const worker = {
       if (url.pathname === "/api/source") return await sourceApi(request, env);
       if (url.pathname === "/api/source/chunk") return await sourceChunkApi(request, env);
       if (url.pathname === "/api/source/finalize") return await sourceFinalizeApi(request, env);
+      if (url.pathname === "/api/source/ocr-chunk") return await sourceOcrChunkApi(request, env);
       if (url.pathname === "/api/source/intelligence") return await sourceIntelligenceApi(request, env);
       if (url.pathname === "/api/source/download") return await downloadSourceApi(request, env);
       if (url.pathname === "/api/source/reanalyse") return await reanalyseSourceApi(request, env);

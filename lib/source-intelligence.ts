@@ -29,7 +29,16 @@ export type SourceIntelligence = {
   ocrCostEstimateUsd?: number;
   cacheKey?: string;
   lastError?: string;
+  ocrBatchesTotal?: number;
+  ocrBatchesCompleted?: number;
+  ocrPagesCached?: number;
+  structureRequestCount?: number;
+  estimatedNemotronRequests?: number;
+  currentBatchLabel?: string;
 };
+
+export const SAFE_OCR_CHUNK_BYTES = 3_250_000;
+export const SAFE_OCR_CHUNK_PAGES = 4;
 
 export function classifySource(pageTexts: string[], totalPages = pageTexts.length): { sourceKind: SourceKind; searchablePageRatio: number } {
   if (!totalPages) return { sourceKind: "damaged", searchablePageRatio: 0 };
