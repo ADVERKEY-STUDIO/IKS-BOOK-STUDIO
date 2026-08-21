@@ -3376,7 +3376,6 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
         backgroundSize: draft.backgroundSize,
         backgroundPosition: draft.backgroundPosition,
         backgroundOpacity: draft.backgroundOpacity,
-        backgroundColor: "transparent",
       } satisfies Partial<DesignerPageRevision>;
       if (scope === "page") {
         await saveRevision({ ...currentSnapshot(), ...background });
