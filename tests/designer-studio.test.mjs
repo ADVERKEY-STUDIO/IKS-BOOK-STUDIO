@@ -128,3 +128,16 @@ test("Designer preview and PDF preserve the authored 650px A4 layout", () => {
   assert.match(page, /previewWholeBook/);
   assert.match(page, /await saveWholeBook\(\);[\s\S]*onPreview\(\)/);
 });
+
+test("Designer uses the final publication template and saves individual pages", () => {
+  assert.match(page, /function designerBookClasses/);
+  assert.match(page, /function designerPageClasses/);
+  assert.match(page, /designer-canvas-page book-sheet \$\{bookClasses\} \$\{pageClasses\}/);
+  assert.match(page, /surfaceClasses = `\$\{designerBookClasses\(project\)\} \$\{designerPageClasses\(project, page\)\}`/);
+  assert.match(page, /savePageById = async/);
+  assert.match(page, /page-save-button/);
+  assert.match(page, /Save page/);
+  assert.match(page, /designer-more-menu/);
+  assert.match(css, /\.designer-canvas-page\.contents-page li/);
+  assert.match(css, /\.page-save-button\.dirty/);
+});
