@@ -3234,7 +3234,7 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
 
     const sheet = document.createElement("article");
     sheet.className = "designer-canvas-page designer-measure-page";
-    Object.assign(sheet.style, { position: "fixed", left: "-10000px", top: "0", width: "650px", minWidth: "650px", height: "919.285714px", visibility: "hidden", pointerEvents: "none" });
+    Object.assign(sheet.style, { position: "fixed", left: "-10000px", top: "0", width: "794px", minWidth: "794px", height: "1123px", visibility: "hidden", pointerEvents: "none" });
     const content = document.createElement("div");
     content.className = "designer-editable-content";
     Object.assign(content.style, { boxSizing: "border-box", height: "100%", fontFamily: style.fontFamily, fontSize: `${style.fontSize}px`, color: style.textColor, lineHeight: String(style.lineHeight), letterSpacing: `${style.letterSpacing}px`, columnCount: String(style.columns), columnGap: `${style.columnGap}px`, padding: `${style.pagePadding}px` });
