@@ -193,6 +193,22 @@ type DesignerPageOverride = DesignerPageRevision & {
 
 type DesignerStylePreset = { id: string; name: string; style: Partial<DesignerPageRevision> };
 
+type PageManifestChapter = {
+  chapterId: number;
+  sourcePages: number;
+  targetPages: number;
+  renderedPages: number;
+  status: "short" | "matched" | "long";
+};
+
+type PageManifest = {
+  version: 1;
+  generatedAt: string;
+  sourceSignature: string;
+  pages: DesignerBasePage[];
+  chapters: PageManifestChapter[];
+};
+
 type Project = {
   id: string;
   title: string;
@@ -231,6 +247,7 @@ type Project = {
   designerPages?: DesignerPageOverride[];
   designerPageOrder?: string[];
   designerPresets?: DesignerStylePreset[];
+  pageManifest?: PageManifest;
   creationMode?: "external" | "automatic";
   externalManuscript?: {
     fileName: string;
@@ -1021,7 +1038,7 @@ function normalizeProject(saved: Project): Project {
   // matching illustration, including already-saved projects.
   const visualProject = childFirstSaved;
   const illustratedChapters = fitChaptersToBookLimit(attachChapterVisuals(visualProject, hierarchy.chapters));
-  return {
+  const normalized: Project = {
     ...emptyProject,
     ...childFirstSaved,
     sourcePreview: cleanSaved.sourcePreview ?? "",
@@ -1039,6 +1056,7 @@ function normalizeProject(saved: Project): Project {
     designerPageOrder: cleanSaved.designerPageOrder ?? [],
     designerPresets: cleanSaved.designerPresets ?? [],
   };
+  return { ...normalized, pageManifest: buildPageManifest(normalized) };
 }
 
 function makeId() {
@@ -1484,7 +1502,8 @@ export default function Home() {
   }
 
   async function persistProject(next: Project) {
-    const bounded = { ...next, chapters: fitChaptersToBookLimit(next.chapters) };
+    const boundedProject = { ...next, chapters: fitChaptersToBookLimit(next.chapters) };
+    const bounded = { ...boundedProject, pageManifest: buildPageManifest(boundedProject) };
     const response = await fetch("/api/projects", { method: "POST", headers: requestHeaders(), body: JSON.stringify(bounded) });
     if (!response.ok) throw new Error("Could not save the book");
     const data = await response.json() as { project: Project };
@@ -2776,10 +2795,13 @@ function paginateReaderHtml(html: string, audience: string) {
   const flattened = clean.replace(/<\/?(?:section|div)\b[^>]*>/gi, "");
   const rawBlocks = flattened.match(/<(h2|h3|p|blockquote|ul|ol|b)\b[^>]*>[\s\S]*?<\/\1>/gi) ?? [flattened];
   const age = childAgeBand(audience);
-  // Calibrated to the usable A4 text area. The opening sheet reserves room for
-  // the chapter title; continuation sheets use more of the page.
-  const pageCapacity = age === "7-9" ? 2550 : age === "13-15" ? 3000 : 2750;
-  const firstPageCapacity = Math.round(pageCapacity * .78);
+  // Keep the renderer aligned with the adaptation planner. The old values
+  // allowed roughly 400-500 words on a children's page while the planner
+  // promised about 185, so a planned seven-page chapter collapsed to two or
+  // three rendered pages. These character budgets correspond to the actual
+  // reader-age word budgets and leave room for headings and learning features.
+  const pageCapacity = age === "7-9" ? 1180 : age === "13-15" ? 1760 : 1480;
+  const firstPageCapacity = Math.round(pageCapacity * .82);
   const textLength = (block: string) => block.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().length;
   const blockWeightFor = (block: string) => textLength(block) + (/^<h[23]/i.test(block) ? 145 : 0) + (/^<(?:ul|ol|blockquote)/i.test(block) ? 100 : 0);
   const sentenceParts = (value: string) => value.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [];
@@ -2926,32 +2948,18 @@ function Preview({ project, exportBusy, pdfProgress, onClose, onDownload }: { pr
   const [showThumbnails, setShowThumbnails] = useState(true);
   const [selectedChapterId, setSelectedChapterId] = useState(project.chapters[0]?.id ?? 1);
   const printable = useMemo(() => printableChapters(project.chapters), [project.chapters]);
+  const manifest = useMemo(() => resolvedPageManifest(project), [project]);
   const unresolved = project.chapters.filter((chapter) => !isPublishApproved(chapter));
   const worldClass = `${bookPersonaClass(project.bookPersona)} world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")}`;
   const pageClass = `page-aesthetic-${normalizedTitle(project.pageAesthetic).replace(/[^a-z]+/g, "-")}`;
   const borderClass = `book-border-${normalizedTitle(project.bookBorder).replace(/[^a-z]+/g, "-")}`;
   const ageClass = `age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}`;
-  const chapterSheets = printable.chapters.flatMap((chapter) => {
-    if (chapter.importValidated && chapter.importedPages?.length) return chapter.importedPages.map((page, index) => ({ kind: "chapter" as const, chapter, body: page.body, pageIndex: index, pageCount: chapter.importedPages!.length, imageUrl: page.imageUrl, imageCaption: page.imageCaption, imageAlt: page.imageAlt }));
-    const pages = paginateReaderHtml(chapter.body, project.audience);
-    // A short final text page and a separate illustration page created two
-    // half-empty sheets in almost every chapter. Let the illustration occupy
-    // the remaining lower half when the final page has enough safe room.
-    const age = childAgeBand(project.audience);
-    const shareLimit = age === "7-9" ? 1500 : age === "13-15" ? 1750 : 1625;
-    const shareIllustration = Boolean(chapter.imageUrl) && readerTextLength(pages[pages.length - 1] ?? "") <= shareLimit;
-    const pageCount = pages.length + (chapter.imageUrl && !shareIllustration ? 1 : 0);
-    const text = pages.map((body, index) => {
-      const includesIllustration = shareIllustration && index === pages.length - 1;
-      return { kind: "chapter" as const, chapter, body, pageIndex: index, pageCount, imageUrl: includesIllustration ? chapter.imageUrl : undefined, imageCaption: includesIllustration ? chapter.imageCaption : undefined, imageAlt: includesIllustration ? chapter.imageAlt : undefined };
-    });
-    return chapter.imageUrl && !shareIllustration ? [...text, { kind: "chapter" as const, chapter, body: "", pageIndex: pages.length, pageCount, imageUrl: chapter.imageUrl, imageCaption: chapter.imageCaption, imageAlt: chapter.imageAlt }] : text;
-  });
+  const chapterSheets = useMemo(() => chapterSheetsForProject(project).map((sheet) => ({ kind: "chapter" as const, ...sheet })), [project]);
   const sheets: ({ kind: "cover" | "contents" | "back" } | (typeof chapterSheets)[number])[] = [{ kind: "cover" }, { kind: "contents" }, ...chapterSheets, { kind: "back" }];
   const renderSheet = (sheet: (typeof sheets)[number], key: string) => {
     const base = `book-sheet ${worldClass} ${pageClass} ${borderClass}`;
     if (sheet.kind === "cover") return <article className={`${base} preview-cover`} key={key}><div className="cover-edition">IKS BOOK STUDIO · {project.audience.toUpperCase()}</div><h1>{project.title}</h1><span>An illustrated book shaped from your source</span><b>✦</b>{unresolved.length > 0 && <small className="draft-status">Working preview · {unresolved.length} chapter{unresolved.length === 1 ? "" : "s"} still in progress</small>}</article>;
-    if (sheet.kind === "contents") return <article className={`${base} preview-page contents-page`} key={key}><span>CONTENTS</span><h2>Inside this book</h2><ol>{printable.chapters.map((chapter, index) => <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{isPublishApproved(chapter) ? `${chapter.pages} pages` : "In progress"}</i></li>)}</ol></article>;
+    if (sheet.kind === "contents") return <article className={`${base} preview-page contents-page`} key={key}><span>CONTENTS</span><h2>Inside this book</h2><ol>{printable.chapters.map((chapter, index) => { const stat = manifest.chapters.find((item) => item.chapterId === chapter.id); return <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{stat?.renderedPages ?? 0} actual page{stat?.renderedPages === 1 ? "" : "s"}</i></li>; })}</ol></article>;
     if (sheet.kind === "back") return <article className={`${base} preview-page backmatter`} key={key}><span>A FINAL THOUGHT</span><h2>Keep wondering</h2><p>The most powerful ideas do not end on the last page. They grow when we ask careful questions, notice new connections and share what we discover.</p><p>Carry one idea from this book into the world—and see where it leads.</p></article>;
     const image = Boolean(sheet.imageUrl) && !sheet.body;
     const combined = Boolean(sheet.imageUrl) && Boolean(sheet.body);
@@ -2985,33 +2993,110 @@ type DesignerBasePage = {
   html: string;
 };
 
-function designerBasePages(project: Project): DesignerBasePage[] {
+type ChapterSheet = {
+  chapter: Chapter;
+  body: string;
+  pageIndex: number;
+  pageCount: number;
+  imageUrl?: string;
+  imageCaption?: string;
+  imageAlt?: string;
+};
+
+function pageManifestSignature(project: Project) {
+  const source = JSON.stringify({
+    audience: project.audience,
+    title: project.title,
+    chapters: project.chapters.map((chapter) => ({
+      id: chapter.id,
+      title: chapter.title,
+      target: chapter.pages,
+      body: chapter.body,
+      image: chapter.imageUrl,
+      imported: chapter.importedPages?.map((page) => [page.pageId, page.body, page.imageUrl]),
+    })),
+  });
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `v1-${(hash >>> 0).toString(36)}`;
+}
+
+function chapterSheetsForProject(project: Project): ChapterSheet[] {
   const printable = printableChapters(project.chapters);
+  return printable.chapters.flatMap((chapter) => {
+    if (chapter.importValidated && chapter.importedPages?.length) {
+      return chapter.importedPages.map((page, pageIndex) => ({
+        chapter,
+        body: page.body,
+        pageIndex,
+        pageCount: chapter.importedPages!.length,
+        imageUrl: page.imageUrl,
+        imageCaption: page.imageCaption,
+        imageAlt: page.imageAlt,
+      }));
+    }
+    const textPages = paginateReaderHtml(chapter.body, project.audience);
+    const age = childAgeBand(project.audience);
+    const shareLimit = age === "7-9" ? 650 : age === "13-15" ? 940 : 790;
+    const shareIllustration = Boolean(chapter.imageUrl) && readerTextLength(textPages.at(-1) ?? "") <= shareLimit;
+    const pageCount = textPages.length + (chapter.imageUrl && !shareIllustration ? 1 : 0);
+    const sheets: ChapterSheet[] = textPages.map((body, pageIndex) => ({
+      chapter,
+      body,
+      pageIndex,
+      pageCount,
+      imageUrl: shareIllustration && pageIndex === textPages.length - 1 ? chapter.imageUrl : undefined,
+      imageCaption: shareIllustration && pageIndex === textPages.length - 1 ? chapter.imageCaption : undefined,
+      imageAlt: shareIllustration && pageIndex === textPages.length - 1 ? chapter.imageAlt : undefined,
+    }));
+    if (chapter.imageUrl && !shareIllustration) sheets.push({ chapter, body: "", pageIndex: textPages.length, pageCount, imageUrl: chapter.imageUrl, imageCaption: chapter.imageCaption, imageAlt: chapter.imageAlt });
+    return sheets;
+  });
+}
+
+function buildPageManifest(project: Project): PageManifest {
+  const printable = printableChapters(project.chapters);
+  const chapterSheets = chapterSheetsForProject(project);
+  const chapterStats = printable.chapters.map((chapter) => {
+    const renderedPages = chapterSheets.filter((sheet) => sheet.chapter.id === chapter.id).length;
+    const targetPages = Math.max(1, chapter.pages || chapter.recommendedPages || renderedPages);
+    return {
+      chapterId: chapter.id,
+      sourcePages: chapter.sourcePageCount ?? chapter.importedPages?.length ?? 0,
+      targetPages,
+      renderedPages,
+      status: renderedPages < targetPages ? "short" as const : renderedPages > targetPages ? "long" as const : "matched" as const,
+    };
+  });
   const pages: DesignerBasePage[] = [
     { slotId: "cover", label: "Front cover", kind: "cover", html: `<div class="cover-edition">IKS BOOK STUDIO · ${escapeHtml(project.audience.toUpperCase())}</div><h1>${escapeHtml(project.title)}</h1><span>An illustrated book shaped from your source</span><b>✦</b>` },
-    { slotId: "contents", label: "Contents page", kind: "contents", html: `<span>CONTENTS</span><h2>Inside this book</h2><ol>${printable.chapters.map((chapter, index) => `<li><b>${String(index + 1).padStart(2, "0")}</b><span>${escapeHtml(chapter.title)}</span><i>${isPublishApproved(chapter) ? `${chapter.pages} pages` : "In progress"}</i></li>`).join("")}</ol>` },
+    { slotId: "contents", label: "Contents page", kind: "contents", html: `<span>CONTENTS</span><h2>Inside this book</h2><ol>${printable.chapters.map((chapter, index) => { const stat = chapterStats.find((item) => item.chapterId === chapter.id); return `<li><b>${String(index + 1).padStart(2, "0")}</b><span>${escapeHtml(chapter.title)}</span><i>${stat?.renderedPages ?? 0} actual page${stat?.renderedPages === 1 ? "" : "s"}</i></li>`; }).join("")}</ol>` },
   ];
-  printable.chapters.forEach((chapter) => {
-    const textPages = chapter.importValidated && chapter.importedPages?.length ? chapter.importedPages.map((page) => page.body) : paginateReaderHtml(chapter.body, project.audience);
-    textPages.forEach((body, pageIndex) => pages.push({
-      slotId: `chapter-${chapter.id}-page-${pageIndex + 1}`,
-      label: `Chapter ${chapter.id} · page ${pageIndex + 1}`,
+  chapterSheets.forEach((sheet) => {
+    const illustrationOnly = Boolean(sheet.imageUrl) && !sheet.body;
+    pages.push({
+      slotId: `chapter-${sheet.chapter.id}-page-${sheet.pageIndex + 1}`,
+      label: illustrationOnly ? `Chapter ${sheet.chapter.id} · illustration` : `Chapter ${sheet.chapter.id} · page ${sheet.pageIndex + 1}`,
       kind: "chapter",
-      chapterId: chapter.id,
-      pageIndex,
-      html: `<header class="print-chapter-header"><span>CHAPTER ${chapter.id}</span><span>PAGE ${pageIndex + 1} OF ${textPages.length}</span></header>${pageIndex === 0 ? `<h2>${escapeHtml(chapter.title)}</h2>` : `<p class="continued-title">${escapeHtml(chapter.title)} · continued</p>`}<div class="preview-body">${body}</div>${chapter.imageUrl && pageIndex === textPages.length - 1 ? `<figure class="chapter-image"><img src="${escapeHtml(chapter.imageUrl)}" alt="${escapeHtml(chapter.imageAlt || chapter.title)}"><figcaption>${escapeHtml(chapter.imageCaption || chapter.title)}</figcaption></figure>` : ""}<footer class="sheet-number"><span>${escapeHtml(project.title)}</span><span>${pageIndex + 1}</span></footer>`,
-    }));
-    if (chapter.imageUrl && !textPages.some((body) => body.includes(chapter.imageUrl!))) pages.push({
-      slotId: `chapter-${chapter.id}-page-${textPages.length + 1}`,
-      label: `Chapter ${chapter.id} · illustration`,
-      kind: "chapter",
-      chapterId: chapter.id,
-      pageIndex: textPages.length,
-      html: `<header class="print-chapter-header"><span>CHAPTER ${chapter.id}</span><span>PAGE ${textPages.length + 1} OF ${textPages.length + 1}</span></header><figure class="chapter-image designer-full-figure"><img src="${escapeHtml(chapter.imageUrl)}" alt="${escapeHtml(chapter.imageAlt || chapter.title)}"><figcaption>${escapeHtml(chapter.imageCaption || chapter.title)}</figcaption></figure><footer class="sheet-number"><span>${escapeHtml(project.title)}</span><span>${textPages.length + 1}</span></footer>`,
+      chapterId: sheet.chapter.id,
+      pageIndex: sheet.pageIndex,
+      html: `<header class="print-chapter-header"><span>CHAPTER ${sheet.chapter.id}</span><span>PAGE ${sheet.pageIndex + 1} OF ${sheet.pageCount}</span></header>${sheet.pageIndex === 0 && !illustrationOnly ? `<h2>${escapeHtml(sheet.chapter.title)}</h2>` : sheet.body ? `<p class="continued-title">${escapeHtml(sheet.chapter.title)} · continued</p>` : ""}${sheet.body ? `<div class="preview-body">${sheet.body}</div>` : ""}${sheet.imageUrl ? `<figure class="chapter-image${illustrationOnly ? " designer-full-figure" : ""}"><img src="${escapeHtml(sheet.imageUrl)}" alt="${escapeHtml(sheet.imageAlt || sheet.chapter.title)}"><figcaption>${escapeHtml(sheet.imageCaption || sheet.chapter.title)}</figcaption></figure>` : ""}<footer class="sheet-number"><span>${escapeHtml(project.title)}</span><span>${sheet.pageIndex + 1}</span></footer>`,
     });
   });
   pages.push({ slotId: "back", label: "Back cover", kind: "back", html: "<span>A FINAL THOUGHT</span><h2>Keep wondering</h2><p>The most powerful ideas do not end on the last page. They grow when we ask careful questions, notice new connections and share what we discover.</p><p>Carry one idea from this book into the world—and see where it leads.</p>" });
-  return pages;
+  return { version: 1, generatedAt: new Date().toISOString(), sourceSignature: pageManifestSignature(project), pages, chapters: chapterStats };
+}
+
+function resolvedPageManifest(project: Project) {
+  const signature = pageManifestSignature(project);
+  return project.pageManifest?.version === 1 && project.pageManifest.sourceSignature === signature ? project.pageManifest : buildPageManifest(project);
+}
+
+function designerBasePages(project: Project): DesignerBasePage[] {
+  return resolvedPageManifest(project).pages;
 }
 
 function designerBookClasses(project: Project) {
@@ -3077,6 +3162,7 @@ function designerPageFill(html: string, audience: string, firstPage: boolean) {
 }
 
 function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Project; onClose: () => void; onPreview: () => void; onCommit: (next: Project) => Promise<void> }) {
+  const manifest = useMemo(() => resolvedPageManifest(project), [project]);
   const basePages = useMemo(() => designerBasePages(project), [project]);
   const savedPages = (project.designerPages ?? []).map(hydrateDesignerOverride).map((page) => {
     const base = basePages.find((candidate) => candidate.slotId === page.slotId);
@@ -3084,7 +3170,11 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   });
   const customPages = savedPages.filter((page) => page.kind === "custom");
   const allPages = [...basePages, ...customPages.map((page) => ({ slotId: page.slotId, label: page.label, kind: "custom" as const, chapterId: page.chapterId, pageIndex: page.pageIndex, html: page.html }))];
-  const order = [...(project.designerPageOrder ?? []).filter((slotId) => allPages.some((page) => page.slotId === slotId)), ...allPages.map((page) => page.slotId).filter((slotId) => !(project.designerPageOrder ?? []).includes(slotId))];
+  const savedOrder = project.designerPageOrder ?? [];
+  const savedOrderMatchesManifest = basePages.every((page) => savedOrder.includes(page.slotId));
+  const order = savedOrderMatchesManifest
+    ? [...savedOrder.filter((slotId) => allPages.some((page) => page.slotId === slotId)), ...allPages.map((page) => page.slotId).filter((slotId) => !savedOrder.includes(slotId))]
+    : [...basePages.map((page) => page.slotId), ...customPages.map((page) => page.slotId)];
   const orderedPages = order.map((slotId) => allPages.find((page) => page.slotId === slotId)!).filter(Boolean);
   const [selectedId, setSelectedId] = useState(order[0] ?? "cover");
   const selected = orderedPages.find((page) => page.slotId === selectedId) ?? orderedPages[0];
@@ -3112,7 +3202,11 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
     const liveDraft = liveBookDrafts.current[selected?.slotId ?? ""];
     setDraft(liveDraft ?? { ...next, html: liveBookHtml.current[selected?.slotId ?? ""] ?? next.html });
     setUndoStack([]); setRedoStack([]); setIssues([]); setPendingBackground(null); setSelectedObject("page"); selectedNode.current = null;
-  }, [selectedId]);
+  }, [selectedId, selected?.slotId, selected?.html, saved?.savedAt]);
+
+  useEffect(() => {
+    if (!orderedPages.some((page) => page.slotId === selectedId) && orderedPages[0]) setSelectedId(orderedPages[0].slotId);
+  }, [selectedId, orderedPages]);
 
   const currentSnapshot = () => ({ ...draft, html: editor.current?.innerHTML ?? draft.html });
   const revisionFor = (page: (typeof allPages)[number]) => {
@@ -3299,6 +3393,11 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   const balanceLayout = async (scope: "chapter" | "book") => {
     const targetChapterIds = scope === "book" ? project.chapters.map((chapter) => chapter.id) : selected.chapterId ? [selected.chapterId] : [];
     if (!targetChapterIds.length) { setMessage("Choose a chapter page before balancing this chapter."); return; }
+    const editedTargets = savedPages.filter((page) => page.chapterId && targetChapterIds.includes(page.chapterId) && !page.layoutLocked);
+    if (editedTargets.length && !window.confirm(`Rebuild pagination for ${scope === "book" ? "the book" : "this chapter"}? ${editedTargets.length} edited page layout${editedTargets.length === 1 ? "" : "s"} may be reflowed. Locked pages will be preserved and previous versions remain recoverable.`)) {
+      setMessage("Pagination rebuild cancelled. No Designer pages were changed.");
+      return;
+    }
     setBusy(true);
     try {
       const replacements = new Map(savedPages.map((page) => [page.slotId, page]));
@@ -3461,6 +3560,19 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   };
   const runBookPreflight = () => {
     const found: { slotId: string; label: string; issue: string }[] = [];
+    manifest.chapters.forEach((stat) => {
+      if (stat.renderedPages === stat.targetPages) return;
+      const chapter = project.chapters.find((item) => item.id === stat.chapterId);
+      const firstPage = orderedPages.find((page) => page.chapterId === stat.chapterId);
+      if (!chapter || !firstPage) return;
+      found.push({
+        slotId: firstPage.slotId,
+        label: chapter.title,
+        issue: stat.renderedPages < stat.targetPages
+          ? `Target ${stat.targetPages} pages, but only ${stat.renderedPages} render. Expand the chapter or accept the shorter length.`
+          : `Target ${stat.targetPages} pages, but ${stat.renderedPages} render. Review the target or rebalance the chapter.`,
+      });
+    });
     orderedPages.forEach((page) => {
       const revision = revisionFor(page);
       if (revision.deleted || revision.intentionalBlank || page.kind !== "chapter") return;
@@ -3499,8 +3611,8 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   if (!selected) return null;
   return <div className="modal-backdrop designer-backdrop"><section className="designer-studio designer-studio-pro" role="dialog" aria-modal="true" aria-label="Designer Studio">
     <header><div><p className="eyebrow">FINAL PRODUCTION</p><h2>Whole-book Designer</h2><span>The pages below are the same pages used by Preview and PDF.</span></div><div><button className="secondary" onClick={() => void previewWholeBook()} disabled={busy}>Preview</button><button className="primary" onClick={() => void saveRevision()} disabled={busy || !dirtyPages.includes(selectedId)}>{busy ? "Saving…" : dirtyPages.includes(selectedId) ? "Save page" : "Page saved"}</button><details className="designer-more-menu"><summary>More</summary><div><button onClick={runBookPreflight}>Check whole book</button><button onClick={() => void balanceLayout("book")} disabled={busy}>Balance layout</button><button onClick={() => void saveWholeBook()} disabled={busy}>Save whole book</button><button onClick={() => void addBlankPage()}>Add blank page</button><button onClick={() => void duplicatePage()}>Duplicate page</button></div></details><button className="designer-close" onClick={onClose} aria-label="Close Designer Studio">×</button></div></header>
-    <div className="designer-status"><span>◆</span><b>{message}</b><i>{dirtyPages.length ? `${dirtyPages.length} unsaved page${dirtyPages.length === 1 ? "" : "s"}` : `${orderedPages.filter((page) => !revisionFor(page).deleted).length} pages`} · {selected.label}</i></div>
-    <div className="designer-workspace designer-book-workspace"><aside className="designer-pages designer-book-nav"><p className="designer-nav-label">BOOK SECTIONS</p>{orderedPages.filter((page) => page.kind === "cover" || page.kind === "contents").map((page) => <button key={page.slotId} className={page.slotId === selectedId ? "active" : ""} onClick={() => selectAndReveal(page.slotId)}><span>{page.kind === "cover" ? "C" : "T"}</span><div><b>{page.label}</b><small>Book matter</small></div></button>)}{project.chapters.map((chapter) => { const pages = orderedPages.filter((page) => page.chapterId === chapter.id && !revisionFor(page).deleted); const hasIssue = pages.some((page) => ["empty", "overflow"].includes(designerPageFill(liveBookHtml.current[page.slotId] ?? revisionFor(page).html, project.audience, page.pageIndex === 0).tone)); return <button key={chapter.id} className={selected.chapterId === chapter.id ? "active" : ""} onClick={() => jumpToChapter(chapter.id)}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small>{pages.length} page{pages.length === 1 ? "" : "s"}{hasIssue ? " · check spacing" : " · balanced"}</small></div></button>; })}{orderedPages.filter((page) => page.kind === "back").map((page) => <button key={page.slotId} className={page.slotId === selectedId ? "active" : ""} onClick={() => selectAndReveal(page.slotId)}><span>B</span><div><b>{page.label}</b><small>Book matter</small></div></button>)}</aside>
+    <div className="designer-status"><span>◆</span><b>{message}</b><i>{dirtyPages.length ? `${dirtyPages.length} unsaved page${dirtyPages.length === 1 ? "" : "s"}` : `${orderedPages.filter((page) => !revisionFor(page).deleted).length} pages`} · {selected.label}{selected.chapterId ? (() => { const stat = manifest.chapters.find((item) => item.chapterId === selected.chapterId); return stat ? ` · target ${stat.targetPages}, rendered ${stat.renderedPages}` : ""; })() : ""}</i></div>
+    <div className="designer-workspace designer-book-workspace"><aside className="designer-pages designer-book-nav"><p className="designer-nav-label">BOOK SECTIONS</p>{orderedPages.filter((page) => page.kind === "cover" || page.kind === "contents").map((page) => <button key={page.slotId} className={page.slotId === selectedId ? "active" : ""} onClick={() => selectAndReveal(page.slotId)}><span>{page.kind === "cover" ? "C" : "T"}</span><div><b>{page.label}</b><small>Book matter</small></div></button>)}{project.chapters.map((chapter) => { const pages = orderedPages.filter((page) => page.chapterId === chapter.id && !revisionFor(page).deleted); const hasIssue = pages.some((page) => ["empty", "overflow"].includes(designerPageFill(liveBookHtml.current[page.slotId] ?? revisionFor(page).html, project.audience, page.pageIndex === 0).tone)); const stat = manifest.chapters.find((item) => item.chapterId === chapter.id); const mismatch = stat && stat.renderedPages !== stat.targetPages; return <button key={chapter.id} className={selected.chapterId === chapter.id ? "active" : ""} onClick={() => jumpToChapter(chapter.id)}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small>{pages.length} rendered · target {stat?.targetPages ?? chapter.pages}{mismatch ? stat!.renderedPages < stat!.targetPages ? ` · short by ${stat!.targetPages - stat!.renderedPages}` : ` · ${stat!.renderedPages - stat!.targetPages} extra` : hasIssue ? " · check spacing" : " · matched"}</small></div></button>; })}{orderedPages.filter((page) => page.kind === "back").map((page) => <button key={page.slotId} className={page.slotId === selectedId ? "active" : ""} onClick={() => selectAndReveal(page.slotId)}><span>B</span><div><b>{page.label}</b><small>Book matter</small></div></button>)}</aside>
     <main className="designer-stage"><nav className="designer-toolbar designer-book-toolbar"><button onClick={undo} disabled={!undoStack.length} title="Undo selected page">↶</button><button onClick={redo} disabled={!redoStack.length} title="Redo selected page">↷</button><select aria-label="Selected text font" defaultValue="Georgia" onChange={(event) => command("fontName", event.target.value)}><option>Georgia</option><option>Arial</option><option>Verdana</option><option>Trebuchet MS</option><option>Times New Roman</option><option>Noto Serif</option><option>Noto Sans Devanagari</option></select><select aria-label="Selected text size" defaultValue="3" onChange={(event) => command("fontSize", event.target.value)}><option value="1">Small</option><option value="3">Body</option><option value="5">Subheading</option><option value="7">Title</option></select><button onClick={() => command("bold")}><b>B</b></button><button onClick={() => command("italic")}><i>I</i></button><button onClick={() => command("underline")}><u>U</u></button><button onClick={() => command("insertUnorderedList")}>• List</button><button onClick={() => command("justifyLeft")}>Left</button><button onClick={() => command("justifyCenter")}>Centre</button><button onClick={() => command("justifyRight")}>Right</button><label title="Text colour"><input type="color" defaultValue="#243b34" onChange={(event) => command("foreColor", event.target.value)}/></label><label title="Highlight"><input type="color" defaultValue="#f6e6ad" onChange={(event) => command("hiliteColor", event.target.value)}/></label><button onClick={addTextBox}>＋ Text box</button><button className="balance-chapter-button" onClick={() => void balanceLayout("chapter")} disabled={!selected.chapterId || busy}>Balance this chapter</button></nav>
       <div className="designer-canvas-wrap designer-whole-book-canvas" aria-label="Editable whole book">{orderedPages.filter((page) => !revisionFor(page).deleted).map((page, index) => { const revision = revisionFor(page); const fill = page.kind === "chapter" ? designerPageFill(liveBookHtml.current[page.slotId] ?? revision.html, project.audience, page.pageIndex === 0) : { ratio: 100, label: "Designed page", tone: "balanced" }; const pageBackground = { backgroundImage: revision.backgroundImageUrl ? `url(${revision.backgroundImageUrl})` : undefined, backgroundSize: revision.backgroundSize === "repeat" ? "auto" : revision.backgroundSize, backgroundRepeat: revision.backgroundSize === "repeat" ? "repeat" : "no-repeat", backgroundPosition: revision.backgroundPosition, opacity: revision.backgroundOpacity }; const pageBorder = revision.borderStyle === "none" ? undefined : { inset: `${revision.borderInset}px`, border: `${revision.borderWidth}px ${revision.borderStyle} ${revision.borderColor}`, borderRadius: `${revision.borderRadius}px` }; const pageClasses = designerPageClasses(project, page); const isDirty = dirtyPages.includes(page.slotId); return <section className={`designer-flow-page${page.slotId === selectedId ? " selected" : ""}`} id={`designer-flow-${page.slotId}`} key={page.slotId}><div className="designer-flow-page-meta"><span>PAGE {index + 1}</span><b>{page.label}</b><button className={`page-fill-badge ${fill.tone}`} onClick={() => { setSelectedId(page.slotId); setPanel("preflight"); }}>{fill.label} · {fill.ratio}%</button><button className={`page-save-button ${isDirty ? "dirty" : "saved"}`} disabled={busy || !isDirty} onClick={() => void savePageById(page.slotId)}>{busy && page.slotId === selectedId ? "Saving…" : isDirty ? "Save page" : "Saved"}</button></div><article className={`designer-canvas-page book-sheet ${bookClasses} ${pageClasses}${revision.intentionalBlank ? " blank" : ""}`} style={{ backgroundColor: revision.backgroundColor }} onMouseDown={() => setSelectedId(page.slotId)}><div className="designer-background-layer" style={pageBackground}/><div className="designer-border-layer" style={pageBorder}/><div className={`designer-watermark-layer${revision.watermarkRepeat ? " repeat" : ""}`} style={{ opacity: revision.watermarkOpacity, left: `${revision.watermarkX}%`, top: `${revision.watermarkY}%`, transform: `translate(-50%,-50%) rotate(${revision.watermarkRotation}deg)`, display: revision.watermarkVisible ? "grid" : "none" }}>{Array.from({ length: revision.watermarkRepeat ? 6 : 1 }, (_, watermarkIndex) => <span key={watermarkIndex}>{revision.watermarkImageUrl && <img src={revision.watermarkImageUrl} alt="Custom watermark"/>}{revision.watermarkText}</span>)}</div>{!revision.intentionalBlank && revision.contentVisible && <div ref={(node) => { if (node) { bookEditors.current.set(page.slotId, node); if (page.slotId === selectedId) editor.current = node; } else bookEditors.current.delete(page.slotId); }} className="designer-editable-content" style={pageStyleFor(revision)} contentEditable suppressContentEditableWarning onFocus={() => setSelectedId(page.slotId)} onInput={(event) => rememberLiveHtml(page.slotId, event.currentTarget.innerHTML)} onClick={selectCanvasObject} dangerouslySetInnerHTML={{ __html: liveBookHtml.current[page.slotId] ?? revision.html }}/>}</article>{revision.intentionalBlank && <div className="intentional-blank-label">INTENTIONAL BLANK PAGE</div>}</section>; })}{pendingBackground && <div className="designer-background-choice" role="dialog" aria-modal="true" aria-labelledby="background-choice-title"><img src={pendingBackground.url} alt="Uploaded background preview"/><div><p className="eyebrow">BACKGROUND READY</p><h3 id="background-choice-title">Where should this background be used?</h3><span>{pendingBackground.fileName}</span><div className="designer-background-choice-actions"><button onClick={() => void applyUploadedBackground("page")} disabled={busy}>This page only</button><button className="primary" onClick={() => void applyUploadedBackground("book")} disabled={busy}>All pages</button></div><button className="designer-choice-cancel" onClick={() => { setPendingBackground(null); setMessage("Background choice cancelled. The current design was not changed."); }} disabled={busy}>Cancel</button></div></div>}</div>
     </main>
@@ -3627,16 +3739,8 @@ function CanvaPreview({ project, exportBusy, pdfProgress, onClose, onDownload, o
   const typographyClass = `typography-${normalizedTitle(project.fontTheme).replace(/[^a-z]+/g, "-")}`;
   const watermarkSlug = normalizedTitle(project.pageWatermark).replace(/[^a-z]+/g, "-");
   const ageClass = `age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}`;
-  const chapterSheets = printable.chapters.flatMap((chapter) => {
-    if (chapter.importValidated && chapter.importedPages?.length) return chapter.importedPages.map((page, index) => ({ kind: "chapter" as const, chapter, body: page.body, pageIndex: index, pageCount: chapter.importedPages!.length, imageUrl: page.imageUrl, imageCaption: page.imageCaption, imageAlt: page.imageAlt }));
-    const pages = paginateReaderHtml(chapter.body, project.audience);
-    const age = childAgeBand(project.audience);
-    const shareLimit = age === "7-9" ? 1500 : age === "13-15" ? 1750 : 1625;
-    const shareIllustration = Boolean(chapter.imageUrl) && readerTextLength(pages[pages.length - 1] ?? "") <= shareLimit;
-    const pageCount = pages.length + (chapter.imageUrl && !shareIllustration ? 1 : 0);
-    const text = pages.map((body, index) => ({ kind: "chapter" as const, chapter, body, pageIndex: index, pageCount, imageUrl: shareIllustration && index === pages.length - 1 ? chapter.imageUrl : undefined, imageCaption: shareIllustration && index === pages.length - 1 ? chapter.imageCaption : undefined, imageAlt: shareIllustration && index === pages.length - 1 ? chapter.imageAlt : undefined }));
-    return chapter.imageUrl && !shareIllustration ? [...text, { kind: "chapter" as const, chapter, body: "", pageIndex: pages.length, pageCount, imageUrl: chapter.imageUrl, imageCaption: chapter.imageCaption, imageAlt: chapter.imageAlt }] : text;
-  });
+  const manifest = useMemo(() => resolvedPageManifest(project), [project]);
+  const chapterSheets = useMemo(() => chapterSheetsForProject(project).map((sheet) => ({ kind: "chapter" as const, ...sheet })), [project]);
   const baseSheets: ({ kind: "cover" | "contents" | "back" } | (typeof chapterSheets)[number])[] = [{ kind: "cover" }, { kind: "contents" }, ...chapterSheets, { kind: "back" }];
   type BaseSheet = (typeof baseSheets)[number];
   type Sheet = BaseSheet | { kind: "custom"; designerPage: DesignerPageOverride };
@@ -3644,7 +3748,13 @@ function CanvaPreview({ project, exportBusy, pdfProgress, onClose, onDownload, o
   const customSheets: Sheet[] = (project.designerPages ?? []).filter((page) => page.kind === "custom" && !page.deleted).map((designerPage) => ({ kind: "custom", designerPage }));
   const availableSheets: Sheet[] = [...baseSheets.filter((sheet) => !(project.designerPages ?? []).find((page) => page.slotId === baseSlotId(sheet))?.deleted), ...customSheets];
   const desiredOrder = project.designerPageOrder ?? [];
+  const desiredOrderMatchesManifest = baseSheets.every((sheet) => desiredOrder.includes(baseSlotId(sheet)));
   const sheets = [...availableSheets].sort((left, right) => {
+    if (!desiredOrderMatchesManifest) {
+      const leftBaseIndex = left.kind === "custom" ? Number.MAX_SAFE_INTEGER : baseSheets.findIndex((sheet) => baseSlotId(sheet) === baseSlotId(left));
+      const rightBaseIndex = right.kind === "custom" ? Number.MAX_SAFE_INTEGER : baseSheets.findIndex((sheet) => baseSlotId(sheet) === baseSlotId(right));
+      return leftBaseIndex - rightBaseIndex;
+    }
     const leftId = left.kind === "custom" ? left.designerPage.slotId : baseSlotId(left);
     const rightId = right.kind === "custom" ? right.designerPage.slotId : baseSlotId(right);
     const leftIndex = desiredOrder.indexOf(leftId); const rightIndex = desiredOrder.indexOf(rightId);
@@ -3673,7 +3783,7 @@ function CanvaPreview({ project, exportBusy, pdfProgress, onClose, onDownload, o
     const base = `book-sheet ${worldClass} ${pageClass} ${borderClass} ${typographyClass}`;
     if (sheet.kind === "custom") return renderDesignerSheet(sheet.designerPage, key);
     if (sheet.kind === "cover") return <article data-page-slot={slot.slotId} className={`${base} preview-cover`} key={key}><div className="cover-edition">IKS BOOK STUDIO · {project.audience.toUpperCase()}</div><h1>{project.title}</h1><span>An illustrated book shaped from your source</span><b>✦</b>{unresolved.length > 0 && <small className="draft-status">Working preview · {unresolved.length} chapter{unresolved.length === 1 ? "" : "s"} still in progress</small>}</article>;
-    if (sheet.kind === "contents") return <article data-page-slot={slot.slotId} className={`${base} preview-page contents-page`} key={key}><span>CONTENTS</span><h2>Inside this book</h2><ol>{printable.chapters.map((chapter, index) => <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{isPublishApproved(chapter) ? `${chapter.pages} pages` : "In progress"}</i></li>)}</ol></article>;
+    if (sheet.kind === "contents") return <article data-page-slot={slot.slotId} className={`${base} preview-page contents-page`} key={key}><span>CONTENTS</span><h2>Inside this book</h2><ol>{printable.chapters.map((chapter, index) => { const stat = manifest.chapters.find((item) => item.chapterId === chapter.id); return <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{stat?.renderedPages ?? 0} actual page{stat?.renderedPages === 1 ? "" : "s"}</i></li>; })}</ol></article>;
     if (sheet.kind === "back") return <article data-page-slot={slot.slotId} className={`${base} preview-page backmatter`} key={key}><span>A FINAL THOUGHT</span><h2>Keep wondering</h2><p>The most powerful ideas do not end on the last page. They grow when we ask careful questions, notice new connections and share what we discover.</p><p>Carry one idea from this book into the world—and see where it leads.</p></article>;
     const image = Boolean(sheet.imageUrl) && !sheet.body;
     const combined = Boolean(sheet.imageUrl) && Boolean(sheet.body);
