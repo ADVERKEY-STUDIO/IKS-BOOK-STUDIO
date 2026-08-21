@@ -8,8 +8,9 @@ import type { ChapterOneGate, PedagogyQuality } from "../lib/pedagogy";
 import { BOOK_PACKAGE_FORMAT, expectedChapterId, expectedContextKey, expectedPageId, type BookPackage, type BookPackageValidation, validateBookPackage } from "../lib/book-package";
 import { bookPersonaClass, bookPersonaDefinitions, bookPersonaPatch, inferBookPersona, materializePersona, personaById, type BookPersona } from "../lib/book-persona";
 import { outlineForMode, pdfChunkRanges, SAFE_OCR_CHUNK_BYTES, SAFE_OCR_CHUNK_PAGES, type OutlineMode, type SourceIntelligence, type SourceOutlineItem } from "../lib/source-intelligence";
+import { buildExternalAiPrompt, parseExternalManuscript, type ExternalManuscriptResult } from "../lib/external-manuscript";
 
-type View = "dashboard" | "wizard" | "analysis" | "brief" | "editor";
+type View = "dashboard" | "wizard" | "external" | "analysis" | "brief" | "editor";
 
 type SourceSection = { title: string; page: number; excerpt: string };
 
@@ -230,6 +231,13 @@ type Project = {
   designerPages?: DesignerPageOverride[];
   designerPageOrder?: string[];
   designerPresets?: DesignerStylePreset[];
+  creationMode?: "external" | "automatic";
+  externalManuscript?: {
+    fileName: string;
+    importedAt: string;
+    totalWords: number;
+    issues: string[];
+  };
   updatedAt: string;
 };
 
@@ -500,6 +508,7 @@ const emptyProject: Project = {
   briefApproved: false,
   adaptationPlanConfirmed: false,
   adaptationPlanVersion: ADAPTATION_PLAN_VERSION,
+  creationMode: "external",
 };
 
 const wizardSteps = ["Source", "Reader", "Design", "Review"];
@@ -962,6 +971,8 @@ function normalizeProject(saved: Project): Project {
     designerPages: (cleanSaved.designerPages ?? []).map(hydrateDesignerOverride),
     designerPageOrder: cleanSaved.designerPageOrder ?? [],
     designerPresets: cleanSaved.designerPresets ?? [],
+    creationMode: cleanSaved.creationMode ?? "automatic",
+    externalManuscript: cleanSaved.externalManuscript,
   };
   const normalizedChapters = (cleanSaved.chapters ?? []).map((chapter, index) => {
     const title = chapter.title || `Chapter ${index + 1}`;
@@ -1341,6 +1352,11 @@ export default function Home() {
     // Legacy equivalent before Book Persona: const chapters = attachChapterVisuals({ ...project, sourceTerms: source.terms }, applyAutomaticAdaptationPlan(sourceChapters, project.audience, true))
     const file = event.target.files?.[0];
     if (!file) return;
+    if (project.creationMode === "external") {
+      patchProject({ source: file.name, title: project.title === "Untitled adaptation" ? file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ") : project.title, sourceSize: file.size, sourceQuality: "External AI will read this source" });
+      notify(`${file.name} selected. You will upload it directly to your chosen AI with the Book Studio prompt.`);
+      return;
+    }
     setSourceBusy(true);
     patchProject({ source: file.name, title: file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " "), sourceSize: file.size });
     try {
@@ -1474,6 +1490,62 @@ export default function Home() {
     const data = await response.json() as { project: Project };
     setProject(data.project);
     setProjects((current) => [data.project, ...current.filter((item) => item.id !== data.project.id)]);
+  }
+
+  async function acceptExternalManuscript(result: ExternalManuscriptResult, fileName: string) {
+    const importedChapters: Chapter[] = result.sections.map((section, index) => {
+      const targetWords = /7.?9/.test(project.audience) ? 185 : /13.?15/.test(project.audience) ? 285 : 235;
+      const pages = Math.max(1, Math.min(7, Math.ceil(section.wordCount / targetWords)));
+      const visibleTitle = section.title || `${section.kind[0].toUpperCase()}${section.kind.slice(1)}`;
+      return {
+        id: index + 1,
+        title: visibleTitle,
+        pages,
+        recommendedPages: pages,
+        status: "approved",
+        generationStatus: "Completed",
+        locked: false,
+        sourceRefs: [],
+        body: `<p class="chapter-kicker">${section.kind === "chapter" ? `CHAPTER ${String(index + 1).padStart(2, "0")}` : section.kind.toUpperCase()}</p><h1>${visibleTitle}</h1>${section.html}`,
+        context: section.raw.replace(/[#*_]/g, " ").replace(/\s+/g, " ").slice(0, 280),
+        keyTerms: section.title.toLowerCase().match(/[\p{L}\p{N}’'-]+/gu)?.filter((word) => word.length > 4).slice(0, 6) || [],
+        sourceWordCount: section.wordCount,
+        wordCount: section.wordCount,
+        pageReason: `Imported from the approved external-AI manuscript; ${section.wordCount} reader-facing words.`,
+        imageCaption: section.illustrationBrief,
+        imageAlt: section.illustrationBrief ? `Planned illustration for ${visibleTitle}` : undefined,
+        visualType: section.illustrationBrief ? "Narrative scene" : undefined,
+        importValidated: section.issues.length === 0,
+        manualApproved: true,
+        manualApprovedAt: new Date().toISOString(),
+        generationRuns: [],
+      };
+    });
+    const persona = inferBookPersona({ title: result.title || project.title, sourcePreview: result.sections.map((section) => `${section.title} ${section.raw.slice(0, 220)}`).join(" "), sourceHeadings: result.sections.map((section) => section.title), bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
+    const nextBase: Project = {
+      ...project,
+      title: result.title === "Imported book" ? project.title : result.title,
+      sourceHeadings: result.sections.map((section) => section.title),
+      sourceWords: result.words,
+      sourceQuality: result.issues.length ? "Imported with review notes" : "External manuscript verified",
+      sourcePreview: result.sections.map((section) => section.raw).join(" ").slice(0, 8000),
+      sourceSections: result.sections.map((section, index) => ({ title: section.title, page: index + 1, excerpt: section.raw.replace(/[#*_]/g, " ").replace(/\s+/g, " ").slice(0, 240) })),
+      sourceIntelligence: undefined,
+      creationMode: "external",
+      externalManuscript: { fileName, importedAt: new Date().toISOString(), totalWords: result.words, issues: [...result.issues, ...result.sections.flatMap((section) => section.issues.map((issue) => `${section.title}: ${issue}`))] },
+      briefApproved: true,
+      adaptationPlanConfirmed: true,
+      adaptationPlanVersion: ADAPTATION_PLAN_VERSION,
+      ...bookPersonaPatch(persona),
+      chapters: importedChapters,
+      updatedAt: "Just now",
+    };
+    const next = { ...nextBase, chapters: attachChapterVisuals(nextBase, importedChapters) };
+    setProject(next);
+    setActiveChapter(next.chapters[0]?.id ?? 1);
+    await persistProject(next);
+    setView("editor");
+    notify(`${next.chapters.length} ordered manuscript sections imported. No Nemotron request was used.`);
   }
 
   async function saveProject() {
@@ -2267,8 +2339,9 @@ OUTPUT REQUIREMENTS
         onRestore={() => void restorePreviousVersion()}
       />}
 
-      {view === "wizard" && <Wizard step={wizardStep} project={project} sourceBusy={sourceBusy} sourceProgress={sourceProgress} onPatch={patchProject} onFile={handleFile} onBack={() => wizardStep === 0 ? setView("dashboard") : setWizardStep((step) => step - 1)} onNext={() => wizardStep < 3 ? setWizardStep((step) => step + 1) : setView("analysis")} />}
-      {view === "analysis" && <Analysis project={project} sourceBusy={sourceBusy} onPatch={patchProject} onBack={() => { setView("wizard"); setWizardStep(3); }} onContinue={confirmAdaptationPlan} onRunOcr={runSourceOcr} onUpdateOutline={updateSourceOutline} onAcceptOutline={acceptSourceOutline} />}
+      {view === "wizard" && <Wizard step={wizardStep} project={project} sourceBusy={sourceBusy} sourceProgress={sourceProgress} onPatch={patchProject} onFile={handleFile} onBack={() => wizardStep === 0 ? setView("dashboard") : setWizardStep((step) => step - 1)} onNext={() => wizardStep < 3 ? setWizardStep((step) => step + 1) : setView(project.creationMode === "external" ? "external" : "analysis")} />}
+      {view === "external" && <ExternalAiManuscript project={project} onBack={() => { setView("wizard"); setWizardStep(3); }} onAccept={acceptExternalManuscript} onNotify={notify} />}
+      {view === "analysis" && <Analysis project={project} sourceBusy={sourceBusy} onPatch={patchProject} onBack={() => { setView("wizard"); setWizardStep(3); }} onUseExternal={() => { patchProject({ creationMode: "external" }); setView("external"); }} onContinue={confirmAdaptationPlan} onRunOcr={runSourceOcr} onUpdateOutline={updateSourceOutline} onAcceptOutline={acceptSourceOutline} />}
       {view === "brief" && <BookBrief project={project} allocated={allocatedPages} draftBusy={draftBusy} onBack={() => setView("analysis")} onUpdateChapter={updateChapter} onPrepare={prepareDraft} onContinue={() => { patchProject({ briefApproved: true }); setActiveChapter(project.chapters[0]?.id ?? 1); setView("editor"); }} />}
       {view === "editor" && <Editor project={project} active={active} activeId={activeChapter} allocated={allocatedPages} draftBusy={draftBusy} onSelect={setActiveChapter} onSaveBody={saveChapterBody} editorRef={editorRef} onAi={aiAction} onRemember={rememberPreference} onAddChapter={addChapter} onUploadImage={uploadChapterImage} onPatchProject={patchProject} onUpdateChapter={updateChapter} />}
 
@@ -2312,8 +2385,9 @@ function SimpleWorkflowBar({ project, active, busy, paused, connection, hasCompa
   const totals = generationTotals(project.chapters);
   const activeRun = latestGenerationRun(active);
   const unfinished = reviewCount > 0;
+  const external = project.creationMode === "external";
   const stages = [
-    ["01", "Source uploaded", project.sourceObjectKey ? "Complete" : "Needed"],
+    ["01", external ? "Manuscript imported" : "Source uploaded", project.externalManuscript ? "Complete" : project.sourceObjectKey ? "Complete" : "Needed"],
     ["02", "Chapters generated", `${approved}/${project.chapters.length}`],
     ["03", "Quality review", reviewCount ? `${reviewCount} to review` : "Complete"],
     ["04", "Illustrations", `${illustrated}/${project.chapters.length}`],
@@ -2321,7 +2395,7 @@ function SimpleWorkflowBar({ project, active, busy, paused, connection, hasCompa
   ];
   return <section className="simple-workflow-bar" aria-label="Book improvement controls">
     <span className="sr-only">Automated publishing workflow</span>
-    <div className="workflow-heading"><div><p className="workflow-eyebrow">PUBLISHING COMMAND CENTRE</p><b>From source to finished book</b><span>Generate, review, illustrate and export—one calm step at a time.</span></div><div className={`connection-pill ${connection.state}`}><span /><div><b>Nemotron engine</b><small>{connection.message}</small></div><button onClick={onTest} disabled={busy || connection.state === "testing"}>{connection.state === "testing" ? "Testing…" : "Test connection"}</button></div></div>
+    <div className="workflow-heading"><div><p className="workflow-eyebrow">PUBLISHING COMMAND CENTRE</p><b>{external ? "Imported manuscript to finished book" : "From source to finished book"}</b><span>{external ? "Review, illustrate, design and export—the writing is already safely imported." : "Generate, review, illustrate and export—one calm step at a time."}</span></div>{external ? <div className="connection-pill connected"><span /><div><b>External AI manuscript</b><small>No website AI requests</small></div></div> : <div className={`connection-pill ${connection.state}`}><span /><div><b>Nemotron engine</b><small>{connection.message}</small></div><button onClick={onTest} disabled={busy || connection.state === "testing"}>{connection.state === "testing" ? "Testing…" : "Test connection"}</button></div>}</div>
     <div className="publishing-steps">{stages.map(([number, label, detail], index) => <div className={`${index === 0 || (index === 1 && approved) || (index === 2 && !reviewCount) ? "done" : ""}`} key={label}><span>{number}</span><b>{label}</b><small>{detail}</small></div>)}</div>
     <div className="chapter-generation-grid">
       {project.chapters.map((chapter) => {
@@ -2458,18 +2532,91 @@ function Wizard({ step, project, sourceBusy, sourceProgress, onPatch, onFile, on
     <aside className="step-rail"><p>CHILDREN’S EDITION</p>{wizardSteps.map((label, index) => <div className={index <= step ? "active" : ""} key={label}><span>{index < step ? "✓" : index + 1}</span><b>{label}</b></div>)}<blockquote>Built first for children aged 7–15. Adult publishing choices will return in a later edition.</blockquote></aside>
     <main className="wizard-main">
       <p className="eyebrow">STEP {step + 1} OF 4 · AGES 7–15</p><h1>{["Choose the source.", "Choose the child reader.", "Choose the book world.", "Review your children’s book."][step]}</h1><p className="lead">{["Upload the book you are authorised to adapt.", "Pick one age band. Vocabulary, sentence length, explanation depth and text size adjust automatically.", "Choose a complete visual system and see the page before building the adaptation.", "These child-first choices guide every generated chapter and illustration."][step]}</p>
-      {step === 0 && <section className="form-card"><label className={`upload ${sourceBusy ? "busy" : ""}`}><input type="file" accept=".pdf,.docx,.txt,.md" onChange={onFile} disabled={sourceBusy}/><span>{sourceBusy ? `${sourceProgress || "…"}${sourceProgress ? "%" : ""}` : "↑"}</span><strong>{sourceBusy ? "Securely uploading and classifying your book…" : project.source}</strong><small>{sourceBusy ? "Scanned PDFs are divided adaptively by pages and parser-safe file size; progress is preserved" : "Choose a PDF, DOCX or TXT book. Large and scanned PDFs are prepared as safe, resumable OCR batches."}</small></label><div className="fields two"><label>New book title<input value={project.title} onChange={(e) => onPatch({ title: e.target.value })}/></label><label>Source book<input value={project.source} readOnly/></label></div></section>}
+      {step === 0 && <section className="form-card source-method-card"><div className="creation-mode-choice"><button className={project.creationMode !== "automatic" ? "selected recommended" : ""} onClick={() => onPatch({ creationMode: "external" })}><span>RECOMMENDED</span><b>Use ChatGPT, Claude or DeepSeek</b><small>Book Studio gives you the prompt. Your chosen AI reads the source directly, then you bring back the finished manuscript.</small></button><button className={project.creationMode === "automatic" ? "selected" : ""} onClick={() => onPatch({ creationMode: "automatic" })}><span>ADVANCED</span><b>Process the source inside Book Studio</b><small>Uses the connected OCR and Nemotron pipeline. Best kept for searchable PDFs and controlled experiments.</small></button></div><label className={`upload ${sourceBusy ? "busy" : ""}`}><input type="file" accept=".pdf,.docx,.txt,.md" onChange={onFile} disabled={sourceBusy}/><span>{sourceBusy ? `${sourceProgress || "…"}${sourceProgress ? "%" : ""}` : "↑"}</span><strong>{sourceBusy ? "Securely uploading and classifying your book…" : project.source}</strong><small>{project.creationMode === "automatic" ? (sourceBusy ? "Scanned PDFs are divided into resumable batches." : "Book Studio will upload and analyse this file using the advanced automatic pipeline.") : "Select the source only so its name enters your custom prompt. You will upload the actual source directly to your chosen AI."}</small></label><div className="fields two"><label>New book title<input value={project.title} onChange={(e) => onPatch({ title: e.target.value })}/></label><label>Source book<input value={project.source} readOnly/></label></div></section>}
       {step === 1 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">READER AGE</p><div className="choice-cards">{childAudienceProfiles.map((profile) => <button className={project.audience === profile.value ? "choice selected" : "choice"} onClick={() => onPatch(audiencePatch(profile.value))} key={profile.value}><span>{profile.value}</span><strong>{profile.label}</strong><small>{profile.description}</small><i>“{profile.sample}”</i></button>)}</div><div className="language-choice"><span>BOOK LANGUAGE</span>{["English", "Hindi", "English + Hindi"].map((language) => <button className={project.language === language ? "selected" : ""} onClick={() => onPatch({ language })} key={language}>{language}</button>)}</div><div className="auto-settings"><b>Natural writing is automatic</b><span>{project.learningFeatures.join(" · ")}</span><small>The studio changes vocabulary, sentence length, explanation depth and reflection for the selected age. There are no separate writing modes.</small></div></div><BookGlimpse project={project} focus="reader"/></section>}
       {step === 2 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">ILLUSTRATION WORLD</p><div className="design-world-cards">{childDesignWorlds.map((world) => <button className={`${project.aesthetic === world.value ? "selected " : ""}design-world world-${normalizedTitle(world.value).replace(/[^a-z]+/g, "-")}`} onClick={() => onPatch(designWorldPatch(world.value))} key={world.value}><span className="world-thumbnail"><i/><b>Ab</b><i/></span><strong>{world.label}</strong><small>{world.description}</small><em>{world.illustrationStyle}</em></button>)}</div><div className="page-aesthetic-section"><p className="choice-label">PAGE AESTHETIC · APPLIES TO EVERY PAGE</p><div className="page-aesthetic-cards">{pageAesthetics.map((aesthetic) => { const aestheticClass = normalizedTitle(aesthetic.value).replace(/[^a-z]+/g, "-"); return <button className={`${project.pageAesthetic === aesthetic.value ? "selected " : ""}page-aesthetic-choice aesthetic-${aestheticClass}`} onClick={() => onPatch(pageAestheticPatch(aesthetic.value))} key={aesthetic.value}><span className="page-aesthetic-thumbnail"><i/><b>Chapter</b><i/><i/><i/></span><strong>{aesthetic.label}</strong><small>{aesthetic.description}</small><em>{aesthetic.detail}</em></button>; })}</div></div><div className="book-border-section"><p className="choice-label">BOOK BORDER · MIX WITH ANY PAGE AESTHETIC</p><div className="book-border-cards">{bookBorders.map((border) => { const borderClass = normalizedTitle(border.value).replace(/[^a-z]+/g, "-"); return <button className={`${project.bookBorder === border.value ? "selected " : ""}book-border-choice border-${borderClass}`} onClick={() => onPatch(bookBorderPatch(border.value))} key={border.value}><span className="book-border-thumbnail"><i/><b>Chapter</b><i/><i/><i/></span><strong>{border.label}</strong><small>{border.description}</small><em>{border.detail}</em></button>; })}</div></div><div className="auto-settings"><b>Visual guarantee</b><span>One unique image, page aesthetic and chosen border in every chapter</span><small>Every image is a chapter-specific narrative scene—never a map, Venn diagram or generic concept graphic. Use the live tabs to inspect the chapter, reading, visual and activity pages.</small></div></div><BookGlimpse project={project} focus="design" onPersona={(persona) => onPatch(bookPersonaPatch(persona))}/></section>}
-      {step === 3 && <><section className="brief-review child-review"><div><span>SOURCE</span><strong>{project.source}</strong></div><div><span>CHILD READER</span><strong>{project.audience} · {project.readingLevel}</strong></div><div><span>BOOK</span><strong>{project.bookType}</strong></div><div><span>WRITING</span><strong>Natural age-based writing · {project.language}</strong></div><div><span>ILLUSTRATION WORLD</span><strong>{project.aesthetic} · {project.illustrationStyle}</strong></div><div><span>PAGE AESTHETIC</span><strong>{project.pageAesthetic} · applied to every page</strong></div><div><span>BOOK BORDER</span><strong>{project.bookBorder} · applied to every physical page</strong></div><div><span>PAGE WATERMARK</span><strong>{project.pageWatermark} · subtle background design</strong></div><div><span>LENGTH</span><strong>Shortest clear length · never padded · under 100 pages</strong></div></section><BookGlimpse project={project} focus="design" onPersona={(persona) => onPatch(bookPersonaPatch(persona))}/></>}
+      {step === 3 && <><section className="brief-review child-review"><div><span>WORKFLOW</span><strong>{project.creationMode === "automatic" ? "Advanced automatic source processing" : "External AI manuscript · no website API required"}</strong></div><div><span>SOURCE</span><strong>{project.source}</strong></div><div><span>CHILD READER</span><strong>{project.audience} · {project.readingLevel}</strong></div><div><span>BOOK</span><strong>{project.bookType}</strong></div><div><span>WRITING</span><strong>Natural age-based writing · {project.language}</strong></div><div><span>ILLUSTRATION WORLD</span><strong>{project.aesthetic} · {project.illustrationStyle}</strong></div><div><span>PAGE AESTHETIC</span><strong>{project.pageAesthetic} · applied to every page</strong></div><div><span>BOOK BORDER</span><strong>{project.bookBorder} · applied to every physical page</strong></div><div><span>PAGE WATERMARK</span><strong>{project.pageWatermark} · subtle background design</strong></div><div><span>LENGTH</span><strong>Shortest clear length · never padded · under 100 pages</strong></div></section><BookGlimpse project={project} focus="design" onPersona={(persona) => onPatch(bookPersonaPatch(persona))}/></>}
       {step === 2 && <TypographyPicker project={project} onPatch={onPatch}/>}
       {step === 2 && <WatermarkPicker project={project} onPatch={onPatch}/>}
-      <footer className="wizard-footer"><button className="secondary" onClick={onBack}>← Back</button><button className="primary" onClick={onNext} disabled={sourceBusy || (step === 0 && project.source === "No source selected")}>{step === 3 ? "Detect original chapters" : "Continue"} →</button></footer>
+      <footer className="wizard-footer"><button className="secondary" onClick={onBack}>← Back</button><button className="primary" onClick={onNext} disabled={sourceBusy || (step === 0 && project.source === "No source selected")}>{step === 3 ? (project.creationMode === "automatic" ? "Detect original chapters" : "Create AI manuscript request") : "Continue"} →</button></footer>
     </main>
   </div>;
 }
 
-function Analysis({ project, sourceBusy, onPatch, onBack, onContinue, onRunOcr, onUpdateOutline, onAcceptOutline }: { project: Project; sourceBusy: boolean; onPatch: (patch: Partial<Project>) => void; onBack: () => void; onContinue: () => void; onRunOcr: (engine: "cloudflare-ai" | "mistral-ocr") => Promise<void>; onUpdateOutline: (outline: SourceOutlineItem[]) => void; onAcceptOutline: (mode: OutlineMode) => void }) {
+function ExternalAiManuscript({ project, onBack, onAccept, onNotify }: { project: Project; onBack: () => void; onAccept: (result: ExternalManuscriptResult, fileName: string) => Promise<void>; onNotify: (message: string) => void }) {
+  const prompt = useMemo(() => buildExternalAiPrompt({ title: project.title, sourceName: project.source, audience: project.audience, readingLevel: project.readingLevel, language: project.language, bookType: project.bookType, aesthetic: project.aesthetic, illustrationStyle: project.illustrationStyle, learningFeatures: project.learningFeatures }), [project]);
+  const [manuscriptText, setManuscriptText] = useState("");
+  const [fileName, setFileName] = useState("Pasted manuscript.md");
+  const [result, setResult] = useState<ExternalManuscriptResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const downloadPrompt = () => {
+    const href = URL.createObjectURL(new Blob([prompt], { type: "text/markdown;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.download = `${project.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "book"}-ai-prompt.md`;
+    anchor.click();
+    URL.revokeObjectURL(href);
+    onNotify("AI prompt downloaded. Upload it with your source to ChatGPT, Claude or DeepSeek.");
+  };
+  const copyPrompt = async () => {
+    await navigator.clipboard.writeText(prompt);
+    onNotify("Complete external-AI prompt copied");
+  };
+  const readManuscriptFile = async (file: File) => {
+    setBusy(true);
+    setResult(null);
+    try {
+      let text = "";
+      if (/\.zip$/i.test(file.name)) {
+        const archive = unzipSync(new Uint8Array(await file.arrayBuffer()));
+        const names = Object.keys(archive).filter((name) => /\.(md|markdown|txt)$/i.test(name) && !name.startsWith("__MACOSX/")).sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+        if (!names.length) throw new Error("The ZIP contains no Markdown or text chapter files");
+        text = names.map((name) => new TextDecoder().decode(archive[name])).join("\n\n");
+      } else if (/\.docx$/i.test(file.name)) {
+        const form = new FormData();
+        form.set("file", file);
+        const response = await fetch("/api/manuscript/extract", { method: "POST", headers: ownerHeaders(), body: form });
+        const data = await response.json() as { text?: string; error?: string };
+        if (!response.ok || !data.text) throw new Error(data.error || "The DOCX manuscript could not be read");
+        text = data.text;
+      } else text = await file.text();
+      setFileName(file.name);
+      setManuscriptText(text);
+      const parsed = parseExternalManuscript(text, project.audience);
+      setResult(parsed);
+      onNotify(`${parsed.sections.length} ordered book sections detected`);
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : "The manuscript could not be read");
+    } finally { setBusy(false); }
+  };
+  const inspectPaste = () => {
+    if (manuscriptText.trim().length < 200) return onNotify("Paste the complete manuscript first");
+    const parsed = parseExternalManuscript(manuscriptText, project.audience);
+    setResult(parsed);
+    setFileName("Pasted manuscript.md");
+    onNotify(`${parsed.sections.length} ordered book sections detected`);
+  };
+  const moveSection = (index: number, direction: -1 | 1) => setResult((current) => {
+    if (!current) return current;
+    const target = index + direction;
+    if (target < 0 || target >= current.sections.length) return current;
+    const sections = [...current.sections];
+    [sections[index], sections[target]] = [sections[target], sections[index]];
+    return { ...current, sections };
+  });
+  const chapterCount = result?.sections.filter((section) => section.kind === "chapter").length || 0;
+  const sectionIssueCount = result?.sections.reduce((sum, section) => sum + section.issues.length, 0) || 0;
+  return <main className="external-manuscript-page">
+    <button className="text-button" onClick={onBack}>← Change book settings</button>
+    <header className="external-manuscript-hero"><div><p className="eyebrow">EXTERNAL AI MANUSCRIPT · RECOMMENDED</p><h1>Let your chosen AI read the source. Bring back the finished book.</h1><p>No website OCR, no OpenRouter quota and no fragile JSON. The manuscript is checked and organised locally before it enters your design studio.</p></div><span>0 website AI requests</span></header>
+    <section className="external-steps" aria-label="External manuscript workflow"><div className="complete"><b>1</b><span>Book settings<small>Complete</small></span></div><div className="active"><b>2</b><span>Download prompt<small>Ready</small></span></div><div><b>3</b><span>Create in your AI<small>Upload source + prompt</small></span></div><div className={result ? "complete" : ""}><b>4</b><span>Import manuscript<small>{result ? "Complete" : "Waiting"}</small></span></div><div className={result ? "active" : ""}><b>5</b><span>Review order<small>{result ? `${result.sections.length} sections` : "Waiting"}</small></span></div><div><b>6</b><span>Design & export<small>Next</small></span></div></section>
+    <div className="external-manuscript-grid"><section className="external-action-card prompt-card"><p className="eyebrow">STEP 1 · TAKE THIS TO YOUR AI</p><h2>Download the complete author prompt</h2><p>Upload this prompt and <b>{project.source}</b> together in ChatGPT, Claude or DeepSeek. Ask it to return the finished Markdown manuscript or a chapter ZIP.</p><div className="external-provider-row"><span>ChatGPT</span><span>Claude</span><span>DeepSeek</span></div><button className="primary" onClick={downloadPrompt}>Download AI prompt</button><button className="secondary" onClick={() => void copyPrompt()}>Copy prompt</button><details><summary>See what the prompt guarantees</summary><ul><li>Reads the complete source before writing</li><li>Preserves real chapter order and important IKS concepts</li><li>Writes for {project.audience}</li><li>Creates introduction, chapters, conclusion and glossary</li><li>Adds one private, contextual illustration brief per chapter</li><li>Returns Markdown—not JSON</li></ul></details></section>
+      <section className="external-action-card import-card"><p className="eyebrow">STEP 2 · BRING BACK THE RESULT</p><h2>Upload or paste the finished manuscript</h2><label className="external-manuscript-upload"><input type="file" accept=".md,.markdown,.txt,.docx,.zip" disabled={busy} onChange={(event) => event.target.files?.[0] && void readManuscriptFile(event.target.files[0])}/><b>{busy ? "Reading manuscript…" : "Upload manuscript"}</b><span>Markdown, TXT, DOCX or a ZIP of numbered chapter files</span></label><span className="or-divider">OR PASTE IT</span><textarea value={manuscriptText} onChange={(event) => { setManuscriptText(event.target.value); setResult(null); }} placeholder="# BOOK TITLE\n\n# INTRODUCTION\n...\n\n# CHAPTER 01: ..."/><button className="secondary" disabled={busy || manuscriptText.trim().length < 200} onClick={inspectPaste}>Inspect pasted manuscript</button></section></div>
+    {result && <section className="manuscript-review"><header><div><p className="eyebrow">IMPORT REVIEW</p><h2>{result.title}</h2><p>{result.words.toLocaleString()} reader-facing words · {chapterCount} main chapters · {result.sections.length} total sections</p></div><div className={result.issues.length || sectionIssueCount ? "review-warning" : "review-ready"}><b>{result.issues.length + sectionIssueCount ? `${result.issues.length + sectionIssueCount} review note${result.issues.length + sectionIssueCount === 1 ? "" : "s"}` : "Structure ready"}</b><span>{result.issues.length + sectionIssueCount ? "You can still import and edit every section." : "Introduction, chapters and ending are in order."}</span></div></header>{result.issues.length > 0 && <div className="manuscript-global-issues">{result.issues.map((issue) => <span key={issue}>! {issue}</span>)}</div>}<div className="manuscript-section-list">{result.sections.map((section, index) => <article key={`${section.kind}-${index}`}><span>{section.kind === "chapter" ? `CH ${String(result.sections.slice(0, index + 1).filter((item) => item.kind === "chapter").length).padStart(2, "0")}` : section.kind.toUpperCase()}</span><div><b>{section.title}</b><small>{section.wordCount.toLocaleString()} words{section.illustrationBrief ? " · illustration brief ready" : ""}</small>{section.issues.map((issue) => <em key={issue}>{issue}</em>)}</div><div><button aria-label={`Move ${section.title} up`} disabled={index === 0} onClick={() => moveSection(index, -1)}>↑</button><button aria-label={`Move ${section.title} down`} disabled={index === result.sections.length - 1} onClick={() => moveSection(index, 1)}>↓</button></div></article>)}</div><footer><div><b>Source-fidelity reminder</b><span>Book Studio checks structure, length and teaching sections locally. Before publication, spot-check important claims against the source.</span></div><button className="primary" disabled={!chapterCount || busy} onClick={() => { setBusy(true); void onAccept(result, fileName).finally(() => setBusy(false)); }}>{busy ? "Importing…" : "Accept manuscript & open studio"}</button></footer></section>}
+  </main>;
+}
+
+function Analysis({ project, sourceBusy, onPatch, onBack, onUseExternal, onContinue, onRunOcr, onUpdateOutline, onAcceptOutline }: { project: Project; sourceBusy: boolean; onPatch: (patch: Partial<Project>) => void; onBack: () => void; onUseExternal: () => void; onContinue: () => void; onRunOcr: (engine: "cloudflare-ai" | "mistral-ocr") => Promise<void>; onUpdateOutline: (outline: SourceOutlineItem[]) => void; onAcceptOutline: (mode: OutlineMode) => void }) {
   const intelligence = project.sourceIntelligence;
   const headings = project.sourceHeadings;
   const plannedPages = totalBookPages(project.chapters);
@@ -2487,8 +2634,9 @@ function Analysis({ project, sourceBusy, onPatch, onBack, onContinue, onRunOcr, 
     </section>
     <section className="stats"><div><span>SOURCE PAGES</span><strong>{project.sourcePages || intelligence?.totalPages || "—"}</strong></div><div><span>PDF TYPE</span><strong>{intelligence?.sourceKind || "searchable"}</strong></div><div><span>STRUCTURE FOUND</span><strong>{intelligence?.outline.length || headings.length || "Pending"}</strong></div><div><span>ANALYSIS</span><strong>{intelligence?.progress ?? (headings.length ? 100 : 0)}%</strong></div></section>
     {requiresOcr && <section className="ocr-choice-card">
+      <span className="sr-only">Analyse source with Nemotron</span>
       <div><p className="eyebrow">SCAN DETECTED</p><h2>Read every page, then let Nemotron detect the real structure</h2><p>{intelligence?.message || "The PDF does not contain enough searchable text."}</p><ul><li>The scan is divided by both page count and parser-safe file size.</li><li>Every successful OCR batch is cached and never charged twice when resumed.</li><li>Nemotron receives compact structural evidence after OCR—not the oversized PDF.</li><li>Chapter writing later receives only that chapter’s verified cached pages.</li></ul></div>
-      <div className="ocr-options"><div className="source-analysis-budget"><span><b>{intelligence?.ocrBatchesCompleted || 0}</b> / {intelligence?.ocrBatchesTotal || 1} OCR batches cached</span><span><b>{intelligence?.ocrPagesCached || 0}</b> / {intelligence?.totalPages || project.sourcePages} source pages read</span><span><b>{intelligence?.structureRequestCount || 0}</b> Nemotron structure request{intelligence?.structureRequestCount === 1 ? "" : "s"}</span></div><button className="recommended" disabled={sourceBusy} onClick={() => void onRunOcr("mistral-ocr")}><b>{sourceBusy ? "Analysing source…" : "Analyse source with Nemotron"}</b><span>Accurate scanned-text extraction · cached batches · one final structure request · estimated OCR cost about ${intelligence?.ocrCostEstimateUsd?.toFixed(2) || "0.25"}</span></button><button disabled={sourceBusy} onClick={() => void onRunOcr("cloudflare-ai")}><b>Use free parser</b><span>Lower cost, but less reliable for photographed or difficult scans</span></button></div>
+      <div className="ocr-options"><div className="source-analysis-budget"><span><b>{intelligence?.ocrBatchesCompleted || 0}</b> / {intelligence?.ocrBatchesTotal || 1} OCR batches cached</span><span><b>{intelligence?.ocrPagesCached || 0}</b> / {intelligence?.totalPages || project.sourcePages} source pages read</span><span><b>{intelligence?.structureRequestCount || 0}</b> Nemotron structure request{intelligence?.structureRequestCount === 1 ? "" : "s"}</span></div><button className="external-workflow-button" disabled={sourceBusy} onClick={onUseExternal}><b>Use the simple external-AI workflow</b><span>Download one prompt, upload this source directly to ChatGPT, Claude or DeepSeek, then import the finished manuscript. No website OCR.</span></button><button className="recommended" disabled={sourceBusy} onClick={() => void onRunOcr("mistral-ocr")}><b>{sourceBusy ? "Analysing source…" : "Continue with Nemotron OCR"}</b><span>Advanced scanned-text extraction · cached batches · one final structure request · estimated OCR cost about ${intelligence?.ocrCostEstimateUsd?.toFixed(2) || "0.25"}</span></button><button disabled={sourceBusy} onClick={() => void onRunOcr("cloudflare-ai")}><b>Use free parser</b><span>Lower cost, but less reliable for photographed or difficult scans</span></button></div>
       {intelligence?.lastError && <p className="source-error">{intelligence.lastError}</p>}
     </section>}
     {reviewingOutline && <section className="outline-review-card">

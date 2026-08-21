@@ -961,6 +961,23 @@ async function exportDocxApi(request: Request) {
   return new Response(blob, { headers: { "content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "content-disposition": `attachment; filename="book.docx"`, "cache-control": "no-store" } });
 }
 
+async function manuscriptExtractApi(request: Request) {
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const form = await request.formData();
+  const file = form.get("file");
+  if (!(file instanceof File)) return json({ error: "Choose a DOCX manuscript to import" }, 400);
+  if (!/\.docx$/i.test(file.name)) return json({ error: "Only DOCX manuscripts are supported by this importer" }, 400);
+  if (file.size > 15 * 1024 * 1024) return json({ error: "The DOCX manuscript is larger than the 15 MB import limit" }, 413);
+  try {
+    const extracted = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+    const text = extracted.value.replace(/\r\n?/g, "\n").trim();
+    if (text.length < 200) return json({ error: "The DOCX did not contain enough readable manuscript text" }, 422);
+    return json({ text, warnings: extracted.messages.map((message) => message.message) });
+  } catch (error) {
+    return json({ error: error instanceof Error ? error.message : "The DOCX manuscript could not be read" }, 422);
+  }
+}
+
 async function sourceChunkApi(request: Request, env: Env) {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const form = await request.formData();
@@ -1344,6 +1361,7 @@ const worker = {
       if (url.pathname === "/api/visual") return await visualApi(request);
       if (url.pathname === "/api/asset") return await assetApi(request, env);
       if (url.pathname === "/api/export/docx") return await exportDocxApi(request);
+      if (url.pathname === "/api/manuscript/extract") return await manuscriptExtractApi(request);
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : "The request could not be completed" }, 500);
     }
