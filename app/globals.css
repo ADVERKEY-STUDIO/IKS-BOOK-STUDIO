@@ -512,6 +512,7 @@
 /* Designer and export intentionally share the same publication surface. */
 .designer-canvas-page.book-sheet{height:919.285714px;min-height:919.285714px;box-sizing:border-box}
 .designer-canvas-page.preview-cover .designer-editable-content,.designer-render-canvas.preview-cover .designer-render-content{display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-end;text-align:left;background:linear-gradient(150deg,#173f37 0%,#102f2a 70%,#0b2722 100%);color:#fff}
+.designer-canvas-page.preview-cover.has-background .designer-editable-content,.designer-render-canvas.preview-cover.has-background .designer-render-content{background:transparent !important;box-shadow:none !important}
 .designer-canvas-page.preview-cover .cover-edition,.designer-render-canvas.preview-cover .cover-edition{position:absolute;left:68px;top:72px;color:#d7ad58;font:800 8px/1.2 ui-sans-serif,system-ui;letter-spacing:.16em}
 .designer-canvas-page.preview-cover h1,.designer-render-canvas.preview-cover h1{max-width:485px;margin:0 0 20px;color:#fff;font:400 46px/1.03 Georgia,serif;letter-spacing:-.035em;text-align:left}
 .designer-canvas-page.preview-cover .designer-editable-content>span,.designer-render-canvas.preview-cover .designer-render-content>span{color:#b9cac4;font:400 12px/1.55 Georgia,serif}
