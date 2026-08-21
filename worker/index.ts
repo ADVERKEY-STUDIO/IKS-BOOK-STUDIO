@@ -8,6 +8,7 @@ import { authorialReaderHtml, generationProfileKey } from "../lib/child-summary"
 import { allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET, recommendedAdaptationPages } from "../lib/adaptation-pages";
 import { efficientChapterPrompt, evaluateChapterOneGate, evaluateTeachingChapter, feedbackRevisionPrompt, fitTeachingChapterLocally, localPedagogyScores, normalizeTeachingChapter, renderTeachingChapter, type ChapterOneGate, type PedagogyQuality, type PedagogyScores, type TeachingChapter } from "../lib/pedagogy";
 import type { BookPersona } from "../lib/book-persona";
+import { classifySource, ocrEstimate, validateOutline, type SourceIntelligence, type SourceOutlineItem } from "../lib/source-intelligence";
 
 interface Env {
   ASSETS: Fetcher;
@@ -127,6 +128,37 @@ async function extractSourcePages(bytes: ArrayBuffer, extension: string) {
   }
   const text = new TextDecoder().decode(bytes);
   return { text, pageTexts: [text], pages: 0 };
+}
+
+type SourceChunk = { key: string; startPage: number; endPage: number; size: number; pageTexts: string[] };
+type SourceManifest = { version: 1; name: string; size: number; pages: number; chunks: SourceChunk[]; sourceIntelligence: SourceIntelligence };
+
+function isSourceManifestKey(key: string) { return key.endsWith("/manifest.json"); }
+
+async function readSourceManifest(env: Env, key: string) {
+  if (!isSourceManifestKey(key)) return null;
+  const object = await env.BUCKET.get(key);
+  if (!object) return null;
+  return JSON.parse(await object.text()) as SourceManifest;
+}
+
+async function extractStoredSource(env: Env, key: string, sourceName: string) {
+  const manifest = await readSourceManifest(env, key);
+  if (!manifest) {
+    const source = await env.BUCKET.get(key);
+    if (!source) return null;
+    return { ...(await extractSourcePages(await source.arrayBuffer(), sourceExtension(sourceName))), manifest: null };
+  }
+  const pageTexts: string[] = [];
+  for (const chunk of manifest.chunks.sort((a, b) => a.startPage - b.startPage)) pageTexts.push(...chunk.pageTexts);
+  return { text: pageTexts.join("\n\n"), pageTexts, pages: manifest.pages, manifest };
+}
+
+function bufferDataUrl(bytes: ArrayBuffer, type = "application/pdf") {
+  const view = new Uint8Array(bytes);
+  let binary = "";
+  for (let offset = 0; offset < view.length; offset += 0x8000) binary += String.fromCharCode(...view.subarray(offset, offset + 0x8000));
+  return `data:${type};base64,${btoa(binary)}`;
 }
 
 function cleanSourceText(value: string) {
@@ -549,6 +581,28 @@ async function openRouterStructured<T>(env: Env, prompt: string, maxCompletionTo
   };
 }
 
+async function openRouterScannedChapter(env: Env, files: Array<{ name: string; bytes: ArrayBuffer }>, chapter: DraftChapterInput, project: DraftProjectInput) {
+  const key = typeof env.OPENROUTER_API_KEY === "string" ? env.OPENROUTER_API_KEY.trim() : "";
+  if (!key) throw new TeachingEngineError("The OpenRouter teaching engine is not connected yet.", 503, "missing-key");
+  const model = env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL;
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: { authorization: `Bearer ${key}`, "content-type": "application/json", "http-referer": "https://iks-book-studio.gaurav-gupta-6041.chatgpt.site", "x-openrouter-title": "IKS Book Studio" },
+    body: JSON.stringify({ model, temperature: .2, max_completion_tokens: 3600, reasoning: { effort: "none", exclude: true }, response_format: { type: "json_object" }, plugins: [{ id: "file-parser", pdf: { engine: "cloudflare-ai" } }], messages: [{ role: "user", content: [
+      { type: "text", text: `${efficientChapterPrompt({ title: chapter.title, audience: project.audience || "Ages 10–12", language: project.language || "English", targetPages: chapter.pages, sourceMaterial: `The attached verified source range is physical PDF pages ${chapter.sourceStartPage}-${chapter.sourceEndPage}.`, bookPersona: project.bookPersona })}\nReturn exactly two top-level fields: chapter and sourceDigest. sourceDigest must be a compact, factual 500-900 word private digest of the attached range used for local checking and targeted repair. Do not use material outside the attached pages.` },
+      ...files.map((file) => ({ type: "file", file: { filename: file.name, file_data: bufferDataUrl(file.bytes) } })),
+    ] }] }),
+  });
+  if (!response.ok) {
+    if (response.status === 429 || response.status === 402) throw new TeachingEngineError("Nemotron or OCR quota is exhausted. Completed chapters remain saved; resume after reset.", response.status, "quota-exhausted", false, true, 1);
+    throw new TeachingEngineError(`Nemotron could not read this scanned chapter (${response.status}).`, 502, "scan-generation", response.status >= 500, false, 1);
+  }
+  const result = await response.json() as { choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; reasoning_tokens?: number } };
+  const data = parseJsonObject<{ chapter: TeachingChapter; sourceDigest: string }>(result.choices?.[0]?.message?.content || "");
+  if (!data.chapter || contentWords(data.sourceDigest || "").length < 80) throw new TeachingEngineError("Nemotron could not return a grounded chapter digest. The chapter was not replaced.", 422, "malformed-output", false, false, 1);
+  return { data: { chapter: data.chapter }, sourceMaterial: data.sourceDigest, model, usage: { inputTokens: result.usage?.prompt_tokens ?? 0, outputTokens: result.usage?.completion_tokens ?? 0, totalTokens: result.usage?.total_tokens ?? 0, reasoningTokens: result.usage?.reasoning_tokens ?? 0, requests: 1 } satisfies AiUsage };
+}
+
 function privateChapterRefs(pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput) {
   const { selected, keywords } = selectChapterPages(pageTexts, chapter, index, total, project.sourceTerms ?? []);
   return selected.flatMap((entry) => usefulSentences(entry.page)
@@ -558,12 +612,12 @@ function privateChapterRefs(pageTexts: string[], chapter: DraftChapterInput, ind
     .map((item) => ({ title: chapter.title, page: entry.pageIndex + 1, excerpt: item.sentence.slice(0, 520) }))).slice(0, 8);
 }
 
-async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput) {
-  const sourceMaterial = chapterSourceMaterial(pageTexts, chapter, index, total, project);
+async function buildPedagogicalDraft(env: Env, pageTexts: string[], chapter: DraftChapterInput, index: number, total: number, project: DraftProjectInput, scannedInitial?: Awaited<ReturnType<typeof openRouterScannedChapter>>) {
+  const sourceMaterial = scannedInitial?.sourceMaterial || chapterSourceMaterial(pageTexts, chapter, index, total, project);
   if (contentWords(sourceMaterial).length < 120) throw new TeachingEngineError("This chapter does not contain enough readable text. OCR or a clearer source file may be required.", 422);
   const audience = project.audience || "Ages 10–12";
   const language = project.language || "English";
-  const initial = await openRouterStructured<{ chapter: TeachingChapter }>(
+  const initial = scannedInitial ?? await openRouterStructured<{ chapter: TeachingChapter }>(
     env,
     efficientChapterPrompt({ title: chapter.title, audience, language, targetPages: chapter.pages, sourceMaterial, bookPersona: project.bookPersona }),
     2800,
@@ -895,6 +949,110 @@ async function exportDocxApi(request: Request) {
   return new Response(blob, { headers: { "content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "content-disposition": `attachment; filename="book.docx"`, "cache-control": "no-store" } });
 }
 
+async function sourceChunkApi(request: Request, env: Env) {
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const form = await request.formData();
+  const file = form.get("file");
+  if (!(file instanceof File)) return json({ error: "A PDF chunk is required" }, 400);
+  if (file.size > 28 * 1024 * 1024) return json({ error: "This chunk is too large. Use fewer pages per chunk." }, 413);
+  const projectId = String(form.get("projectId") || "").replace(/[^a-zA-Z0-9_-]/g, "");
+  const uploadId = String(form.get("uploadId") || "").replace(/[^a-zA-Z0-9_-]/g, "");
+  const index = Math.max(0, Number(form.get("index") || 0));
+  const startPage = Math.max(1, Number(form.get("startPage") || 1));
+  const endPage = Math.max(startPage, Number(form.get("endPage") || startPage));
+  if (!projectId || !uploadId) return json({ error: "Upload identity is missing" }, 400);
+  const bytes = await file.arrayBuffer();
+  const key = `sources/${ownerKey(request)}/${projectId}/${uploadId}/chunk-${String(index).padStart(3, "0")}.pdf`;
+  await env.BUCKET.put(key, bytes.slice(0), { httpMetadata: { contentType: "application/pdf" } });
+  const extracted = await extractSourcePages(bytes, "pdf");
+  return json({ chunk: { key, startPage, endPage, size: file.size, pageTexts: extracted.pageTexts } satisfies SourceChunk });
+}
+
+async function sourceFinalizeApi(request: Request, env: Env) {
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const payload = await request.json() as { projectId?: string; uploadId?: string; name?: string; size?: number; pages?: number; chunks?: SourceChunk[]; audience?: string };
+  if (!payload.projectId || !payload.uploadId || !payload.name || !payload.pages || !payload.chunks?.length) return json({ error: "The chunked source upload is incomplete" }, 400);
+  const ownerPrefix = `sources/${ownerKey(request)}/${payload.projectId}/${payload.uploadId}/`;
+  if (payload.chunks.some((chunk) => !chunk.key.startsWith(ownerPrefix))) return json({ error: "One or more source chunks do not belong to this project" }, 403);
+  const pageTexts = payload.chunks.sort((a, b) => a.startPage - b.startPage).flatMap((chunk) => chunk.pageTexts);
+  const text = pageTexts.join("\n\n");
+  const analysis = analyseText(text);
+  const classification = classifySource(pageTexts, payload.pages);
+  const sourceIntelligence: SourceIntelligence = {
+    version: 1,
+    status: classification.sourceKind === "searchable" ? "ready" : "ocr-required",
+    sourceKind: classification.sourceKind,
+    totalPages: payload.pages,
+    fileSizeBytes: payload.size || 0,
+    searchablePageRatio: classification.searchablePageRatio,
+    pagesProcessed: pageTexts.length,
+    progress: classification.sourceKind === "searchable" ? 100 : 22,
+    message: classification.sourceKind === "searchable" ? "Searchable text and chapter structure detected." : "This is a scanned book. OCR is required before its outline can be trusted.",
+    structureMode: "parts",
+    outline: [],
+    ocrCostEstimateUsd: ocrEstimate(payload.pages),
+    cacheKey: `${payload.uploadId}:${payload.pages}:${payload.size || 0}`,
+  };
+  const objectKey = `${ownerPrefix}manifest.json`;
+  const chapterPlans = classification.sourceKind === "searchable" ? chapterContextPlans(analysis.headings, pageTexts, payload.audience) : [];
+  const sections = classification.sourceKind === "searchable" ? makeSections(analysis.headings, pageTexts, text, chapterPlans) : [];
+  const manifest: SourceManifest = { version: 1, name: payload.name, size: payload.size || 0, pages: payload.pages, chunks: payload.chunks, sourceIntelligence };
+  await env.BUCKET.put(objectKey, JSON.stringify(manifest), { httpMetadata: { contentType: "application/json" }, customMetadata: { originalName: payload.name } });
+  return json({ source: { name: payload.name, size: payload.size || 0, objectKey, pages: payload.pages, ...analysis, sections, chapterPlans, sourceIntelligence, quality: classification.sourceKind === "searchable" ? "Good" : "OCR required — outline not yet confirmed" } });
+}
+
+async function openRouterPdfOutline(env: Env, file: R2ObjectBody, filename: string, engine: "cloudflare-ai" | "mistral-ocr", totalPages: number) {
+  const key = typeof env.OPENROUTER_API_KEY === "string" ? env.OPENROUTER_API_KEY.trim() : "";
+  if (!key) throw new TeachingEngineError("OPENROUTER_API_KEY is not configured as a server secret.", 503, "authentication");
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: { authorization: `Bearer ${key}`, "content-type": "application/json", "HTTP-Referer": "https://iks-book-studio.chatgpt.site", "X-Title": "IKS Book Studio Source Intelligence" },
+    body: JSON.stringify({
+      model: env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL,
+      temperature: 0,
+      max_tokens: 2600,
+      plugins: [{ id: "file-parser", pdf: { engine } }],
+      messages: [{ role: "user", content: [
+        { type: "text", text: `Read the contents/front-matter pages of this scanned book. Return JSON only with one field named outline. Preserve exact printed Part and chapter titles. Each item must contain id, type (part or chapter), title, sourceStartPage, sourceEndPage, confidence from 0 to 1, included, and optional parentId. Infer physical PDF page ranges cautiously within 1-${totalPages}. Include both the major Parts and their child chapters when visible. Never invent generic headings.` },
+        { type: "file", file: { filename, file_data: bufferDataUrl(await file.arrayBuffer()) } },
+      ] }],
+    }),
+  });
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 360);
+    if (response.status === 429 || response.status === 402) throw new TeachingEngineError("OCR paused because the provider quota or credit limit was reached. Resume after the quota resets.", response.status, "quota-exhausted", false, true);
+    throw new TeachingEngineError(`The ${engine === "mistral-ocr" ? "accurate" : "free"} OCR pass failed (${response.status}). ${detail}`, 502, "ocr-provider");
+  }
+  const result = await response.json() as { choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } };
+  const parsed = parseJsonObject<{ outline: SourceOutlineItem[] }>(result.choices?.[0]?.message?.content || "");
+  return { outline: parsed.outline || [], usage: result.usage || {} };
+}
+
+async function sourceIntelligenceApi(request: Request, env: Env) {
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const payload = await request.json() as { sourceObjectKey?: string; engine?: "cloudflare-ai" | "mistral-ocr" };
+  if (!payload.sourceObjectKey) return json({ error: "The stored source is missing" }, 400);
+  const ownerPrefix = `sources/${ownerKey(request)}/`;
+  if (!payload.sourceObjectKey.startsWith(ownerPrefix)) return json({ error: "The source does not belong to this project" }, 403);
+  const manifest = await readSourceManifest(env, payload.sourceObjectKey);
+  if (!manifest) return json({ error: "Re-upload this scan once so Book Studio can create safe page chunks." }, 409);
+  const engine = payload.engine === "mistral-ocr" ? "mistral-ocr" : "cloudflare-ai";
+  const frontMatter = manifest.chunks[0];
+  const object = frontMatter ? await env.BUCKET.get(frontMatter.key) : null;
+  if (!object) return json({ error: "The first source chunk is unavailable" }, 404);
+  try {
+    const result = await openRouterPdfOutline(env, object, `${manifest.name}-front-matter.pdf`, engine, manifest.pages);
+    const validated = validateOutline(result.outline, manifest.pages);
+    if (validated.errors.length) return json({ error: validated.errors.join(" "), code: "low-confidence-outline", sourceIntelligence: { ...manifest.sourceIntelligence, status: "ocr-required", lastError: validated.errors.join(" ") } }, 422);
+    manifest.sourceIntelligence = { ...manifest.sourceIntelligence, status: "outline-review", ocrEngine: engine, outline: validated.outline, progress: 72, pagesProcessed: frontMatter.endPage, message: `${validated.outline.length} source divisions found. Review their names and page ranges before generation.` };
+    await env.BUCKET.put(payload.sourceObjectKey, JSON.stringify(manifest), { httpMetadata: { contentType: "application/json" }, customMetadata: { originalName: manifest.name } });
+    return json({ sourceIntelligence: manifest.sourceIntelligence, usage: result.usage });
+  } catch (error) {
+    if (error instanceof TeachingEngineError) return json({ error: error.message, code: error.code }, error.status);
+    return json({ error: error instanceof Error ? error.message : "OCR could not read this source" }, 502);
+  }
+}
+
 async function sourceApi(request: Request, env: Env) {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const form = await request.formData();
@@ -904,18 +1062,26 @@ async function sourceApi(request: Request, env: Env) {
   if (!(file instanceof File)) return json({ error: "Choose a source file" }, 400);
   const extension = sourceExtension(file.name);
   if (!allowedExtensions.has(extension)) return json({ error: "Use a PDF, DOCX, TXT or MD file" }, 415);
-  if (file.size > 30 * 1024 * 1024) return json({ error: "The source must be smaller than 30 MB" }, 413);
+  if (file.size > 90 * 1024 * 1024) return json({ error: "This large PDF must use Book Studio's safe chunked uploader." }, 413);
   const bytes = await file.arrayBuffer();
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, "-");
-  const objectKey = `sources/${ownerKey(request)}/${projectId}/${crypto.randomUUID()}-${safeName}`;
+  let objectKey = `sources/${ownerKey(request)}/${projectId}/${crypto.randomUUID()}-${safeName}`;
   // Persist before PDF parsing because some PDF engines transfer/detach the
   // supplied ArrayBuffer while loading the document.
   await env.BUCKET.put(objectKey, bytes.slice(0), { httpMetadata: { contentType: file.type || "application/octet-stream" }, customMetadata: { originalName: file.name } });
   const { text, pageTexts, pages } = await extractSourcePages(bytes, extension);
   const analysis = analyseText(text);
-  const chapterPlans = chapterContextPlans(analysis.headings, pageTexts, audience);
-  const sections = makeSections(analysis.headings, pageTexts, text, chapterPlans);
-  return json({ source: { name: file.name, size: file.size, objectKey, pages, ...analysis, sections, chapterPlans, quality: analysis.words > 200 ? "Good" : "Needs review — OCR may be required" } });
+  const classification = classifySource(pageTexts, pages || pageTexts.length);
+  const sourceIntelligence: SourceIntelligence = { version: 1, status: classification.sourceKind === "searchable" ? "ready" : "ocr-required", sourceKind: classification.sourceKind, totalPages: pages, fileSizeBytes: file.size, searchablePageRatio: classification.searchablePageRatio, pagesProcessed: pageTexts.length, progress: classification.sourceKind === "searchable" ? 100 : 22, message: classification.sourceKind === "searchable" ? "Searchable text and chapter structure detected." : "This PDF is scanned or only partly searchable. OCR is required before chapter generation.", structureMode: "parts", outline: [], ocrCostEstimateUsd: ocrEstimate(pages) };
+  if (extension === "pdf" && classification.sourceKind !== "searchable") {
+    const chunkKey = objectKey;
+    objectKey = `${chunkKey.replace(/\/[^/]+$/, "")}/${crypto.randomUUID()}/manifest.json`;
+    const manifest: SourceManifest = { version: 1, name: file.name, size: file.size, pages, chunks: [{ key: chunkKey, startPage: 1, endPage: pages, size: file.size, pageTexts }], sourceIntelligence };
+    await env.BUCKET.put(objectKey, JSON.stringify(manifest), { httpMetadata: { contentType: "application/json" }, customMetadata: { originalName: file.name } });
+  }
+  const chapterPlans = classification.sourceKind === "searchable" ? chapterContextPlans(analysis.headings, pageTexts, audience) : [];
+  const sections = classification.sourceKind === "searchable" ? makeSections(analysis.headings, pageTexts, text, chapterPlans) : [];
+  return json({ source: { name: file.name, size: file.size, objectKey, pages, ...analysis, sections, chapterPlans, sourceIntelligence, quality: classification.sourceKind === "searchable" ? "Good" : "OCR required — outline not yet confirmed" } });
 }
 
 async function reanalyseSourceApi(request: Request, env: Env) {
@@ -924,15 +1090,15 @@ async function reanalyseSourceApi(request: Request, env: Env) {
   if (!payload.source || !payload.sourceObjectKey) return json({ error: "The stored source is missing" }, 400);
   const ownerPrefix = `sources/${ownerKey(request)}/`;
   if (!payload.sourceObjectKey.startsWith(ownerPrefix)) return json({ error: "The source does not belong to this project" }, 403);
-  const source = await env.BUCKET.get(payload.sourceObjectKey);
+  const source = await extractStoredSource(env, payload.sourceObjectKey, payload.source);
   if (!source) return json({ error: "The original source file is unavailable. Upload it again to re-detect chapters." }, 404);
   const extension = sourceExtension(payload.source);
   if (!allowedExtensions.has(extension)) return json({ error: "This source format cannot be analysed" }, 415);
-  const extracted = await extractSourcePages(await source.arrayBuffer(), extension);
+  const extracted = source;
   const analysis = analyseText(extracted.text);
   const chapterPlans = chapterContextPlans(analysis.headings, extracted.pageTexts, payload.audience);
   const sections = makeSections(analysis.headings, extracted.pageTexts, extracted.text, chapterPlans);
-  return json({ source: { pages: extracted.pages, ...analysis, sections, chapterPlans, quality: analysis.words > 200 ? "Good" : "Needs review — OCR may be required" } });
+  return json({ source: { pages: extracted.pages, ...analysis, sections, chapterPlans, sourceIntelligence: extracted.manifest?.sourceIntelligence, quality: analysis.words > 200 ? "Good" : "OCR required — outline not yet confirmed" } });
 }
 
 async function downloadSourceApi(request: Request, env: Env) {
@@ -960,12 +1126,11 @@ async function draftApi(request: Request, env: Env) {
   }
   const ownerPrefix = `sources/${ownerKey(request)}/`;
   if (!project.sourceObjectKey.startsWith(ownerPrefix)) return json({ error: "The source does not belong to this project" }, 403);
-  const source = await env.BUCKET.get(project.sourceObjectKey);
+  const source = await extractStoredSource(env, project.sourceObjectKey, project.source);
   if (!source) return json({ error: "The original source file is unavailable. Upload it again to rebuild chapters." }, 404);
-  const bytes = await source.arrayBuffer();
   const extension = sourceExtension(project.source);
   if (!allowedExtensions.has(extension)) return json({ error: "This source format cannot be drafted" }, 415);
-  const extracted = await extractSourcePages(bytes, extension);
+  const extracted = source;
   const requested = new Set(project.chapterIds.map(Number));
   if (requested.size > 1) return json({ error: "For safe progress saving, request exactly one chapter at a time." }, 400);
   if (project.phase7ChapterOneOnly && (requested.size !== 1 || !requested.has(1))) {
@@ -978,7 +1143,21 @@ async function draftApi(request: Request, env: Env) {
     for (let index = 0; index < project.chapters.length; index += 1) {
       const chapter = project.chapters[index];
       if (!requested.has(chapter.id) || chapter.locked) continue;
-      const built = await buildPedagogicalDraft(env, extracted.pageTexts, chapter, index, project.chapters.length, project);
+      let scannedInitial: Awaited<ReturnType<typeof openRouterScannedChapter>> | undefined;
+      if (extracted.manifest && extracted.manifest.sourceIntelligence.sourceKind !== "searchable") {
+        const start = chapter.sourceStartPage || 1;
+        const end = chapter.sourceEndPage || start;
+        const relevant = extracted.manifest.chunks.filter((chunk) => chunk.endPage >= start && chunk.startPage <= end);
+        if (!relevant.length) throw new TeachingEngineError("No uploaded scan chunk overlaps this verified chapter range.", 422, "missing-source-range");
+        const files = [];
+        for (const chunk of relevant.slice(0, 3)) {
+          const object = await env.BUCKET.get(chunk.key);
+          if (object) files.push({ name: `${project.source}-pp-${chunk.startPage}-${chunk.endPage}.pdf`, bytes: await object.arrayBuffer() });
+        }
+        if (!files.length) throw new TeachingEngineError("The scan pages for this chapter are unavailable.", 404, "missing-source-range");
+        scannedInitial = await openRouterScannedChapter(env, files, chapter, project);
+      }
+      const built = await buildPedagogicalDraft(env, extracted.pageTexts, chapter, index, project.chapters.length, project, scannedInitial);
       chapters.push(built.chapter);
       usage = addUsage(usage, built.usage);
     }
@@ -1043,6 +1222,9 @@ const worker = {
       if (url.pathname === "/api/versions") return await versionsApi(request, env);
       if (url.pathname === "/api/preferences") return await preferencesApi(request, env);
       if (url.pathname === "/api/source") return await sourceApi(request, env);
+      if (url.pathname === "/api/source/chunk") return await sourceChunkApi(request, env);
+      if (url.pathname === "/api/source/finalize") return await sourceFinalizeApi(request, env);
+      if (url.pathname === "/api/source/intelligence") return await sourceIntelligenceApi(request, env);
       if (url.pathname === "/api/source/download") return await downloadSourceApi(request, env);
       if (url.pathname === "/api/source/reanalyse") return await reanalyseSourceApi(request, env);
       if (url.pathname === "/api/ai/status") return await openRouterStatusApi(request, env);

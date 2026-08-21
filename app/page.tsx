@@ -7,6 +7,7 @@ import { ADAPTATION_PLAN_VERSION, allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET
 import type { ChapterOneGate, PedagogyQuality } from "../lib/pedagogy";
 import { BOOK_PACKAGE_FORMAT, expectedChapterId, expectedContextKey, expectedPageId, type BookPackage, type BookPackageValidation, validateBookPackage } from "../lib/book-package";
 import { bookPersonaClass, bookPersonaDefinitions, bookPersonaPatch, inferBookPersona, materializePersona, personaById, type BookPersona } from "../lib/book-persona";
+import { outlineForMode, pdfChunkRanges, type OutlineMode, type SourceIntelligence, type SourceOutlineItem } from "../lib/source-intelligence";
 
 type View = "dashboard" | "wizard" | "analysis" | "brief" | "editor";
 
@@ -121,6 +122,7 @@ type SourceResult = {
   chapterPlans: ChapterContextPlan[];
   preview: string;
   quality: string;
+  sourceIntelligence?: SourceIntelligence;
 };
 
 type CanvaPageVersion = {
@@ -203,6 +205,7 @@ type Project = {
   sourceTerms: string[];
   sourceSections: SourceSection[];
   sourcePreview: string;
+  sourceIntelligence?: SourceIntelligence;
   audience: string;
   readingLevel: string;
   language: string;
@@ -1042,6 +1045,50 @@ function ownerHeaders() {
   return { "x-book-studio-owner": owner };
 }
 
+async function uploadSourceForAnalysis(file: File, projectId: string, audience: string, onProgress?: (progress: number) => void): Promise<SourceResult> {
+  const isLargePdf = file.type === "application/pdf" && file.size > 24 * 1024 * 1024;
+  if (!isLargePdf) {
+    const form = new FormData();
+    form.set("file", file);
+    form.set("projectId", projectId);
+    form.set("audience", audience);
+    const response = await fetch("/api/source", { method: "POST", headers: ownerHeaders(), body: form });
+    const data = await response.json() as { source?: SourceResult; error?: string };
+    if (!response.ok || !data.source) throw new Error(data.error || "Source upload failed");
+    return data.source;
+  }
+  const { PDFDocument } = await import("pdf-lib");
+  const original = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true, updateMetadata: false });
+  const uploadId = makeId();
+  const ranges = pdfChunkRanges(original.getPageCount(), 10);
+  const chunks: Array<{ key: string; startPage: number; endPage: number; size: number; pageTexts: string[] }> = [];
+  for (const range of ranges) {
+    const part = await PDFDocument.create();
+    const indices = Array.from({ length: range.endPage - range.startPage + 1 }, (_, index) => range.startPage - 1 + index);
+    const copied = await part.copyPages(original, indices);
+    copied.forEach((page) => part.addPage(page));
+    const bytes = await part.save({ useObjectStreams: true });
+    if (bytes.byteLength > 28 * 1024 * 1024) throw new Error(`Pages ${range.startPage}–${range.endPage} contain unusually large scans. Compress the PDF once, then upload it again.`);
+    const form = new FormData();
+    form.set("file", new File([bytes], `source-${range.startPage}-${range.endPage}.pdf`, { type: "application/pdf" }));
+    form.set("projectId", projectId);
+    form.set("uploadId", uploadId);
+    form.set("index", String(range.index));
+    form.set("startPage", String(range.startPage));
+    form.set("endPage", String(range.endPage));
+    const response = await fetch("/api/source/chunk", { method: "POST", headers: ownerHeaders(), body: form });
+    const data = await response.json() as { chunk?: typeof chunks[number]; error?: string };
+    if (!response.ok || !data.chunk) throw new Error(data.error || `Could not upload pages ${range.startPage}–${range.endPage}`);
+    chunks.push(data.chunk);
+    onProgress?.(Math.round((range.index + 1) / ranges.length * 75));
+  }
+  const response = await fetch("/api/source/finalize", { method: "POST", headers: { "content-type": "application/json", ...ownerHeaders() }, body: JSON.stringify({ projectId, uploadId, name: file.name, size: file.size, pages: original.getPageCount(), chunks, audience }) });
+  const data = await response.json() as { source?: SourceResult; error?: string };
+  if (!response.ok || !data.source) throw new Error(data.error || "Could not assemble the uploaded source");
+  onProgress?.(100);
+  return data.source;
+}
+
 function escapeHtml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#039;");
 }
@@ -1209,6 +1256,7 @@ export default function Home() {
   const [packageBusy, setPackageBusy] = useState(false);
   const [versions, setVersions] = useState<{ label: string; date: string; snapshot: Project }[]>([]);
   const [sourceBusy, setSourceBusy] = useState(false);
+  const [sourceProgress, setSourceProgress] = useState(0);
   const [draftBusy, setDraftBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [pdfProgress, setPdfProgress] = useState(0);
@@ -1280,15 +1328,8 @@ export default function Home() {
     setSourceBusy(true);
     patchProject({ source: file.name, title: file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " "), sourceSize: file.size });
     try {
-      const form = new FormData();
-      form.set("file", file);
-      form.set("projectId", project.id || makeId());
-      form.set("audience", project.audience);
-      const response = await fetch("/api/source", { method: "POST", headers: ownerHeaders(), body: form });
-      const data = await response.json() as { source?: SourceResult; error?: string };
-      if (!response.ok || !data.source) throw new Error(data.error || "Upload failed");
-      const source = data.source;
-      const headings = source.headings.length ? source.headings : ["Opening chapter", "Core ideas", "Applications and examples", "Closing reflections"];
+      const source = await uploadSourceForAnalysis(file, project.id || makeId(), project.audience, setSourceProgress);
+      const headings = source.headings;
       const persona = inferBookPersona({ title: file.name.replace(/\.[^.]+$/, ""), sourcePreview: source.preview, sourceTerms: source.terms, sourceHeadings: headings, bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
       const sourceChapters: Chapter[] = headings.map((title, index) => chapterFromContextPlan(title, index, source.sections[index], source.chapterPlans[index], project.audience));
       const personaProject = { ...project, ...bookPersonaPatch(persona), sourceTerms: source.terms };
@@ -1304,17 +1345,19 @@ export default function Home() {
         sourceTerms: source.terms,
         sourceSections: source.sections,
         sourcePreview: source.preview,
+        sourceIntelligence: source.sourceIntelligence,
         ...bookPersonaPatch(persona),
         briefApproved: false,
         adaptationPlanConfirmed: false,
         adaptationPlanVersion: ADAPTATION_PLAN_VERSION,
         chapters,
       });
-      notify(`${file.name} analysed successfully`);
+      notify(source.sourceIntelligence?.status === "ocr-required" ? `${file.name} uploaded. Choose an OCR method to detect its real structure.` : `${file.name} analysed successfully`);
     } catch (error) {
       notify(error instanceof Error ? error.message : "Could not analyse this source");
     } finally {
       setSourceBusy(false);
+      setSourceProgress(0);
     }
   }
 
@@ -1322,15 +1365,8 @@ export default function Home() {
     // Legacy equivalent before Book Persona: chapters: attachChapterVisuals({ ...project, sourceTerms: source.terms }, reconcileOriginalChapters(project, titles, source.sections, source.chapterPlans))
     setSourceBusy(true);
     try {
-      const form = new FormData();
-      form.set("file", file);
-      form.set("projectId", project.id);
-      form.set("audience", project.audience);
-      const response = await fetch("/api/source", { method: "POST", headers: ownerHeaders(), body: form });
-      const data = await response.json() as { source?: SourceResult; error?: string };
-      if (!response.ok || !data.source) throw new Error(data.error || "Source upload failed");
-      const source = data.source;
-      const titles = source.headings.length ? source.headings : project.sourceHeadings;
+      const source = await uploadSourceForAnalysis(file, project.id, project.audience, setSourceProgress);
+      const titles = source.sourceIntelligence?.status === "ocr-required" ? [] : source.headings.length ? source.headings : project.sourceHeadings;
       const persona = inferBookPersona({ title: project.title, sourcePreview: source.preview, sourceTerms: source.terms, sourceHeadings: titles, bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
       const personaProject = { ...project, ...bookPersonaPatch(persona), sourceTerms: source.terms };
       const next = {
@@ -1346,10 +1382,11 @@ export default function Home() {
         sourceTerms: source.terms,
         sourceSections: source.sections,
         sourcePreview: source.preview,
+        sourceIntelligence: source.sourceIntelligence,
         adaptationPlanConfirmed: false,
         adaptationPlanVersion: ADAPTATION_PLAN_VERSION,
         briefApproved: false,
-        chapters: attachChapterVisuals(personaProject, reconcileOriginalChapters(project, titles, source.sections, source.chapterPlans)),
+        chapters: source.sourceIntelligence?.status === "ocr-required" ? [] : attachChapterVisuals(personaProject, reconcileOriginalChapters(project, titles, source.sections, source.chapterPlans)),
       };
       setProject(next);
       await persistProject(next);
@@ -1359,7 +1396,45 @@ export default function Home() {
       notify(error instanceof Error ? error.message : "Could not refresh the source");
     } finally {
       setSourceBusy(false);
+      setSourceProgress(0);
     }
+  }
+
+  async function runSourceOcr(engine: "cloudflare-ai" | "mistral-ocr") {
+    if (!project.sourceObjectKey) return notify("Upload the source first");
+    setSourceBusy(true);
+    patchProject({ sourceIntelligence: { ...(project.sourceIntelligence as SourceIntelligence), status: "reading-contents", progress: 38, message: engine === "mistral-ocr" ? "Accurate OCR is reading the contents pages…" : "Free OCR is reading the contents pages…", ocrEngine: engine } });
+    try {
+      const response = await fetch("/api/source/intelligence", { method: "POST", headers: requestHeaders(), body: JSON.stringify({ sourceObjectKey: project.sourceObjectKey, engine }) });
+      const data = await response.json() as { sourceIntelligence?: SourceIntelligence; error?: string; code?: string };
+      if (!response.ok || !data.sourceIntelligence) throw new Error(data.error || "OCR could not detect the source outline");
+      patchProject({ sourceIntelligence: data.sourceIntelligence });
+      notify("Source outline detected. Review the names and page ranges.");
+    } catch (error) {
+      patchProject({ sourceIntelligence: { ...(project.sourceIntelligence as SourceIntelligence), status: "ocr-required", progress: 22, message: error instanceof Error ? error.message : "OCR could not detect the outline", lastError: error instanceof Error ? error.message : "OCR failed" } });
+      notify(error instanceof Error ? error.message : "OCR failed");
+    } finally { setSourceBusy(false); }
+  }
+
+  function updateSourceOutline(outline: SourceOutlineItem[]) {
+    if (!project.sourceIntelligence) return;
+    patchProject({ sourceIntelligence: { ...project.sourceIntelligence, outline } });
+  }
+
+  function acceptSourceOutline(mode: OutlineMode) {
+    if (!project.sourceIntelligence) return;
+    const selected = outlineForMode(project.sourceIntelligence.outline, mode).filter((item) => item.included);
+    if (!selected.length) return notify("Include at least one detected Part or chapter");
+    const plans: ChapterContextPlan[] = selected.map((item) => {
+      const sourcePageCount = Math.max(1, item.sourceEndPage - item.sourceStartPage + 1);
+      const seed = { title: item.title, sourceStartPage: item.sourceStartPage, sourceEndPage: item.sourceEndPage, sourcePageCount, sourceWordCount: sourcePageCount * 260, complexityScore: .55, complexity: "Concept-rich" as const, keyTerms: item.title.toLowerCase().match(/[\p{L}\p{N}]+/gu)?.filter((word) => word.length > 4).slice(0, 5) || [], context: `Verified source range pp. ${item.sourceStartPage}–${item.sourceEndPage}.`, recommendedPages: 4, pageReason: `Source-led adaptation of ${sourcePageCount} scanned pages. The chapter itself will be sent to Nemotron only when generated.` };
+      return { ...seed, recommendedPages: recommendedAdaptationPages(seed, project.audience) };
+    });
+    const sourceChapters = selected.map((item, index) => chapterFromContextPlan(item.title, index, undefined, plans[index], project.audience));
+    const persona = inferBookPersona({ title: project.title, sourcePreview: selected.map((item) => item.title).join(" "), sourceTerms: project.sourceTerms, sourceHeadings: selected.map((item) => item.title), bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
+    const personaProject = { ...project, ...bookPersonaPatch(persona) };
+    patchProject({ sourceHeadings: selected.map((item) => item.title), chapters: attachChapterVisuals(personaProject, applyAutomaticAdaptationPlan(sourceChapters, project.audience, true)), sourceIntelligence: { ...project.sourceIntelligence, status: "ready", structureMode: mode, progress: 100, message: `${selected.length} verified ${mode === "parts" ? "Parts" : "chapters"} are ready for generation.` }, ...bookPersonaPatch(persona), adaptationPlanConfirmed: false, briefApproved: false });
+    notify(`${selected.length} source-led chapters prepared from the verified outline`);
   }
 
   async function persistProject(next: Project) {
@@ -1400,7 +1475,8 @@ export default function Home() {
       });
       const data = await response.json() as { source?: Omit<SourceResult, "name" | "size" | "objectKey">; error?: string };
       if (!response.ok || !data.source) throw new Error(data.error || "Source re-check failed");
-      const titles = data.source.headings.length ? data.source.headings : next.sourceHeadings;
+      const awaitingSourceOutline = Boolean(data.source.sourceIntelligence && data.source.sourceIntelligence.status !== "ready");
+      const titles = awaitingSourceOutline ? [] : data.source.headings.length ? data.source.headings : next.sourceHeadings;
       const persona = inferBookPersona({ title: next.title, sourcePreview: data.source.preview, sourceTerms: data.source.terms, sourceHeadings: titles, bookType: next.bookType }, projects.filter((item) => item.id !== next.id).map((item) => item.bookPersona?.signature).filter(Boolean));
       const personaProject = { ...next, ...bookPersonaPatch(persona), sourceTerms: data.source.terms };
       next = {
@@ -1413,10 +1489,11 @@ export default function Home() {
         sourceTerms: data.source.terms,
         sourceSections: data.source.sections,
         sourcePreview: data.source.preview,
+        sourceIntelligence: data.source.sourceIntelligence ?? next.sourceIntelligence,
         adaptationPlanVersion: ADAPTATION_PLAN_VERSION,
         adaptationPlanConfirmed: needsContextPlan ? false : next.adaptationPlanConfirmed,
         briefApproved: needsContextPlan ? false : next.briefApproved,
-        chapters: attachChapterVisuals(personaProject, reconcileOriginalChapters(next, titles, data.source.sections, data.source.chapterPlans)),
+        chapters: awaitingSourceOutline ? [] : attachChapterVisuals(personaProject, reconcileOriginalChapters(next, titles, data.source.sections, data.source.chapterPlans)),
       };
       setProject(next);
       await persistProject(next);
@@ -2160,8 +2237,8 @@ OUTPUT REQUIREMENTS
         onRestore={() => void restorePreviousVersion()}
       />}
 
-      {view === "wizard" && <Wizard step={wizardStep} project={project} sourceBusy={sourceBusy} onPatch={patchProject} onFile={handleFile} onBack={() => wizardStep === 0 ? setView("dashboard") : setWizardStep((step) => step - 1)} onNext={() => wizardStep < 3 ? setWizardStep((step) => step + 1) : setView("analysis")} />}
-      {view === "analysis" && <Analysis project={project} sourceBusy={sourceBusy} onPatch={patchProject} onBack={() => { setView("wizard"); setWizardStep(4); }} onContinue={confirmAdaptationPlan} />}
+      {view === "wizard" && <Wizard step={wizardStep} project={project} sourceBusy={sourceBusy} sourceProgress={sourceProgress} onPatch={patchProject} onFile={handleFile} onBack={() => wizardStep === 0 ? setView("dashboard") : setWizardStep((step) => step - 1)} onNext={() => wizardStep < 3 ? setWizardStep((step) => step + 1) : setView("analysis")} />}
+      {view === "analysis" && <Analysis project={project} sourceBusy={sourceBusy} onPatch={patchProject} onBack={() => { setView("wizard"); setWizardStep(3); }} onContinue={confirmAdaptationPlan} onRunOcr={runSourceOcr} onUpdateOutline={updateSourceOutline} onAcceptOutline={acceptSourceOutline} />}
       {view === "brief" && <BookBrief project={project} allocated={allocatedPages} draftBusy={draftBusy} onBack={() => setView("analysis")} onUpdateChapter={updateChapter} onPrepare={prepareDraft} onContinue={() => { patchProject({ briefApproved: true }); setActiveChapter(project.chapters[0]?.id ?? 1); setView("editor"); }} />}
       {view === "editor" && <Editor project={project} active={active} activeId={activeChapter} allocated={allocatedPages} draftBusy={draftBusy} onSelect={setActiveChapter} onSaveBody={saveChapterBody} editorRef={editorRef} onAi={aiAction} onRemember={rememberPreference} onAddChapter={addChapter} onUploadImage={uploadChapterImage} onPatchProject={patchProject} onUpdateChapter={updateChapter} />}
 
@@ -2346,12 +2423,12 @@ function WatermarkPicker({ project, onPatch }: { project: Project; onPatch: (pat
   return <section className="page-watermark-section"><div className="typography-heading"><div><p className="choice-label">PAGE WATERMARK · APPLIES TO EVERY PAGE</p><h2>Choose a quiet background mark</h2></div><span>The live book glimpse changes instantly</span></div><div className="page-watermark-cards">{pageWatermarks.map((watermark) => { const watermarkClass = normalizedTitle(watermark.value).replace(/[^a-z]+/g, "-"); return <button className={`${project.pageWatermark === watermark.value ? "selected " : ""}page-watermark-choice watermark-${watermarkClass}`} onClick={() => onPatch(pageWatermarkPatch(watermark.value))} key={watermark.value}><span className="page-watermark-thumbnail"><i/><b>Chapter</b><span/><span/><span/></span><strong>{watermark.label}</strong><small>{watermark.description}</small><em>{watermark.detail}</em></button>; })}</div></section>;
 }
 
-function Wizard({ step, project, sourceBusy, onPatch, onFile, onBack, onNext }: { step: number; project: Project; sourceBusy: boolean; onPatch: (patch: Partial<Project>) => void; onFile: (e: ChangeEvent<HTMLInputElement>) => void; onBack: () => void; onNext: () => void }) {
+function Wizard({ step, project, sourceBusy, sourceProgress, onPatch, onFile, onBack, onNext }: { step: number; project: Project; sourceBusy: boolean; sourceProgress: number; onPatch: (patch: Partial<Project>) => void; onFile: (e: ChangeEvent<HTMLInputElement>) => void; onBack: () => void; onNext: () => void }) {
   return <div className="wizard-layout">
     <aside className="step-rail"><p>CHILDREN’S EDITION</p>{wizardSteps.map((label, index) => <div className={index <= step ? "active" : ""} key={label}><span>{index < step ? "✓" : index + 1}</span><b>{label}</b></div>)}<blockquote>Built first for children aged 7–15. Adult publishing choices will return in a later edition.</blockquote></aside>
     <main className="wizard-main">
       <p className="eyebrow">STEP {step + 1} OF 4 · AGES 7–15</p><h1>{["Choose the source.", "Choose the child reader.", "Choose the book world.", "Review your children’s book."][step]}</h1><p className="lead">{["Upload the book you are authorised to adapt.", "Pick one age band. Vocabulary, sentence length, explanation depth and text size adjust automatically.", "Choose a complete visual system and see the page before building the adaptation.", "These child-first choices guide every generated chapter and illustration."][step]}</p>
-      {step === 0 && <section className="form-card"><label className={`upload ${sourceBusy ? "busy" : ""}`}><input type="file" accept=".pdf,.docx,.txt,.md" onChange={onFile} disabled={sourceBusy}/><span>{sourceBusy ? "…" : "↑"}</span><strong>{sourceBusy ? "Reading and analysing your book…" : project.source}</strong><small>{sourceBusy ? "Large PDFs can take a short while" : "Click to choose a PDF, DOCX or TXT book (maximum 30 MB)"}</small></label><div className="fields two"><label>New book title<input value={project.title} onChange={(e) => onPatch({ title: e.target.value })}/></label><label>Source book<input value={project.source} readOnly/></label></div></section>}
+      {step === 0 && <section className="form-card"><label className={`upload ${sourceBusy ? "busy" : ""}`}><input type="file" accept=".pdf,.docx,.txt,.md" onChange={onFile} disabled={sourceBusy}/><span>{sourceBusy ? `${sourceProgress || "…"}${sourceProgress ? "%" : ""}` : "↑"}</span><strong>{sourceBusy ? "Securely uploading and classifying your book…" : project.source}</strong><small>{sourceBusy ? "Large scanned PDFs are split into safe 10-page chunks; progress is preserved" : "Choose a PDF, DOCX or TXT book. Large PDFs are uploaded safely in chunks."}</small></label><div className="fields two"><label>New book title<input value={project.title} onChange={(e) => onPatch({ title: e.target.value })}/></label><label>Source book<input value={project.source} readOnly/></label></div></section>}
       {step === 1 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">READER AGE</p><div className="choice-cards">{childAudienceProfiles.map((profile) => <button className={project.audience === profile.value ? "choice selected" : "choice"} onClick={() => onPatch(audiencePatch(profile.value))} key={profile.value}><span>{profile.value}</span><strong>{profile.label}</strong><small>{profile.description}</small><i>“{profile.sample}”</i></button>)}</div><div className="language-choice"><span>BOOK LANGUAGE</span>{["English", "Hindi", "English + Hindi"].map((language) => <button className={project.language === language ? "selected" : ""} onClick={() => onPatch({ language })} key={language}>{language}</button>)}</div><div className="auto-settings"><b>Natural writing is automatic</b><span>{project.learningFeatures.join(" · ")}</span><small>The studio changes vocabulary, sentence length, explanation depth and reflection for the selected age. There are no separate writing modes.</small></div></div><BookGlimpse project={project} focus="reader"/></section>}
       {step === 2 && <section className="wizard-choice-layout"><div className="form-card compact-choice-card"><p className="choice-label">ILLUSTRATION WORLD</p><div className="design-world-cards">{childDesignWorlds.map((world) => <button className={`${project.aesthetic === world.value ? "selected " : ""}design-world world-${normalizedTitle(world.value).replace(/[^a-z]+/g, "-")}`} onClick={() => onPatch(designWorldPatch(world.value))} key={world.value}><span className="world-thumbnail"><i/><b>Ab</b><i/></span><strong>{world.label}</strong><small>{world.description}</small><em>{world.illustrationStyle}</em></button>)}</div><div className="page-aesthetic-section"><p className="choice-label">PAGE AESTHETIC · APPLIES TO EVERY PAGE</p><div className="page-aesthetic-cards">{pageAesthetics.map((aesthetic) => { const aestheticClass = normalizedTitle(aesthetic.value).replace(/[^a-z]+/g, "-"); return <button className={`${project.pageAesthetic === aesthetic.value ? "selected " : ""}page-aesthetic-choice aesthetic-${aestheticClass}`} onClick={() => onPatch(pageAestheticPatch(aesthetic.value))} key={aesthetic.value}><span className="page-aesthetic-thumbnail"><i/><b>Chapter</b><i/><i/><i/></span><strong>{aesthetic.label}</strong><small>{aesthetic.description}</small><em>{aesthetic.detail}</em></button>; })}</div></div><div className="book-border-section"><p className="choice-label">BOOK BORDER · MIX WITH ANY PAGE AESTHETIC</p><div className="book-border-cards">{bookBorders.map((border) => { const borderClass = normalizedTitle(border.value).replace(/[^a-z]+/g, "-"); return <button className={`${project.bookBorder === border.value ? "selected " : ""}book-border-choice border-${borderClass}`} onClick={() => onPatch(bookBorderPatch(border.value))} key={border.value}><span className="book-border-thumbnail"><i/><b>Chapter</b><i/><i/><i/></span><strong>{border.label}</strong><small>{border.description}</small><em>{border.detail}</em></button>; })}</div></div><div className="auto-settings"><b>Visual guarantee</b><span>One unique image, page aesthetic and chosen border in every chapter</span><small>Every image is a chapter-specific narrative scene—never a map, Venn diagram or generic concept graphic. Use the live tabs to inspect the chapter, reading, visual and activity pages.</small></div></div><BookGlimpse project={project} focus="design" onPersona={(persona) => onPatch(bookPersonaPatch(persona))}/></section>}
       {step === 3 && <><section className="brief-review child-review"><div><span>SOURCE</span><strong>{project.source}</strong></div><div><span>CHILD READER</span><strong>{project.audience} · {project.readingLevel}</strong></div><div><span>BOOK</span><strong>{project.bookType}</strong></div><div><span>WRITING</span><strong>Natural age-based writing · {project.language}</strong></div><div><span>ILLUSTRATION WORLD</span><strong>{project.aesthetic} · {project.illustrationStyle}</strong></div><div><span>PAGE AESTHETIC</span><strong>{project.pageAesthetic} · applied to every page</strong></div><div><span>BOOK BORDER</span><strong>{project.bookBorder} · applied to every physical page</strong></div><div><span>PAGE WATERMARK</span><strong>{project.pageWatermark} · subtle background design</strong></div><div><span>LENGTH</span><strong>Shortest clear length · never padded · under 100 pages</strong></div></section><BookGlimpse project={project} focus="design" onPersona={(persona) => onPatch(bookPersonaPatch(persona))}/></>}
@@ -2362,7 +2439,39 @@ function Wizard({ step, project, sourceBusy, onPatch, onFile, onBack, onNext }: 
   </div>;
 }
 
-function Analysis({ project, sourceBusy, onPatch, onBack, onContinue }: { project: Project; sourceBusy: boolean; onPatch: (patch: Partial<Project>) => void; onBack: () => void; onContinue: () => void }) {
+function Analysis({ project, sourceBusy, onPatch, onBack, onContinue, onRunOcr, onUpdateOutline, onAcceptOutline }: { project: Project; sourceBusy: boolean; onPatch: (patch: Partial<Project>) => void; onBack: () => void; onContinue: () => void; onRunOcr: (engine: "cloudflare-ai" | "mistral-ocr") => Promise<void>; onUpdateOutline: (outline: SourceOutlineItem[]) => void; onAcceptOutline: (mode: OutlineMode) => void }) {
+  const intelligence = project.sourceIntelligence;
+  const headings = project.sourceHeadings;
+  const plannedPages = totalBookPages(project.chapters);
+  const requiresOcr = intelligence && ["ocr-required", "reading-contents", "failed", "paused"].includes(intelligence.status);
+  const reviewingOutline = intelligence?.status === "outline-review";
+  const updateItem = (id: string, patch: Partial<SourceOutlineItem>) => onUpdateOutline((intelligence?.outline || []).map((item) => item.id === id ? { ...item, ...patch } : item));
+  const setChapterPages = (index: number, value: number) => onPatch({ chapters: setChapterPagesWithinLimit(project.chapters, index, value) });
+  return <main className="analysis-page source-intelligence-page">
+    <button className="text-button" onClick={onBack}>← Change setup</button>
+    <p className="eyebrow">SOURCE INTELLIGENCE</p>
+    <h1>{sourceBusy ? "Reading your source safely…" : reviewingOutline ? "Review the detected book structure." : requiresOcr ? "This scanned book needs OCR." : "Your source-led adaptation plan is ready."}</h1>
+    <p className="lead">Book Studio first identifies the real Parts, chapters and physical page ranges. It never substitutes generic chapter names when a scan cannot be read.</p>
+    <section className="source-pipeline" aria-label="Source analysis progress">
+      {["Classify PDF", "Read contents", "Detect outline", "Verify ranges", "Ready"].map((label, index) => <div className={intelligence && intelligence.progress >= [5, 25, 55, 75, 100][index] ? "complete" : intelligence && intelligence.progress >= [0, 20, 45, 65, 90][index] ? "active" : ""} key={label}><span>{intelligence && intelligence.progress >= [5, 25, 55, 75, 100][index] ? "✓" : index + 1}</span><b>{label}</b></div>)}
+    </section>
+    <section className="stats"><div><span>SOURCE PAGES</span><strong>{project.sourcePages || intelligence?.totalPages || "—"}</strong></div><div><span>PDF TYPE</span><strong>{intelligence?.sourceKind || "searchable"}</strong></div><div><span>STRUCTURE FOUND</span><strong>{intelligence?.outline.length || headings.length || "Pending"}</strong></div><div><span>ANALYSIS</span><strong>{intelligence?.progress ?? (headings.length ? 100 : 0)}%</strong></div></section>
+    {requiresOcr && <section className="ocr-choice-card">
+      <div><p className="eyebrow">SCAN DETECTED</p><h2>Read the contents before generating anything</h2><p>{intelligence?.message || "The PDF does not contain enough searchable text."}</p><ul><li>Only the front-matter chunk is analysed first.</li><li>The complete 125-page file is never sent in one request.</li><li>Chapter generation later uses only that chapter’s verified page range.</li></ul></div>
+      <div className="ocr-options"><button disabled={sourceBusy} onClick={() => void onRunOcr("cloudflare-ai")}><b>Try free OCR first</b><span>No OCR charge · best for a quick contents-page pass</span></button><button disabled={sourceBusy} onClick={() => void onRunOcr("mistral-ocr")}><b>Use accurate scan OCR</b><span>Estimated parser cost: about ${intelligence?.ocrCostEstimateUsd?.toFixed(2) || "0.25"} for the full source; this first pass reads only front matter</span></button></div>
+      {intelligence?.lastError && <p className="source-error">{intelligence.lastError}</p>}
+    </section>}
+    {reviewingOutline && <section className="outline-review-card">
+      <header><div><p className="eyebrow">OUTLINE REVIEW</p><h2>Choose the publishing structure</h2><p>Edit any title or physical PDF range. Uncheck front matter or unwanted sections.</p></div><span>{intelligence.outline.length} detected entries</span></header>
+      <div className="outline-mode-choice"><button onClick={() => onAcceptOutline("parts")}><b>Build from major Parts</b><span>Best for a concise adaptation. Uses the four high-level Parts when present.</span></button><button onClick={() => onAcceptOutline("chapters")}><b>Build from detailed chapters</b><span>Best for a longer book. Preserves all detected child chapters.</span></button></div>
+      <div className="outline-table"><div className="outline-head"><span>Use</span><span>Type</span><span>Exact source title</span><span>PDF pages</span><span>Confidence</span></div>{intelligence.outline.map((item) => <div className="outline-row" key={item.id}><input aria-label={`Include ${item.title}`} type="checkbox" checked={item.included} onChange={(event) => updateItem(item.id, { included: event.target.checked })}/><select value={item.type} onChange={(event) => updateItem(item.id, { type: event.target.value as SourceOutlineItem["type"] })}><option value="part">Part</option><option value="chapter">Chapter</option><option value="section">Section</option></select><input value={item.title} onChange={(event) => updateItem(item.id, { title: event.target.value })}/><label><input type="number" min="1" max={intelligence.totalPages} value={item.sourceStartPage} onChange={(event) => updateItem(item.id, { sourceStartPage: Number(event.target.value) })}/><span>–</span><input type="number" min="1" max={intelligence.totalPages} value={item.sourceEndPage} onChange={(event) => updateItem(item.id, { sourceEndPage: Number(event.target.value) })}/></label><b className={item.confidence >= .8 ? "high" : "check"}>{Math.round(item.confidence * 100)}%</b></div>)}</div>
+      <footer><button className="secondary" disabled={sourceBusy} onClick={() => void onRunOcr("mistral-ocr")}>Re-read with accurate OCR</button><small>Nothing is generated until you choose Parts or detailed chapters.</small></footer>
+    </section>}
+    {!requiresOcr && !reviewingOutline && <><div className="analysis-grid"><section className="analysis-card chapter-detection"><header><div><p className="eyebrow">VERIFIED ADAPTATION PLAN</p><h2>{headings.length} source divisions, each given only the space it needs</h2></div><button className="recalculate-plan" onClick={() => onPatch({ chapters: applyAutomaticAdaptationPlan(project.chapters, project.audience, true) })}>↻ Recalculate</button></header>{headings.map((heading, index) => { const chapter = project.chapters[index]; return <div className="heading-row context-row" key={`${index}-${heading}`}><span>{String(index + 1).padStart(2, "0")}</span><div className="chapter-context"><strong>{heading}</strong><p>{chapter?.context}</p><div><em>Source pp. {chapter?.sourceStartPage}–{chapter?.sourceEndPage}</em><em>{chapter?.sourcePageCount} scanned pages</em><em>{chapter?.complexity || "Verified"}</em></div><small>{chapter?.pageReason}</small></div><label><b>{chapter?.pagePlanCustom ? "CUSTOM" : "RECOMMENDED"}</b><input type="number" min="1" max={maximumChapterPages(project.chapters, index)} value={chapter?.pages ?? 1} onChange={(event) => setChapterPages(index, Number(event.target.value))}/><span>pages</span></label></div>; })}</section><aside><div className="analysis-card note"><p className="eyebrow">RANGE-SAFE GENERATION</p><p>Nemotron receives only one verified chapter range at a time. Completed chapters remain saved, and the existing three-pass quality limit still applies.</p></div><div className="analysis-card note"><p className="eyebrow">NO GENERIC FALLBACK</p><p>If a source cannot be read, this screen stops for OCR or manual outline review instead of inventing “Opening chapter.”</p></div></aside></div><footer className="analysis-footer"><span>Confirm only after the names and physical source ranges are correct.</span><button className="primary" disabled={sourceBusy || !headings.length || plannedPages > TOTAL_BOOK_PAGE_LIMIT} onClick={onContinue}>Confirm adaptation plan →</button></footer></>}
+  </main>;
+}
+
+function LegacyAnalysis({ project, sourceBusy, onPatch, onBack, onContinue }: { project: Project; sourceBusy: boolean; onPatch: (patch: Partial<Project>) => void; onBack: () => void; onContinue: () => void }) {
   const headings = project.sourceHeadings.length ? project.sourceHeadings : ["Opening chapter"];
   const setChapterPages = (index: number, value: number) => onPatch({
     chapters: setChapterPagesWithinLimit(project.chapters, index, value),
