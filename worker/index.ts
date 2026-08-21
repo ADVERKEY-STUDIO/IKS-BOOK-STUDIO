@@ -8,7 +8,7 @@ import { authorialReaderHtml, generationProfileKey } from "../lib/child-summary"
 import { allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET, recommendedAdaptationPages } from "../lib/adaptation-pages";
 import { efficientChapterPrompt, evaluateChapterOneGate, evaluateTeachingChapter, feedbackRevisionPrompt, fitTeachingChapterLocally, localPedagogyScores, normalizeTeachingChapter, renderTeachingChapter, type ChapterOneGate, type PedagogyQuality, type PedagogyScores, type TeachingChapter } from "../lib/pedagogy";
 import type { BookPersona } from "../lib/book-persona";
-import { classifySource, ocrEstimate, SAFE_OCR_CHUNK_BYTES, validateOutline, type SourceIntelligence, type SourceOutlineItem } from "../lib/source-intelligence";
+import { classifySource, ocrEstimate, recoverOcrPageTexts, SAFE_OCR_CHUNK_BYTES, validateOutline, type SourceIntelligence, type SourceOutlineItem } from "../lib/source-intelligence";
 
 interface Env {
   ASSETS: Fetcher;
@@ -1027,12 +1027,11 @@ async function openRouterOcrChunk(env: Env, file: R2ObjectBody, filename: string
     body: JSON.stringify({
       model: env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL,
       temperature: 0,
-      max_completion_tokens: 8000,
+      max_completion_tokens: 14000,
       reasoning: { effort: "none", exclude: true },
-      response_format: { type: "json_object" },
       plugins: [{ id: "file-parser", pdf: { engine } }],
       messages: [{ role: "user", content: [
-        { type: "text", text: `OCR this small scanned PDF batch faithfully. It represents physical PDF pages ${startPage}-${endPage}. Return JSON only with a pages array. Return exactly one entry per physical page, in order, with fields physicalPage, text, and headings. text must preserve the readable source wording and paragraph order; do not summarise, adapt, explain or invent missing words. headings is an array of exact visible Part, chapter, section or contents-entry headings. When a word is unreadable, write [unclear].` },
+        { type: "text", text: `OCR this small scanned PDF batch faithfully. It represents physical PDF pages ${startPage}-${endPage}. Do not return JSON. Return exactly one block for every physical page in order using these literal markers:\n<<<PDF_PAGE_${startPage}>>>\n[faithful text from that page]\n<<<END_PDF_PAGE_${startPage}>>>\nContinue the same way through page ${endPage}. Preserve readable wording, headings and paragraph order. Do not summarise, adapt, explain or invent missing words. When a word is unreadable, write [unclear].` },
         { type: "file", file: { filename, file_data: bufferDataUrl(await file.arrayBuffer()) } },
       ] }],
     }),
@@ -1044,15 +1043,21 @@ async function openRouterOcrChunk(env: Env, file: R2ObjectBody, filename: string
     throw new TeachingEngineError(`The ${engine === "mistral-ocr" ? "accurate" : "free"} OCR pass failed (${response.status}).${sizeHint} ${detail}`, 502, "ocr-provider");
   }
   const result = await response.json() as { choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } };
-  const parsed = parseJsonObject<{ pages?: Array<{ physicalPage?: number; text?: string; headings?: string[] }> }>(result.choices?.[0]?.message?.content || "");
+  const content = result.choices?.[0]?.message?.content || "";
   const expectedPages = endPage - startPage + 1;
-  const pages = Array.isArray(parsed.pages) ? parsed.pages.slice(0, expectedPages) : [];
-  if (pages.length !== expectedPages || pages.some((page) => typeof page.text !== "string")) {
-    throw new TeachingEngineError(`OCR returned ${pages.length} page records for physical pages ${startPage}-${endPage}; ${expectedPages} were required. This batch was not cached.`, 422, "malformed-ocr");
+  let pageTexts: string[] = [];
+  try {
+    const parsed = parseJsonObject<{ pages?: Array<{ text?: string }> }>(content);
+    pageTexts = Array.isArray(parsed.pages) ? parsed.pages.slice(0, expectedPages).map((page) => typeof page.text === "string" ? page.text : "") : [];
+  } catch {
+    pageTexts = recoverOcrPageTexts(content, expectedPages);
+  }
+  if (pageTexts.length !== expectedPages || pageTexts.some((text) => !text.trim())) {
+    throw new TeachingEngineError(`Nemotron's OCR response for PDF pages ${startPage}-${endPage} ended early or lost its page markers. The completed batches are still saved. Select Resume source analysis to retry only this batch.`, 422, "malformed-ocr");
   }
   return {
-    pageTexts: pages.map((page) => cleanSourceText(page.text || "")),
-    outlineEvidence: pages.map((page, index) => [`PDF PAGE ${startPage + index}`, ...(page.headings || [])].join(" | ")),
+    pageTexts: pageTexts.map((text) => cleanSourceText(text)),
+    outlineEvidence: pageTexts.map((text, index) => `PDF PAGE ${startPage + index} | ${cleanSourceText(text).split("\n").filter((line) => line.length >= 3 && line.length <= 120).slice(0, 6).join(" | ")}`),
     usage: result.usage || {},
   };
 }
@@ -1127,7 +1132,7 @@ async function sourceOcrChunkApi(request: Request, env: Env) {
     return json({ cached: false, batch: { index: chunkIndex, startPage: chunk.startPage, endPage: chunk.endPage }, sourceIntelligence: manifest.sourceIntelligence, usage: result.usage });
   } catch (error) {
     if (error instanceof TeachingEngineError) return json({ error: error.message, code: error.code }, error.status);
-    return json({ error: error instanceof Error ? error.message : "OCR could not read this batch" }, 502);
+    return json({ error: `OCR stopped at PDF pages ${chunk.startPage}-${chunk.endPage}. Completed batches are still saved; resume to retry only this batch.`, code: "ocr-batch-failed" }, 502);
   }
 }
 

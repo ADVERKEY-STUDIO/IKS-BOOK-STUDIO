@@ -1428,7 +1428,7 @@ export default function Home() {
         patchProject({ sourceIntelligence: latest });
         const batchResponse = await fetch("/api/source/ocr-chunk", { method: "POST", headers: requestHeaders(), body: JSON.stringify({ sourceObjectKey: project.sourceObjectKey, engine, chunkIndex }) });
         const batchData = await batchResponse.json() as { sourceIntelligence?: SourceIntelligence; error?: string; code?: string; cached?: boolean };
-        if (!batchResponse.ok || !batchData.sourceIntelligence) throw new Error(batchData.error || `OCR stopped at batch ${chunkIndex + 1}`);
+        if (!batchResponse.ok || !batchData.sourceIntelligence) throw new Error(batchData.error || `OCR stopped at batch ${chunkIndex + 1} of ${totalBatches}. Completed batches remain saved.`);
         latest = batchData.sourceIntelligence;
         patchProject({ sourceIntelligence: latest });
       }

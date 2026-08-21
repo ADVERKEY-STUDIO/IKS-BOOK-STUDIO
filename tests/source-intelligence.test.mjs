@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { classifySource, ocrEstimate, outlineForMode, pdfChunkRanges, SAFE_OCR_CHUNK_BYTES, SAFE_OCR_CHUNK_PAGES, validateOutline } from "../lib/source-intelligence.ts";
+import { classifySource, ocrEstimate, outlineForMode, pdfChunkRanges, recoverOcrPageTexts, SAFE_OCR_CHUNK_BYTES, SAFE_OCR_CHUNK_PAGES, validateOutline } from "../lib/source-intelligence.ts";
 
 const page = fs.readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
 const worker = fs.readFileSync(new URL("../worker/index.ts", import.meta.url), "utf8");
@@ -53,6 +53,14 @@ test("OCR batches are cached before one text-only Nemotron outline pass", () => 
   assert.match(worker, /sourceStructureEvidence\(manifest\)/);
   assert.match(worker, /openRouterOutlineFromOcr/);
   assert.match(worker, /Every source page is cached/);
+});
+
+test("OCR page recovery accepts markers, form feeds, and complete legacy JSON", () => {
+  assert.deepEqual(recoverOcrPageTexts("<<<PDF_PAGE_1>>>\nFirst page\n<<<END_PDF_PAGE_1>>>\n<<<PDF_PAGE_2>>>\nSecond page\n<<<END_PDF_PAGE_2>>>", 2), ["First page", "Second page"]);
+  assert.deepEqual(recoverOcrPageTexts("First page\fSecond page", 2), ["First page", "Second page"]);
+  assert.deepEqual(recoverOcrPageTexts('{"pages":[{"text":"First page"},{"text":"Second page"}]}', 2), ["First page", "Second page"]);
+  assert.deepEqual(recoverOcrPageTexts('{"pages":[{"text":"Only the first page"}', 2), []);
+  assert.doesNotMatch(worker.slice(worker.indexOf("async function openRouterOcrChunk"), worker.indexOf("function sourceStructureEvidence")), /response_format/);
 });
 
 test("scanned chapter generation sends only overlapping verified chunks", () => {

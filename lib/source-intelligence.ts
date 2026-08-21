@@ -40,6 +40,59 @@ export type SourceIntelligence = {
 export const SAFE_OCR_CHUNK_BYTES = 3_250_000;
 export const SAFE_OCR_CHUNK_PAGES = 4;
 
+function balancedTextSegments(value: string, expectedPages: number) {
+  const paragraphs = value.split(/\n\s*\n+/).map((part) => part.trim()).filter(Boolean);
+  if (paragraphs.length < expectedPages) return [];
+  const totalLength = paragraphs.reduce((sum, part) => sum + part.length, 0);
+  const segments: string[] = [];
+  let current: string[] = [];
+  let currentLength = 0;
+  let remainingLength = totalLength;
+  for (let index = 0; index < paragraphs.length; index += 1) {
+    const paragraph = paragraphs[index];
+    const pagesLeft = expectedPages - segments.length;
+    const paragraphsLeft = paragraphs.length - index;
+    const target = remainingLength / Math.max(1, pagesLeft);
+    if (current.length && currentLength + paragraph.length > target && paragraphsLeft >= pagesLeft) {
+      segments.push(current.join("\n\n"));
+      remainingLength -= currentLength;
+      current = [];
+      currentLength = 0;
+    }
+    current.push(paragraph);
+    currentLength += paragraph.length;
+  }
+  if (current.length) segments.push(current.join("\n\n"));
+  return segments.length === expectedPages ? segments : [];
+}
+
+/** Recover page text from provider output without depending on fragile JSON. */
+export function recoverOcrPageTexts(value: string, expectedPages: number) {
+  const cleaned = value.trim().replace(/^```(?:text|json)?\s*/i, "").replace(/\s*```$/i, "");
+  if (!cleaned || expectedPages < 1) return [];
+
+  const marked = [...cleaned.matchAll(/<<<\s*(?:PDF_?)?PAGE[_\s-]*(\d+)\s*>>>\s*([\s\S]*?)(?=<<<\s*(?:END[_\s-]*)?(?:PDF_?)?PAGE|$)/gi)]
+    .map((match) => match[2].replace(/<<<\s*END[_\s-]*(?:PDF_?)?PAGE[^>]*>>>/gi, "").trim())
+    .filter(Boolean);
+  if (marked.length === expectedPages) return marked;
+
+  const formFeedPages = cleaned.split(/\f+/).map((part) => part.trim()).filter(Boolean);
+  if (formFeedPages.length === expectedPages) return formFeedPages;
+
+  const jsonTexts = [...cleaned.matchAll(/"text"\s*:\s*"((?:\\.|[^"\\])*)"/g)].flatMap((match) => {
+    try { return [JSON.parse(`"${match[1]}"`) as string]; } catch { return []; }
+  });
+  if (jsonTexts.length === expectedPages) return jsonTexts;
+
+  const labelled = cleaned.split(/(?:^|\n)\s*(?:#{1,6}\s*)?(?:PDF\s+)?PAGE\s+\d+\s*[:.-]?\s*/gim).map((part) => part.trim()).filter(Boolean);
+  if (labelled.length === expectedPages) return labelled;
+
+  // Last-resort recovery is only used for genuine plain OCR text. It preserves
+  // paragraph order and never applies to a visibly truncated JSON response.
+  if (!/^\s*[\[{]/.test(cleaned)) return balancedTextSegments(cleaned, expectedPages);
+  return [];
+}
+
 export function classifySource(pageTexts: string[], totalPages = pageTexts.length): { sourceKind: SourceKind; searchablePageRatio: number } {
   if (!totalPages) return { sourceKind: "damaged", searchablePageRatio: 0 };
   const sampled = pageTexts.filter((_, index) => index < 12 || index % Math.max(1, Math.floor(totalPages / 12)) === 0);
