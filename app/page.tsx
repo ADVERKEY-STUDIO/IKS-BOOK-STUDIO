@@ -1821,10 +1821,14 @@ OUTPUT REQUIREMENTS
     const response = await fetch("/api/image", { method: "POST", headers: ownerHeaders(), body: form });
     const data = await response.json() as { image?: { key: string; url: string }; error?: string };
     if (!response.ok || !data.image) { notify(data.error || "Image upload failed"); return; }
-    const next = { ...project, chapters: project.chapters.map((chapter) => chapter.id === active.id ? { ...chapter, imageKey: data.image?.key, imageUrl: data.image?.url, imageCaption: chapter.imageCaption || chapter.title, imageAlt: `Uploaded illustration for ${chapter.title}`, visualType: "uploaded" } : chapter) };
+    const updatedChapters = project.chapters.map((chapter) => chapter.id === active.id ? { ...chapter, imageKey: data.image?.key, imageUrl: data.image?.url, imageCaption: chapter.imageCaption || chapter.title, imageAlt: `Uploaded illustration for ${chapter.title}`, visualType: "uploaded" } : chapter);
+    // Also clear any existing Designer overrides for this chapter so Preview and Designer regenerate from the new chapter image
+    const filteredDesignerPages = (project.designerPages ?? []).filter((page) => page.chapterId !== active.id);
+    const filteredOrder = (project.designerPageOrder ?? []).filter((slotId) => !slotId.startsWith(`chapter-${active.id}-`));
+    const next = { ...project, chapters: updatedChapters, designerPages: filteredDesignerPages, designerPageOrder: filteredOrder };
     setProject(next);
     await persistProject(next).catch(() => undefined);
-    notify("Illustration added to chapter");
+    notify("Illustration added to chapter — Designer and Preview will now show the new image");
   }
 
   async function uploadCanvaPage(file: File, slot: Omit<CanvaPageOverride, "active" | "current" | "history">) {
