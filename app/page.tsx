@@ -1484,9 +1484,23 @@ export default function Home() {
   }
 
   async function persistProject(next: Project) {
-    const bounded = { ...next, chapters: fitChaptersToBookLimit(next.chapters) };
+    const pruned = {
+      ...next,
+      designerPages: (next.designerPages ?? []).map((page) => {
+        const cleanHistory = (page.history ?? []).slice(0, 5).map((entry) => {
+          const { history: _ignored, ...rest } = entry as unknown as Record<string, unknown> & typeof entry;
+          return rest as unknown as typeof entry;
+        });
+        return { ...page, history: cleanHistory as unknown as typeof page.history };
+      }),
+      chapters: fitChaptersToBookLimit(next.chapters),
+    };
+    const bounded = pruned;
     const response = await fetch("/api/projects", { method: "POST", headers: requestHeaders(), body: JSON.stringify(bounded) });
-    if (!response.ok) throw new Error("Could not save the book");
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({})) as { error?: string };
+      throw new Error(err.error || `Could not save the book (${response.status})`);
+    }
     const data = await response.json() as { project: Project };
     setProject(data.project);
     setProjects((current) => [data.project, ...current.filter((item) => item.id !== data.project.id)]);
@@ -2445,9 +2459,16 @@ function ChapterComparison({ original, improved, onAccept, onKeep, onClose }: { 
   return <div className="modal-backdrop"><section className="comparison-modal"><header><div><p className="eyebrow">CHAPTER DECISION</p><h2>Compare original and improved</h2><p>{improved.title}</p></div><button onClick={onClose}>×</button></header><div className="comparison-grid"><article><span>ORIGINAL</span><div className="book-copy" dangerouslySetInnerHTML={{ __html: authorialReaderHtml(original.body) }}/></article><article className="improved"><span>IMPROVED</span><div className="book-copy" dangerouslySetInnerHTML={{ __html: authorialReaderHtml(improved.body) }}/></article></div><footer><button className="secondary" onClick={onKeep}>Keep original</button><button className="primary" onClick={onAccept}>Accept improvement</button></footer></section></div>;
 }
 
+function ThemeSwitcher(){
+  const [theme,setTheme]=useState(()=>typeof window!=="undefined"?localStorage.getItem("iks-theme")||"original":"original");
+  useEffect(()=>{if(theme==="original"){document.documentElement.removeAttribute("data-theme")}else{document.documentElement.setAttribute("data-theme",theme)} localStorage.setItem("iks-theme",theme)},[theme]);
+  useEffect(()=>{const saved=typeof window!=="undefined"?localStorage.getItem("iks-theme"):null; if(saved && saved!=="original"){document.documentElement.setAttribute("data-theme",saved)}},[]);
+  return <div className="theme-switcher"><label>Theme</label><select value={theme} onChange={e=>setTheme((e.target as HTMLSelectElement).value)}><option value="original">Original Forest</option><option value="banyan">Banyan Library</option><option value="curious">Curious Lab</option><option value="scholar">Scholar&apos;s Desk</option></select></div>;
+}
+
 function Dashboard({ projects, onNew, onOpen, onDuplicate, onDelete }: { projects: Project[]; onNew: () => void; onOpen: (project: Project) => void; onDuplicate: (project: Project) => void; onDelete: (project: Project) => void }) {
   return <main className="dashboard">
-    <header><div className="brand"><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></div><button className="primary" onClick={onNew}>＋ New book</button></header>
+    <header><div className="brand"><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></div><div style={{display:"flex",alignItems:"center",gap:"12px"}}><ThemeSwitcher/><button className="primary" onClick={onNew}>＋ New book</button></div></header>
     <section className="hero">
       <div><p className="eyebrow">CHILDREN’S ADAPTATION STUDIO</p><h1>Turn any source into a book<br/><em>children want to read.</em></h1><p className="hero-copy">Preserve every original chapter, then reshape the writing, activities and visual world for children aged 7–15.</p><button className="hero-cta" onClick={onNew}>Start a children’s adaptation <span>→</span></button><small>AGES 7–15 · PDF · DOCX · TXT · NATURAL LENGTH · 100-PAGE CEILING</small></div>
       <div className="hero-books" aria-hidden="true"><div className="book back"><span>THE SOURCE</span></div><div className="book front"><span>A BOOK FOR</span><strong>CURIOUS<br/>YOUNG MINDS</strong><i>READ · DISCOVER · CREATE</i><b>✦</b></div></div>
@@ -3153,7 +3174,10 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
     return data.image;
   };
   const descriptorFor = (slotId: string) => allPages.find((page) => page.slotId === slotId);
-  const makeOverride = (descriptor: (typeof allPages)[number], revision: DesignerPageRevision, existing?: DesignerPageOverride): DesignerPageOverride => ({ ...revision, slotId: descriptor.slotId, label: descriptor.label, kind: descriptor.kind, chapterId: descriptor.chapterId, pageIndex: descriptor.pageIndex, history: existing ? [{ ...hydrateDesignerRevision(existing, existing.html), savedAt: new Date().toISOString() }, ...existing.history].slice(0, 20) : [] });
+  const makeOverride = (descriptor: (typeof allPages)[number], revision: DesignerPageRevision, existing?: DesignerPageOverride): DesignerPageOverride => {
+    const snapshot = existing ? (() => { const r = hydrateDesignerRevision(existing, existing.html) as unknown as Record<string, unknown>; const { history: _ignoredHistory, ...rest } = r as { history?: unknown } & typeof r; return { ...rest, savedAt: new Date().toISOString() }; })() : null;
+    return { ...revision, slotId: descriptor.slotId, label: descriptor.label, kind: descriptor.kind, chapterId: descriptor.chapterId, pageIndex: descriptor.pageIndex, history: snapshot ? [snapshot as unknown as DesignerPageRevision & { savedAt: string }, ...existing!.history].slice(0, 5) as unknown as DesignerPageRevision[] : [] };
+  };
   const saveRevision = async (revisionToSave = draft) => {
     if (!selected) return; setBusy(true);
     try {
@@ -3566,7 +3590,7 @@ function LegacyDesignerStudio({ project, onClose, onPreview, onCommit }: { proje
     try {
       const current = (overrideProject.designerPages ?? []).find((page) => page.slotId === selected.slotId);
       const html = revision.intentionalBlank ? revision.html : (editor.current?.innerHTML ?? revision.html);
-      const snapshot: DesignerPageRevision = { ...(current ?? defaultDesignerRevision(selected.html)), savedAt: new Date().toISOString() };
+      const snapshot: DesignerPageRevision = (() => { const base = (current ?? defaultDesignerRevision(selected.html)) as unknown as Record<string, unknown>; const { history: _h, ...rest } = base as { history?: unknown } & typeof base; return { ...rest, savedAt: new Date().toISOString() } as unknown as DesignerPageRevision; })();
       const replacement: DesignerPageOverride = { ...revision, html, savedAt: new Date().toISOString(), slotId: selected.slotId, label: selected.label, kind: selected.kind, chapterId: "chapterId" in selected ? selected.chapterId : undefined, pageIndex: "pageIndex" in selected ? selected.pageIndex : undefined, history: current ? [snapshot, ...current.history].slice(0, 20) : [] };
       const next = { ...overrideProject, designerPages: [...(overrideProject.designerPages ?? []).filter((page) => page.slotId !== selected.slotId), replacement], designerPageOrder: order };
       await onCommit(next);
