@@ -3512,8 +3512,9 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
       // Use template literal with actual url - we need to interpolate correctly in JS
       const finalHtml = html.replace('${image.url}', image.url);
       editor.current?.insertAdjacentHTML("beforeend", finalHtml);
-      // Make the new image draggable/resizable via pointer
-      const container = editor.current?.lastElementChild as HTMLElement | null;
+      // Make the new image draggable/resizable via pointer — find the actual free image (not the global badge)
+      const allFree = editor.current?.querySelectorAll(".designer-free-image");
+      const container = (allFree && allFree.length ? allFree[allFree.length - 1] : null) as HTMLElement | null;
       if (container && container.classList.contains("designer-free-image")) {
         let startX=0, startY=0, startW=0, startH=0, startL=0, startT=0, mode:"move"|"se"|"e"|"s"="move";
         const onPointerMove = (e: PointerEvent) => {
@@ -3618,13 +3619,21 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
             setMessage(`Nudged ${dir} 10px — tap again or drag bar, then Save page`);
           });
         });
-        // Show nudge pad only when selected
+        // Show nudge pad only when selected — ensure parent allows pointer events
         const style = document.createElement("style");
-        style.textContent = ".designer-free-image.designer-object-selected .free-image-nudge{opacity:1 !important;pointer-events:auto !important}";
+        style.textContent = ".designer-free-image.designer-object-selected .free-image-nudge{opacity:1 !important;pointer-events:auto !important} .designer-free-image .free-image-nudge{pointer-events:none} .designer-free-image.designer-object-selected .free-image-nudge button{pointer-events:auto !important}";
         if (!document.getElementById("free-image-nudge-style")) {
           style.id = "free-image-nudge-style";
           document.head.appendChild(style);
         }
+        // Ensure nudge pad is visible immediately for testing
+        setTimeout(() => {
+          const nudge = container?.querySelector(".free-image-nudge") as HTMLElement | null;
+          if (nudge && container?.classList.contains("designer-object-selected")) {
+            nudge.style.opacity = "1";
+            nudge.style.pointerEvents = "auto";
+          }
+        }, 100);
       }
       captureSelectedPageHtml();
       setMessage("Image added anywhere — drag to move, handles to resize height/width, then Save page");
