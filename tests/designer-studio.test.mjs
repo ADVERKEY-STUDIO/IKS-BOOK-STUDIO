@@ -10,7 +10,7 @@ test("Designer Studio is a separate persisted final-production layer", () => {
   assert.match(page, /designerPageOrder\?: string\[\]/);
   assert.match(page, /designerPages: \(cleanSaved\.designerPages \?\? \[\]\)\.map\(hydrateDesignerOverride\)/);
   assert.match(page, />Designer<\/button>/);
-  assert.match(page, /Edit the final book without changing generated chapters or Nemotron history/);
+  assert.match(page, /The pages below are the same pages used by Preview and PDF/);
 });
 
 test("advanced typography, object, border and image controls are selection-aware", () => {
@@ -23,7 +23,7 @@ test("advanced typography, object, border and image controls are selection-aware
   assert.match(page, /Replace image/);
   assert.match(page, /addTextBox/);
   assert.match(page, /moveObject/);
-  assert.match(page, /Lock \/ unlock object/);
+  assert.match(page, /toggleObjectLock/);
 });
 
 test("designer supports reusable styles, scoped application and local preflight", () => {
@@ -39,23 +39,23 @@ test("designer supports reusable styles, scoped application and local preflight"
 
 test("designer can edit content and manage page structure", () => {
   assert.match(page, /contentEditable suppressContentEditableWarning/);
-  assert.match(page, /Leave intentionally blank/);
+  assert.match(page, /Intentional blank/);
   assert.match(page, /Remove from final book/);
   assert.match(page, /addBlankPage/);
   assert.match(page, /duplicatePage/);
   assert.match(page, /movePage\(-1\)/);
   assert.match(page, /Restore previous/);
-  assert.match(page, /Restore studio page/);
+  assert.match(page, /Reset and allow reflow/);
 });
 
 test("custom backgrounds, watermarks, and layers are available", () => {
   assert.match(page, /backgroundImageKey/);
   assert.match(page, /watermarkImageKey/);
-  assert.match(page, /Custom watermark/);
+  assert.match(page, /Watermark/);
   assert.match(page, /watermarkOpacity/);
   assert.match(page, /watermarkRotation/);
-  assert.match(page, /contentVisible[\s\S]{0,180}Content/);
-  assert.match(page, /watermarkVisible[\s\S]{0,180}Watermark/);
+  assert.match(page, /contentVisible[\s\S]{0,240}Flowing content/);
+  assert.match(page, /watermarkVisible[\s\S]{0,240}Watermark/);
   assert.match(css, /\.designer-watermark-layer/);
 });
 
@@ -101,7 +101,7 @@ test("whole-book layout balancing is local, scoped and preserves locked pages", 
   assert.match(page, /Lock this page during reflow/);
   assert.match(page, /Balance this chapter/);
   assert.match(page, /Balance layout/);
-  assert.match(page, /without using AI tokens/);
+  assert.match(page, /No AI tokens were used/);
 });
 
 test("whole-book preflight reports fill problems with page navigation", () => {
@@ -122,9 +122,9 @@ test("Preview and PDF consume saved designer pages and custom ordering", () => {
   assert.match(page, /override\?\.active[\s\S]*designerFor\(sheet\)/);
 });
 
-test("Designer preview and PDF preserve the authored 650px A4 layout", () => {
+test("Designer preview and PDF preserve the shared 794 by 1123 A4 layout", () => {
   assert.match(page, /designer-render-canvas/);
-  assert.match(css, /\.designer-render-canvas\{[^}]*width:650px[^}]*height:919\.285714px[^}]*transform:scale\(1\.2215384615\)/);
+  assert.match(css, /\.designer-render-canvas\{[^}]*width:794px[^}]*height:1123px[^}]*transform:none/);
   assert.match(page, /previewWholeBook/);
   assert.match(page, /await saveWholeBook\(\);[\s\S]*onPreview\(\)/);
 });
@@ -133,11 +133,26 @@ test("Designer uses the final publication template and saves individual pages", 
   assert.match(page, /function designerBookClasses/);
   assert.match(page, /function designerPageClasses/);
   assert.match(page, /designer-canvas-page book-sheet \$\{bookClasses\} \$\{pageClasses\}/);
-  assert.match(page, /surfaceClasses = `\$\{designerBookClasses\(project\)\} \$\{designerPageClasses\(project, page\)\}`/);
+  assert.match(page, /designerBookClasses\(project\)/);
+  assert.match(page, /designerPageClasses\(project, page\)/);
   assert.match(page, /savePageById = async/);
   assert.match(page, /page-save-button/);
   assert.match(page, /Save page/);
   assert.match(page, /designer-more-menu/);
   assert.match(css, /\.designer-canvas-page\.contents-page li/);
   assert.match(css, /\.page-save-button\.dirty/);
+});
+
+test("production editor protects work, autosaves, and exposes direct manipulation tools", () => {
+  assert.match(page, /designerDocument\?: DesignerDocumentV2/);
+  assert.match(page, /manuallyEdited: true/);
+  assert.match(page, /designerDraftStorageKey/);
+  assert.match(page, /Offline draft/);
+  assert.match(page, /onPointerDown=\{startObjectDrag\}/);
+  assert.match(page, /PAGE THUMBNAILS · DRAG TO REORDER/);
+  assert.match(page, /Project asset library/);
+  assert.match(page, /A4 print setup/);
+  assert.match(page, /composeDesignerTransform/);
+  assert.match(css, /\.designer-safe-area/);
+  assert.match(css, /\.designer-layer-list/);
 });

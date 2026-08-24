@@ -76,6 +76,8 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
+type R2ListedObject = { key: string; size: number; uploaded: Date; customMetadata?: Record<string, string>; httpMetadata?: { contentType?: string } };
+
 const allowedExtensions = new Set(["pdf", "docx", "txt", "md"]);
 const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 const stopWords = new Set("about after again also among and are because been before being between book can chapter could did does each for from had has have into its may more most not other our out over page pages part should some such than that the their them then there these they this through under use used using very was were what when where which while who will with would your".split(" "));
@@ -758,15 +760,17 @@ function makeSections(headings: string[], pageTexts: string[], fallbackText: str
 async function projectsApi(request: Request, env: Env) {
   const owner = ownerKey(request);
   if (request.method === "GET") {
-    const result = await env.DB.prepare("SELECT data_json FROM book_projects WHERE owner_key = ? ORDER BY updated_at DESC").bind(owner).all<{ data_json: string }>();
-    return json({ projects: result.results.map((row) => JSON.parse(row.data_json)) });
+    const result = await env.DB.prepare("SELECT data_json, updated_at FROM book_projects WHERE owner_key = ? ORDER BY updated_at DESC").bind(owner).all<{ data_json: string; updated_at: string }>();
+    return json({ projects: result.results.map((row: { data_json: string; updated_at: string }) => ({ ...JSON.parse(row.data_json), saveRevision: row.updated_at })) });
   }
   if (request.method === "POST") {
-    const incoming = await request.json() as { id?: string; title?: string; source?: string; chapters?: DraftChapterInput[] } & Record<string, unknown>;
+    const incoming = await request.json() as { id?: string; title?: string; source?: string; chapters?: DraftChapterInput[]; saveRevision?: string } & Record<string, unknown>;
     const project = { ...incoming, chapters: incoming.chapters ? fitDraftChaptersToBookLimit(incoming.chapters) : incoming.chapters };
     if (!project.id || !project.title || !project.source) return json({ error: "Incomplete book project" }, 400);
-    const saved = { ...project, updatedAt: "Just now" };
     const now = new Date().toISOString();
+    const existing = await env.DB.prepare("SELECT updated_at FROM book_projects WHERE id = ? AND owner_key = ?").bind(project.id, owner).first<{ updated_at: string }>();
+    if (existing && project.saveRevision && project.saveRevision !== existing.updated_at) return json({ error: "This book was changed in another session. Reload it before saving so those changes are not overwritten.", code: "SAVE_CONFLICT", currentRevision: existing.updated_at }, 409);
+    const saved = { ...project, updatedAt: now, saveRevision: now };
     await env.DB.prepare(`INSERT INTO book_projects (id, owner_key, title, source_name, data_json, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET title = excluded.title, source_name = excluded.source_name,
@@ -791,7 +795,7 @@ async function versionsApi(request: Request, env: Env) {
     if (!projectId) return json({ error: "Project id is required" }, 400);
     const result = await env.DB.prepare("SELECT id, label, snapshot_json, created_at FROM book_project_versions WHERE project_id = ? AND owner_key = ? ORDER BY created_at DESC")
       .bind(projectId, owner).all<{ id: string; label: string; snapshot_json: string; created_at: string }>();
-    return json({ versions: result.results.map((row) => ({ id: row.id, label: row.label, date: row.created_at, snapshot: JSON.parse(row.snapshot_json) })) });
+    return json({ versions: result.results.map((row: { id: string; label: string; snapshot_json: string; created_at: string }) => ({ id: row.id, label: row.label, date: row.created_at, snapshot: JSON.parse(row.snapshot_json) })) });
   }
   if (request.method === "POST") {
     const payload = await request.json() as { projectId?: string; label?: string; snapshot?: unknown };
@@ -833,7 +837,30 @@ async function imageApi(request: Request, env: Env) {
   const extension = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
   const key = `images/${projectId}/${crypto.randomUUID()}.${extension}`;
   await env.BUCKET.put(key, await file.arrayBuffer(), { httpMetadata: { contentType: file.type, cacheControl: "private, max-age=86400" }, customMetadata: { originalName: file.name, owner: ownerKey(request) } });
-  return json({ image: { key, url: `/api/asset?key=${encodeURIComponent(key)}` } }, 201);
+  return json({ image: { key, url: `/api/asset?key=${encodeURIComponent(key)}`, name: file.name, contentType: file.type, size: file.size, uploadedAt: new Date().toISOString() } }, 201);
+}
+
+async function designerAssetsApi(request: Request, env: Env) {
+  if (request.method === "POST") return imageApi(request, env);
+  const url = new URL(request.url);
+  const projectId = String(url.searchParams.get("projectId") || "").replace(/[^a-zA-Z0-9_-]/g, "-");
+  if (!projectId) return json({ error: "Project id is required" }, 400);
+  const prefix = `images/${projectId}/`;
+  if (request.method === "GET") {
+    const listed = await env.BUCKET.list({ prefix, limit: 500, include: ["customMetadata", "httpMetadata"] });
+    const assets = (listed.objects as R2ListedObject[]).filter((object) => !object.customMetadata?.owner || object.customMetadata.owner === ownerKey(request)).map((object) => ({ key: object.key, url: `/api/asset?key=${encodeURIComponent(object.key)}`, name: object.customMetadata?.originalName || object.key.split("/").at(-1) || "Image", contentType: object.httpMetadata?.contentType, size: object.size, uploadedAt: object.uploaded.toISOString() }));
+    return json({ assets });
+  }
+  if (request.method === "DELETE") {
+    const key = String(url.searchParams.get("key") || "");
+    if (!key.startsWith(prefix)) return json({ error: "This asset does not belong to the selected project" }, 403);
+    const object = await env.BUCKET.head(key);
+    if (!object) return json({ deleted: true });
+    if (object.customMetadata?.owner && object.customMetadata.owner !== ownerKey(request)) return json({ error: "This asset belongs to another account" }, 403);
+    await env.BUCKET.delete(key);
+    return json({ deleted: true });
+  }
+  return json({ error: "Method not allowed" }, 405);
 }
 
 function escapeXml(value: string) {
@@ -1358,6 +1385,7 @@ const worker = {
       if (url.pathname === "/api/ai/status") return await openRouterStatusApi(request, env);
       if (url.pathname === "/api/draft") return await draftApi(request, env);
       if (url.pathname === "/api/image") return await imageApi(request, env);
+      if (url.pathname === "/api/designer-assets") return await designerAssetsApi(request, env);
       if (url.pathname === "/api/visual") return await visualApi(request);
       if (url.pathname === "/api/asset") return await assetApi(request, env);
       if (url.pathname === "/api/export/docx") return await exportDocxApi(request);
