@@ -15,6 +15,8 @@ const bindingConfig = {
     ? [
         {
           binding: d1,
+          database_name: "iks-book-studio-db",
+          database_id: "03cfa500-1efd-4e89-8f08-4b438599d123",
         },
       ]
     : [],
