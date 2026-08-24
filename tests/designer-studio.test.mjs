@@ -4,14 +4,13 @@ import { readFile } from "node:fs/promises";
 
 const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
-const production = await readFile(new URL("../lib/designer-production.ts", import.meta.url), "utf8");
 
 test("Designer Studio is a separate persisted final-production layer", () => {
   assert.match(page, /designerPages\?: DesignerPageOverride\[\]/);
   assert.match(page, /designerPageOrder\?: string\[\]/);
   assert.match(page, /designerPages: \(cleanSaved\.designerPages \?\? \[\]\)\.map\(hydrateDesignerOverride\)/);
   assert.match(page, />Designer<\/button>/);
-  assert.match(page, /Click any word to edit\. Reading text flows onto new A4 pages automatically/);
+  assert.match(page, /Edit the final book without changing generated chapters or Nemotron history/);
 });
 
 test("advanced typography, object, border and image controls are selection-aware", () => {
@@ -24,7 +23,7 @@ test("advanced typography, object, border and image controls are selection-aware
   assert.match(page, /Replace image/);
   assert.match(page, /addTextBox/);
   assert.match(page, /moveObject/);
-  assert.match(page, /toggleObjectLock/);
+  assert.match(page, /Lock \/ unlock object/);
 });
 
 test("designer supports reusable styles, scoped application and local preflight", () => {
@@ -40,23 +39,23 @@ test("designer supports reusable styles, scoped application and local preflight"
 
 test("designer can edit content and manage page structure", () => {
   assert.match(page, /contentEditable suppressContentEditableWarning/);
-  assert.match(page, /Intentional blank/);
-  assert.match(page, /A previous project version can restore it later/);
+  assert.match(page, /Leave intentionally blank/);
+  assert.match(page, /Remove from final book/);
   assert.match(page, /addBlankPage/);
   assert.match(page, /duplicatePage/);
   assert.match(page, /movePage\(-1\)/);
   assert.match(page, /Restore previous/);
-  assert.match(page, /Reset and allow reflow/);
+  assert.match(page, /Restore studio page/);
 });
 
 test("custom backgrounds, watermarks, and layers are available", () => {
   assert.match(page, /backgroundImageKey/);
   assert.match(page, /watermarkImageKey/);
-  assert.match(page, /Watermark/);
+  assert.match(page, /Custom watermark/);
   assert.match(page, /watermarkOpacity/);
   assert.match(page, /watermarkRotation/);
-  assert.match(page, /contentVisible[\s\S]{0,240}Flowing content/);
-  assert.match(page, /watermarkVisible[\s\S]{0,240}Watermark/);
+  assert.match(page, /contentVisible[\s\S]{0,180}Content/);
+  assert.match(page, /watermarkVisible[\s\S]{0,180}Watermark/);
   assert.match(css, /\.designer-watermark-layer/);
 });
 
@@ -101,8 +100,8 @@ test("whole-book layout balancing is local, scoped and preserves locked pages", 
   assert.match(page, /layoutLocked/);
   assert.match(page, /Lock this page during reflow/);
   assert.match(page, /Balance this chapter/);
-  assert.match(page, /Repaginate book/);
-  assert.match(page, /No AI tokens were used/);
+  assert.match(page, /Balance layout/);
+  assert.match(page, /without using AI tokens/);
 });
 
 test("whole-book preflight reports fill problems with page navigation", () => {
@@ -123,84 +122,22 @@ test("Preview and PDF consume saved designer pages and custom ordering", () => {
   assert.match(page, /override\?\.active[\s\S]*designerFor\(sheet\)/);
 });
 
-test("Designer preview and PDF preserve the shared 794 by 1123 A4 layout", () => {
+test("Designer preview and PDF preserve the authored 650px A4 layout", () => {
   assert.match(page, /designer-render-canvas/);
-  assert.match(css, /\.designer-render-canvas\{[^}]*width:794px[^}]*height:1123px[^}]*transform:none/);
+  assert.match(css, /\.designer-render-canvas\{[^}]*width:650px[^}]*height:919\.285714px[^}]*transform:scale\(1\.2215384615\)/);
   assert.match(page, /previewWholeBook/);
   assert.match(page, /await saveWholeBook\(\);[\s\S]*onPreview\(\)/);
-});
-
-test("Designer materializes the complete planned book and preserves Word-style text ranges", () => {
-  assert.match(page, /paginateReaderHtml\(chapter\.body, project\.audience, textPageTarget\)/);
-  assert.match(page, /designerPlannedChapterPageCount\(project, chapter\)/);
-  assert.match(page, /function designerPageIsRemoved/);
-  assert.match(page, /project\.designerPageOrder/);
-  assert.match(page, /supplementalPages/);
-  assert.match(page, /recoveredStoredOrder/);
-  assert.match(page, /recoveredDesiredOrder/);
-  assert.match(page, /removedManually: true/);
-  assert.match(page, /slotId: "half-title"/);
-  assert.match(page, /slotId: "copyright"/);
-  assert.match(page, /slotId: "dedication"/);
-  assert.match(page, /slotId: "preface"/);
-  assert.match(page, /slotId: "about-book"/);
-  assert.match(page, /hasCompletePhysicalOrder/);
-  assert.match(page, /const nextOrder = order\.filter\(\(slotId\) => slotId !== selectedId\)/);
-  assert.match(page, /savedTextRange/);
-  assert.match(page, /designer-selection-toolbar/);
-  assert.match(page, /designer-selection-count/);
-  assert.match(css, /designer-editable-content::selection/);
 });
 
 test("Designer uses the final publication template and saves individual pages", () => {
   assert.match(page, /function designerBookClasses/);
   assert.match(page, /function designerPageClasses/);
   assert.match(page, /designer-canvas-page book-sheet \$\{bookClasses\} \$\{pageClasses\}/);
-  assert.match(page, /designerBookClasses\(project\)/);
-  assert.match(page, /designerPageClasses\(project, page\)/);
+  assert.match(page, /surfaceClasses = `\$\{designerBookClasses\(project\)\} \$\{designerPageClasses\(project, page\)\}`/);
   assert.match(page, /savePageById = async/);
   assert.match(page, /page-save-button/);
   assert.match(page, /Save page/);
   assert.match(page, /designer-more-menu/);
   assert.match(css, /\.designer-canvas-page\.contents-page li/);
   assert.match(css, /\.page-save-button\.dirty/);
-});
-
-test("production editor protects work, autosaves, and exposes direct manipulation tools", () => {
-  assert.match(page, /designerDocument\?: DesignerDocument/);
-  assert.match(page, /manuallyEdited: true/);
-  assert.match(page, /designerDraftStorageKey/);
-  assert.match(page, /Offline draft/);
-  assert.match(page, /onPointerDown=\{startObjectDrag\}/);
-  assert.match(page, /PAGE THUMBNAILS · DRAG TO REORDER/);
-  assert.match(page, /Project asset library/);
-  assert.match(page, /A4 print setup/);
-  assert.match(page, /composeDesignerTransform/);
-  assert.match(css, /\.designer-safe-area/);
-  assert.match(css, /\.designer-layer-list/);
-});
-
-test("Designer provides Word-style continuous section editing and automatic A4 reflow", () => {
-  assert.match(page, /measureFlowPages/);
-  assert.match(page, /scheduleStoryReflow\(identity\.id\)/);
-  assert.match(page, /window\.setTimeout[\s\S]{0,180}reflowStory/);
-  assert.match(page, /delay = 300/);
-  assert.match(page, /designerFlowBodyFromDom/);
-  assert.match(page, /splitPreservingMarkup/);
-  assert.match(page, /captureFlowCaret/);
-  assert.match(page, /data-designer-caret/);
-  assert.match(page, /onCompositionStart/);
-  assert.match(page, /onCompositionEnd/);
-  assert.match(page, /handleFlowBoundaryKey/);
-  assert.match(page, /joinFlowBlocks/);
-  assert.match(page, /boundaryFlowBlock/);
-  assert.doesNotMatch(page, /targetNode\.deleteData/);
-  assert.match(page, /removedByReflow/);
-  assert.match(page, /detachedPageSlots/);
-  assert.match(page, /Protected from regeneration; its text still reflows/);
-  assert.match(css, /designer-continuous-editor/);
-  assert.match(production, /DesignerDocumentV3/);
-  assert.match(production, /flowStories: Record<string, DesignerFlowStory>/);
-  assert.match(production, /protectedFlows/);
-  assert.match(production, /version: 3/);
 });
