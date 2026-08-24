@@ -41,7 +41,7 @@ test("designer supports reusable styles, scoped application and local preflight"
 test("designer can edit content and manage page structure", () => {
   assert.match(page, /contentEditable suppressContentEditableWarning/);
   assert.match(page, /Intentional blank/);
-  assert.match(page, /Remove from final book/);
+  assert.match(page, /A previous project version can restore it later/);
   assert.match(page, /addBlankPage/);
   assert.match(page, /duplicatePage/);
   assert.match(page, /movePage\(-1\)/);
@@ -136,6 +136,9 @@ test("Designer materializes the complete planned book and preserves Word-style t
   assert.match(page, /function designerPageIsRemoved/);
   assert.match(page, /project\.designerPageOrder/);
   assert.match(page, /supplementalPages/);
+  assert.match(page, /recoveredStoredOrder/);
+  assert.match(page, /recoveredDesiredOrder/);
+  assert.match(page, /removedManually: true/);
   assert.match(page, /slotId: "half-title"/);
   assert.match(page, /slotId: "copyright"/);
   assert.match(page, /slotId: "dedication"/);
