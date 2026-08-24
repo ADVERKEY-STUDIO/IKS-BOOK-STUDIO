@@ -3508,7 +3508,7 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
     try {
       setBusy(true);
       const image = await uploadAsset(file);
-      const html = `<div class="designer-free-image" data-free-image="true" style="position:absolute;left:80px;top:80px;width:280px;height:180px;z-index:3;border:1.5px dashed #b7a98e;background:#fff;overflow:visible;box-shadow:0 4px 12px rgba(0,0,0,0.08);touch-action:none"><div class="free-image-dragbar" style="position:absolute;top:0;left:0;right:0;height:22px;background:rgba(169,50,46,0.92);color:#fff;display:flex;align-items:center;justify-content:center;gap:6px;font-size:10px;font-weight:700;letter-spacing:0.06em;cursor:grab;user-select:none;border-radius:2px 2px 0 0">⋮⋮ DRAG TO MOVE</div><img src="${'${image.url}'}" alt="Free image" style="width:100%;height:100%;object-fit:contain;display:block;pointer-events:none;padding-top:22px;box-sizing:border-box" /><div class="free-image-handle" data-handle="se" style="position:absolute;right:-8px;bottom:-8px;width:16px;height:16px;background:#a9322e;border:2px solid #fff;border-radius:50%;cursor:nwse-resize;box-shadow:0 2px 6px rgba(0,0,0,0.3);touch-action:none"></div><div class="free-image-handle" data-handle="e" style="position:absolute;right:-8px;top:50%;transform:translateY(-50%);width:14px;height:32px;background:rgba(255,255,255,0.95);border:1px solid #a9322e;border-radius:6px;cursor:ew-resize;box-shadow:0 1px 4px rgba(0,0,0,0.2);touch-action:none"></div><div class="free-image-handle" data-handle="s" style="position:absolute;left:50%;bottom:-8px;transform:translateX(-50%);width:32px;height:14px;background:rgba(255,255,255,0.95);border:1px solid #a9322e;border-radius:6px;cursor:ns-resize;box-shadow:0 1px 4px rgba(0,0,0,0.2);touch-action:none"></div></div>`;
+      const html = `<div class="designer-free-image" data-free-image="true" contenteditable="false" style="position:absolute;left:80px;top:80px;width:280px;height:180px;z-index:3;border:1.5px dashed #b7a98e;background:#fff;overflow:visible;box-shadow:0 4px 12px rgba(0,0,0,0.08);touch-action:none;user-select:none"><div class="free-image-dragbar" style="position:absolute;top:0;left:0;right:0;height:32px;background:#a9322e;color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;font-size:11px;font-weight:800;letter-spacing:0.08em;cursor:grab;user-select:none;border-radius:4px 4px 0 0;touch-action:none">⋮⋮ HOLD & DRAG — trackpad friendly</div><img src="${'${image.url}'}" alt="Free image" draggable="false" style="width:100%;height:100%;object-fit:contain;display:block;pointer-events:none;padding-top:32px;box-sizing:border-box" /><div class="free-image-handle" data-handle="se" style="position:absolute;right:-10px;bottom:-10px;width:20px;height:20px;background:#a9322e;border:2px solid #fff;border-radius:50%;cursor:nwse-resize;box-shadow:0 2px 8px rgba(0,0,0,0.3);touch-action:none"></div><div class="free-image-handle" data-handle="e" style="position:absolute;right:-10px;top:50%;transform:translateY(-50%);width:16px;height:48px;background:rgba(255,255,255,0.98);border:1px solid #a9322e;border-radius:8px;cursor:ew-resize;box-shadow:0 2px 6px rgba(0,0,0,0.2);touch-action:none"></div><div class="free-image-handle" data-handle="s" style="position:absolute;left:50%;bottom:-10px;transform:translateX(-50%);width:48px;height:16px;background:rgba(255,255,255,0.98);border:1px solid #a9322e;border-radius:8px;cursor:ns-resize;box-shadow:0 2px 6px rgba(0,0,0,0.2);touch-action:none"></div><div class="free-image-nudge" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:grid;grid-template-columns:28px 28px 28px;grid-template-rows:28px 28px;gap:4px;opacity:0;pointer-events:none;transition:opacity 0.15s"><button data-nudge="up" style="grid-column:2;grid-row:1;width:28px;height:28px;background:rgba(0,0,0,0.75);color:#fff;border:1px solid #fff;border-radius:50%;font-size:12px;cursor:pointer;pointer-events:auto">↑</button><button data-nudge="left" style="grid-column:1;grid-row:2;width:28px;height:28px;background:rgba(0,0,0,0.75);color:#fff;border:1px solid #fff;border-radius:50%;font-size:12px;cursor:pointer;pointer-events:auto">←</button><button data-nudge="right" style="grid-column:3;grid-row:2;width:28px;height:28px;background:rgba(0,0,0,0.75);color:#fff;border:1px solid #fff;border-radius:50%;font-size:12px;cursor:pointer;pointer-events:auto">→</button><button data-nudge="down" style="grid-column:2;grid-row:2;width:28px;height:28px;background:rgba(0,0,0,0.75);color:#fff;border:1px solid #fff;border-radius:50%;font-size:12px;cursor:pointer;pointer-events:auto">↓</button></div></div>`;
       // Use template literal with actual url - we need to interpolate correctly in JS
       const finalHtml = html.replace('${image.url}', image.url);
       editor.current?.insertAdjacentHTML("beforeend", finalHtml);
@@ -3600,6 +3600,31 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
         container.classList.add("designer-object-selected");
         setSelectedObject("image");
         setPanel("image");
+        // Nudge pad click handlers — single tap, no drag needed, trackpad perfect
+        container.querySelectorAll("[data-nudge]").forEach((btn) => {
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const dir = (btn as HTMLElement).dataset.nudge;
+            let dx=0, dy=0;
+            if (dir==="left") dx=-10;
+            else if (dir==="right") dx=10;
+            else if (dir==="up") dy=-10;
+            else if (dir==="down") dy=10;
+            const curL = parseFloat(container.style.left) || 0;
+            const curT = parseFloat(container.style.top) || 0;
+            container.style.left = `${curL + dx}px`;
+            container.style.top = `${curT + dy}px`;
+            captureSelectedPageHtml();
+            setMessage(`Nudged ${dir} 10px — tap again or drag bar, then Save page`);
+          });
+        });
+        // Show nudge pad only when selected
+        const style = document.createElement("style");
+        style.textContent = ".designer-free-image.designer-object-selected .free-image-nudge{opacity:1 !important;pointer-events:auto !important}";
+        if (!document.getElementById("free-image-nudge-style")) {
+          style.id = "free-image-nudge-style";
+          document.head.appendChild(style);
+        }
       }
       captureSelectedPageHtml();
       setMessage("Image added anywhere — drag to move, handles to resize height/width, then Save page");
