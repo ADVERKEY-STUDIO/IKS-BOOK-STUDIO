@@ -36,6 +36,16 @@ test("saved free-placement images regain drag and resize controls after reopenin
   assert.match(css, /\.designer-free-image\.designer-object-selected \.free-image-nudge/);
 });
 
+test("free images hide editing chrome outside selection and can be deleted", () => {
+  assert.match(page, /persistableDesignerHtml/);
+  assert.match(page, /html: persistableDesignerHtml\(revision\.html\)/);
+  assert.match(page, />Delete selected image</);
+  assert.match(page, /Image deleted\. Save the page or whole book/);
+  assert.match(css, /\.designer-free-image:not\(\.designer-object-selected\)>\.free-image-dragbar/);
+  assert.match(css, /\.designer-render-content \.designer-free-image>\.free-image-dragbar/);
+  assert.match(css, /\.designer-render-content \.designer-free-image>img/);
+});
+
 test("designer supports reusable styles, scoped application and local preflight", () => {
   assert.match(page, /applyStyle\("chapter"\)/);
   assert.match(page, /applyStyle\("book"\)/);

@@ -535,6 +535,21 @@
 .designer-render-canvas .designer-render-watermark{z-index:1}
 .designer-render-canvas .designer-render-content{position:relative;z-index:2}
 
+/* Free images are clean artwork until selected; editing chrome never reaches Preview or PDF. */
+.designer-editable-content .designer-free-image{cursor:grab}
+.designer-editable-content .designer-free-image:not(.designer-object-selected){border-color:transparent!important;background:transparent!important;box-shadow:none!important}
+.designer-editable-content .designer-free-image:not(.designer-object-selected)>.free-image-dragbar,.designer-editable-content .designer-free-image:not(.designer-object-selected)>.free-image-handle,.designer-editable-content .designer-free-image:not(.designer-object-selected)>.free-image-nudge{display:none!important}
+.designer-editable-content .designer-free-image:not(.designer-object-selected)>img{padding-top:0!important}
+.designer-editable-content .designer-free-image.designer-object-selected>.free-image-dragbar{display:flex!important}
+.designer-editable-content .designer-free-image.designer-object-selected>.free-image-handle{display:block!important}
+.designer-editable-content .designer-free-image.designer-object-selected>.free-image-nudge{display:grid!important}
+.designer-editable-content .designer-free-image.designer-object-selected>img{padding-top:32px!important}
+.designer-render-content .designer-object-selected{outline:0!important}
+.designer-render-content .designer-free-image{border-color:transparent!important;background:transparent!important;box-shadow:none!important;outline:0!important;overflow:hidden!important;cursor:default!important}
+.designer-render-content .designer-free-image>.free-image-dragbar,.designer-render-content .designer-free-image>.free-image-handle,.designer-render-content .designer-free-image>.free-image-nudge{display:none!important;pointer-events:none!important}
+.designer-render-content .designer-free-image>img{width:100%!important;height:100%!important;max-height:none!important;padding-top:0!important}
+.designer-delete-image{margin:10px 10px 0!important;border-color:#a9322e!important;background:#a9322e!important;color:#fff!important;font-weight:900!important}
+
 /* Resumable OCR + Nemotron source intelligence */
 .source-analysis-budget{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line);background:#fff}.source-analysis-budget span{padding:11px 9px;margin:0!important;border-right:1px solid var(--line);text-align:center;font:8px/1.35 Arial,sans-serif!important}.source-analysis-budget span:last-child{border-right:0}.source-analysis-budget b{display:block;font:18px/1 Georgia,serif!important;color:var(--forest);margin-bottom:4px}.ocr-options button.recommended{background:var(--forest);color:#fff;border-color:var(--forest)}.ocr-options button.recommended span{color:#dcebe2}.ocr-options button.recommended:hover{background:#1c5045;border-color:#1c5045}
 @media(max-width:800px){.source-analysis-budget{grid-template-columns:1fr}.source-analysis-budget span{border-right:0;border-bottom:1px solid var(--line)}.source-analysis-budget span:last-child{border-bottom:0}}
