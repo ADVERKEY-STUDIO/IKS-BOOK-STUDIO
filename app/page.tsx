@@ -3508,7 +3508,7 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
     try {
       setBusy(true);
       const image = await uploadAsset(file);
-      const html = `<div class="designer-free-image" data-free-image="true" style="position:absolute;left:80px;top:80px;width:280px;height:180px;cursor:move;z-index:3;border:1px dashed #b7a98e;background:#fff;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.08)"><img src="${'${image.url}'}" alt="Free image" style="width:100%;height:100%;object-fit:contain;display:block;pointer-events:none" /><div class="free-image-handle" data-handle="se" style="position:absolute;right:-6px;bottom:-6px;width:12px;height:12px;background:#a9322e;border:2px solid #fff;border-radius:50%;cursor:nwse-resize;box-shadow:0 1px 4px rgba(0,0,0,0.2)"></div><div class="free-image-handle" data-handle="e" style="position:absolute;right:-6px;top:50%;transform:translateY(-50%);width:10px;height:10px;background:#fff;border:1px solid #a9322e;border-radius:50%;cursor:ew-resize"></div><div class="free-image-handle" data-handle="s" style="position:absolute;left:50%;bottom:-6px;transform:translateX(-50%);width:10px;height:10px;background:#fff;border:1px solid #a9322e;border-radius:50%;cursor:ns-resize"></div></div>`;
+      const html = `<div class="designer-free-image" data-free-image="true" style="position:absolute;left:80px;top:80px;width:280px;height:180px;z-index:3;border:1.5px dashed #b7a98e;background:#fff;overflow:visible;box-shadow:0 4px 12px rgba(0,0,0,0.08);touch-action:none"><div class="free-image-dragbar" style="position:absolute;top:0;left:0;right:0;height:22px;background:rgba(169,50,46,0.92);color:#fff;display:flex;align-items:center;justify-content:center;gap:6px;font-size:10px;font-weight:700;letter-spacing:0.06em;cursor:grab;user-select:none;border-radius:2px 2px 0 0">⋮⋮ DRAG TO MOVE</div><img src="${'${image.url}'}" alt="Free image" style="width:100%;height:100%;object-fit:contain;display:block;pointer-events:none;padding-top:22px;box-sizing:border-box" /><div class="free-image-handle" data-handle="se" style="position:absolute;right:-8px;bottom:-8px;width:16px;height:16px;background:#a9322e;border:2px solid #fff;border-radius:50%;cursor:nwse-resize;box-shadow:0 2px 6px rgba(0,0,0,0.3);touch-action:none"></div><div class="free-image-handle" data-handle="e" style="position:absolute;right:-8px;top:50%;transform:translateY(-50%);width:14px;height:32px;background:rgba(255,255,255,0.95);border:1px solid #a9322e;border-radius:6px;cursor:ew-resize;box-shadow:0 1px 4px rgba(0,0,0,0.2);touch-action:none"></div><div class="free-image-handle" data-handle="s" style="position:absolute;left:50%;bottom:-8px;transform:translateX(-50%);width:32px;height:14px;background:rgba(255,255,255,0.95);border:1px solid #a9322e;border-radius:6px;cursor:ns-resize;box-shadow:0 1px 4px rgba(0,0,0,0.2);touch-action:none"></div></div>`;
       // Use template literal with actual url - we need to interpolate correctly in JS
       const finalHtml = html.replace('${image.url}', image.url);
       editor.current?.insertAdjacentHTML("beforeend", finalHtml);
@@ -3531,20 +3531,26 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
             container.style.height = `${Math.max(40, startH + dy)}px`;
           }
         };
-        const onPointerUp = () => {
+        const onPointerUp = (e?: PointerEvent) => {
           document.removeEventListener("pointermove", onPointerMove);
           document.removeEventListener("pointerup", onPointerUp);
+          try { if (e) container.releasePointerCapture?.(e.pointerId); } catch {}
+          container.style.cursor = "";
+          if (dragBar) dragBar.style.cursor = "grab";
           captureSelectedPageHtml();
-          setMessage("Image positioned — drag to move, drag handles to resize height/width, then Save page");
+          setMessage("Image positioned — drag top bar to move (trackpad friendly), handles to resize, arrows to nudge, then Save page");
         };
-        container.addEventListener("pointerdown", (e: PointerEvent) => {
+        // Trackpad-friendly: larger grab area, pointer capture, smooth
+        const dragBar = container.querySelector(".free-image-dragbar") as HTMLElement | null;
+        const onPointerDown = (e: PointerEvent) => {
           const target = e.target as HTMLElement;
           const handle = target.closest(".free-image-handle") as HTMLElement | null;
+          const isDragBar = target.closest(".free-image-dragbar");
           if (handle) {
             mode = handle.dataset.handle as any || "se";
             e.preventDefault();
             e.stopPropagation();
-          } else {
+          } else if (isDragBar || target === container || target.closest(".designer-free-image")) {
             mode = "move";
             // select it
             selectedNode.current?.classList.remove("designer-object-selected");
@@ -3552,6 +3558,10 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
             container.classList.add("designer-object-selected");
             setSelectedObject("image");
             setPanel("image");
+            container.style.cursor = "grabbing";
+            if (dragBar) dragBar.style.cursor = "grabbing";
+          } else {
+            return;
           }
           const rect = container.getBoundingClientRect();
           const parentRect = editor.current!.getBoundingClientRect();
@@ -3559,11 +3569,30 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
           startW = rect.width; startH = rect.height;
           startL = rect.left - parentRect.left;
           startT = rect.top - parentRect.top;
-          // Ensure container is positioned relative to editor
           container.style.left = `${startL}px`;
           container.style.top = `${startT}px`;
+          container.setPointerCapture?.(e.pointerId);
           document.addEventListener("pointermove", onPointerMove);
           document.addEventListener("pointerup", onPointerUp);
+          e.preventDefault();
+        };
+        container.addEventListener("pointerdown", onPointerDown as any);
+        // Also allow arrow keys to nudge when selected
+        container.tabIndex = 0;
+        container.addEventListener("keydown", (e: KeyboardEvent) => {
+          if (!container.classList.contains("designer-object-selected")) return;
+          let dx=0, dy=0;
+          if (e.key === "ArrowLeft") dx=-5;
+          else if (e.key === "ArrowRight") dx=5;
+          else if (e.key === "ArrowUp") dy=-5;
+          else if (e.key === "ArrowDown") dy=5;
+          else return;
+          e.preventDefault();
+          const curL = parseFloat(container.style.left) || 0;
+          const curT = parseFloat(container.style.top) || 0;
+          container.style.left = `${curL + dx}px`;
+          container.style.top = `${curT + dy}px`;
+          captureSelectedPageHtml();
         });
         // Select it immediately
         selectedNode.current?.classList.remove("designer-object-selected");
