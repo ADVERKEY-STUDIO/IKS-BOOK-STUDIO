@@ -53,6 +53,35 @@ export type DesignerDocumentV2 = {
   protectedPages: Record<string, { protectedAt: string; reason: "manual-edit" | "restored" }>;
 };
 
+export type DesignerFlowKind = "chapter" | "preface" | "about";
+
+export type DesignerFlowStory = {
+  id: string;
+  kind: DesignerFlowKind;
+  chapterId?: number;
+  html: string;
+  pageSlotIds: string[];
+  contentRevision: number;
+  protectedAt?: string;
+  updatedAt: string;
+};
+
+export type DesignerDocumentV3 = {
+  version: 3;
+  migratedAt: string;
+  assets: DesignerAsset[];
+  guides: DesignerGuide[];
+  print: DesignerPrintSettings;
+  textStyles: DesignerTextStyle[];
+  masters: DesignerMaster[];
+  protectedPages: Record<string, { protectedAt: string; reason: "manual-edit" | "restored" }>;
+  protectedFlows: Record<string, { protectedAt: string; reason: "manual-edit" | "restored" }>;
+  flowStories: Record<string, DesignerFlowStory>;
+  detachedPageSlots: Record<string, string[]>;
+};
+
+export type DesignerDocument = DesignerDocumentV2 | DesignerDocumentV3;
+
 export type DesignerElementInspector = {
   width: number;
   height: number;
@@ -112,6 +141,23 @@ export function createDesignerDocumentV2(existing?: Partial<DesignerDocumentV2>)
   };
 }
 
+export function createDesignerDocumentV3(existing?: Partial<DesignerDocumentV2> | Partial<DesignerDocumentV3>): DesignerDocumentV3 {
+  const candidate = existing as Partial<DesignerDocumentV3> | undefined;
+  return {
+    version: 3,
+    migratedAt: candidate?.migratedAt || new Date().toISOString(),
+    assets: candidate?.assets ?? [],
+    guides: candidate?.guides ?? [],
+    print: { ...DEFAULT_PRINT_SETTINGS, ...(candidate?.print ?? {}) },
+    textStyles: candidate?.textStyles?.length ? candidate.textStyles : DEFAULT_TEXT_STYLES,
+    masters: candidate?.masters ?? [],
+    protectedPages: candidate?.protectedPages ?? {},
+    protectedFlows: candidate?.protectedFlows ?? {},
+    flowStories: candidate?.flowStories ?? {},
+    detachedPageSlots: candidate?.detachedPageSlots ?? {},
+  };
+}
+
 export function parseDesignerTransform(transform = "") {
   const rotation = Number(transform.match(/rotate\((-?[\d.]+)deg\)/)?.[1] ?? 0);
   const scale = transform.match(/scale\((-?[\d.]+)\s*,\s*(-?[\d.]+)\)/);
@@ -157,5 +203,9 @@ export function inspectDesignerElement(node: HTMLElement | null): DesignerElemen
 }
 
 export function designerDraftStorageKey(projectId: string) {
+  return `iks-designer-v3:${projectId}`;
+}
+
+export function legacyDesignerDraftStorageKey(projectId: string) {
   return `iks-designer-v2:${projectId}`;
 }

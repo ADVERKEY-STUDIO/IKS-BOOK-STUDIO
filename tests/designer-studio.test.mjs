@@ -4,13 +4,14 @@ import { readFile } from "node:fs/promises";
 
 const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+const production = await readFile(new URL("../lib/designer-production.ts", import.meta.url), "utf8");
 
 test("Designer Studio is a separate persisted final-production layer", () => {
   assert.match(page, /designerPages\?: DesignerPageOverride\[\]/);
   assert.match(page, /designerPageOrder\?: string\[\]/);
   assert.match(page, /designerPages: \(cleanSaved\.designerPages \?\? \[\]\)\.map\(hydrateDesignerOverride\)/);
   assert.match(page, />Designer<\/button>/);
-  assert.match(page, /The pages below are the same pages used by Preview and PDF/);
+  assert.match(page, /Click any word to edit\. Reading text flows onto new A4 pages automatically/);
 });
 
 test("advanced typography, object, border and image controls are selection-aware", () => {
@@ -100,7 +101,7 @@ test("whole-book layout balancing is local, scoped and preserves locked pages", 
   assert.match(page, /layoutLocked/);
   assert.match(page, /Lock this page during reflow/);
   assert.match(page, /Balance this chapter/);
-  assert.match(page, /Balance layout/);
+  assert.match(page, /Repaginate book/);
   assert.match(page, /No AI tokens were used/);
 });
 
@@ -158,7 +159,7 @@ test("Designer uses the final publication template and saves individual pages", 
 });
 
 test("production editor protects work, autosaves, and exposes direct manipulation tools", () => {
-  assert.match(page, /designerDocument\?: DesignerDocumentV2/);
+  assert.match(page, /designerDocument\?: DesignerDocument/);
   assert.match(page, /manuallyEdited: true/);
   assert.match(page, /designerDraftStorageKey/);
   assert.match(page, /Offline draft/);
@@ -169,4 +170,26 @@ test("production editor protects work, autosaves, and exposes direct manipulatio
   assert.match(page, /composeDesignerTransform/);
   assert.match(css, /\.designer-safe-area/);
   assert.match(css, /\.designer-layer-list/);
+});
+
+test("Designer provides Word-style continuous section editing and automatic A4 reflow", () => {
+  assert.match(page, /measureFlowPages/);
+  assert.match(page, /scheduleStoryReflow\(identity\.id\)/);
+  assert.match(page, /window\.setTimeout[\s\S]{0,180}reflowStory/);
+  assert.match(page, /delay = 300/);
+  assert.match(page, /designerFlowBodyFromDom/);
+  assert.match(page, /splitPreservingMarkup/);
+  assert.match(page, /captureFlowCaret/);
+  assert.match(page, /data-designer-caret/);
+  assert.match(page, /onCompositionStart/);
+  assert.match(page, /onCompositionEnd/);
+  assert.match(page, /handleFlowBoundaryKey/);
+  assert.match(page, /removedByReflow/);
+  assert.match(page, /detachedPageSlots/);
+  assert.match(page, /Protected from regeneration; its text still reflows/);
+  assert.match(css, /designer-continuous-editor/);
+  assert.match(production, /DesignerDocumentV3/);
+  assert.match(production, /flowStories: Record<string, DesignerFlowStory>/);
+  assert.match(production, /protectedFlows/);
+  assert.match(production, /version: 3/);
 });

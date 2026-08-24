@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, CSSProperties, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { strToU8, unzipSync, zipSync } from "fflate";
 import { AUTHORIAL_READER_INSTRUCTION, authorialReaderHtml, childAgeBand, generationProfileKey } from "../lib/child-summary";
 import { ADAPTATION_PLAN_VERSION, allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET, FIXED_MATTER_PAGES, recommendedAdaptationPages, TOTAL_BOOK_PAGE_LIMIT } from "../lib/adaptation-pages";
@@ -9,7 +9,7 @@ import { BOOK_PACKAGE_FORMAT, expectedChapterId, expectedContextKey, expectedPag
 import { bookPersonaClass, bookPersonaDefinitions, bookPersonaPatch, inferBookPersona, materializePersona, personaById, type BookPersona } from "../lib/book-persona";
 import { outlineForMode, pdfChunkRanges, SAFE_OCR_CHUNK_BYTES, SAFE_OCR_CHUNK_PAGES, type OutlineMode, type SourceIntelligence, type SourceOutlineItem } from "../lib/source-intelligence";
 import { buildExternalAiPrompt, parseExternalManuscript, type ExternalManuscriptResult } from "../lib/external-manuscript";
-import { composeDesignerTransform, createDesignerDocumentV2, designerDraftStorageKey, inspectDesignerElement, type DesignerAsset, type DesignerDocumentV2, type DesignerElementInspector } from "../lib/designer-production";
+import { composeDesignerTransform, createDesignerDocumentV3, designerDraftStorageKey, inspectDesignerElement, legacyDesignerDraftStorageKey, type DesignerAsset, type DesignerDocument, type DesignerDocumentV3, type DesignerElementInspector, type DesignerFlowKind, type DesignerFlowStory } from "../lib/designer-production";
 
 type View = "dashboard" | "wizard" | "external" | "analysis" | "brief" | "editor";
 
@@ -191,6 +191,9 @@ type DesignerPageOverride = DesignerPageRevision & {
   kind: "cover" | "contents" | "frontmatter" | "chapter" | "backmatter" | "back" | "custom";
   chapterId?: number;
   pageIndex?: number;
+  flowStoryId?: string;
+  flowPageIndex?: number;
+  removedByReflow?: boolean;
   history: DesignerPageRevision[];
 };
 
@@ -234,7 +237,7 @@ type Project = {
   designerPages?: DesignerPageOverride[];
   designerPageOrder?: string[];
   designerPresets?: DesignerStylePreset[];
-  designerDocument?: DesignerDocumentV2;
+  designerDocument?: DesignerDocument;
   saveRevision?: string;
   creationMode?: "external" | "automatic";
   externalManuscript?: {
@@ -976,7 +979,7 @@ function normalizeProject(saved: Project): Project {
     designerPages: (cleanSaved.designerPages ?? []).map(hydrateDesignerOverride),
     designerPageOrder: cleanSaved.designerPageOrder ?? [],
     designerPresets: cleanSaved.designerPresets ?? [],
-    designerDocument: createDesignerDocumentV2(cleanSaved.designerDocument),
+    designerDocument: createDesignerDocumentV3(cleanSaved.designerDocument),
     creationMode: cleanSaved.creationMode ?? "automatic",
     externalManuscript: cleanSaved.externalManuscript,
   };
@@ -1044,7 +1047,7 @@ function normalizeProject(saved: Project): Project {
     designerPages: (cleanSaved.designerPages ?? []).map(hydrateDesignerOverride),
     designerPageOrder: cleanSaved.designerPageOrder ?? [],
     designerPresets: cleanSaved.designerPresets ?? [],
-    designerDocument: createDesignerDocumentV2(cleanSaved.designerDocument),
+    designerDocument: createDesignerDocumentV3(cleanSaved.designerDocument),
   };
 }
 
@@ -1773,7 +1776,7 @@ OUTPUT REQUIREMENTS
       const sheets = Array.from(document.querySelectorAll<HTMLElement>(".pdf-render-stack .book-sheet"));
       if (!sheets.length) throw new Error("Preview pages are not ready");
       const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")]);
-      const print = createDesignerDocumentV2(project.designerDocument).print;
+      const print = createDesignerDocumentV3(project.designerDocument).print;
       const printer = print.exportMode === "printer" || print.bleedMm === 3;
       const review = print.exportMode === "review";
       const pageFormat: "a4" | [number, number] = printer ? [216, 303] : "a4";
@@ -3075,6 +3078,8 @@ type DesignerBasePage = {
   kind: "cover" | "contents" | "frontmatter" | "chapter" | "backmatter" | "back";
   chapterId?: number;
   pageIndex?: number;
+  flowStoryId?: string;
+  flowPageIndex?: number;
   html: string;
 };
 
@@ -3164,8 +3169,52 @@ function designerFlowBody(html: string) {
     .trim();
 }
 
+type DesignerFlowIdentity = { id: string; kind: DesignerFlowKind; chapterId?: number; label: string };
+
+function designerFlowIdentity(page: { slotId: string; label: string; kind: string; chapterId?: number; flowStoryId?: string }): DesignerFlowIdentity | null {
+  if (page.flowStoryId) {
+    if (page.flowStoryId === "matter-preface") return { id: page.flowStoryId, kind: "preface", label: "Preface" };
+    if (page.flowStoryId === "matter-about") return { id: page.flowStoryId, kind: "about", label: "About this book" };
+    if (page.chapterId) return { id: page.flowStoryId, kind: "chapter", chapterId: page.chapterId, label: `Chapter ${page.chapterId}` };
+  }
+  if (page.kind === "chapter" && page.chapterId) return { id: `chapter-${page.chapterId}`, kind: "chapter", chapterId: page.chapterId, label: `Chapter ${page.chapterId}` };
+  if (page.slotId === "preface") return { id: "matter-preface", kind: "preface", label: "Preface" };
+  if (page.slotId === "about-book") return { id: "matter-about", kind: "about", label: "About this book" };
+  return null;
+}
+
+function designerFlowBodyFromDom(html: string) {
+  const root = document.createElement("div");
+  root.innerHTML = html;
+  const body = root.querySelector<HTMLElement>(".preview-body");
+  if (body) {
+    const inlineFigures = Array.from(root.children).filter((node) => node.tagName === "FIGURE").map((node) => node.outerHTML).join("");
+    return `${body.innerHTML}${inlineFigures}`;
+  }
+  const matter = root.querySelector<HTMLElement>(".matter-page");
+  if (matter) return matter.innerHTML;
+  Array.from(root.children).forEach((node) => {
+    if (node.tagName === "HEADER" || node.tagName === "FOOTER" || node.matches(".continued-title")) node.remove();
+  });
+  return root.innerHTML.trim();
+}
+
 function designerChapterPageHtml(project: Project, chapter: Chapter, body: string, pageIndex: number, pageCount: number) {
-  return `<header><span>CHAPTER ${chapter.id}</span><span>PAGE ${pageIndex + 1} OF ${pageCount}</span></header>${pageIndex === 0 ? `<h2>${escapeHtml(chapter.title)}</h2>` : `<p class="continued-title">${escapeHtml(chapter.title)} · continued</p>`}<div class="preview-body">${body}</div><footer>${escapeHtml(project.title)}</footer>`;
+  return `<header class="print-chapter-header"><span>CHAPTER ${chapter.id}</span><span>PAGE ${pageIndex + 1} OF ${pageCount}</span></header>${pageIndex === 0 ? `<h2>${escapeHtml(chapter.title)}</h2>` : `<p class="continued-title">${escapeHtml(chapter.title)} · continued</p>`}<div class="preview-body">${body}</div><footer class="sheet-number"><span>${escapeHtml(project.title)}</span><span>${pageIndex + 1}</span></footer>`;
+}
+
+function designerMatterPageHtml(project: Project, identity: DesignerFlowIdentity, body: string, pageIndex: number, pageCount: number) {
+  const continuation = pageIndex > 0 ? `<p class="continued-title">${escapeHtml(identity.label)} · continued</p>` : "";
+  return `<div class="matter-page">${continuation}${body}</div><footer class="sheet-number"><span>${escapeHtml(project.title)}</span><span>${pageIndex + 1} of ${pageCount}</span></footer>`;
+}
+
+function designerFlowPageHtml(project: Project, identity: DesignerFlowIdentity, body: string, pageIndex: number, pageCount: number) {
+  if (identity.kind === "chapter") {
+    const chapter = project.chapters.find((item) => item.id === identity.chapterId);
+    if (!chapter) throw new Error(`${identity.label} is no longer available.`);
+    return designerChapterPageHtml(project, chapter, body, pageIndex, pageCount);
+  }
+  return designerMatterPageHtml(project, identity, body, pageIndex, pageCount);
 }
 
 function designerPageFill(html: string, audience: string, firstPage: boolean) {
@@ -3182,15 +3231,19 @@ function designerPageFill(html: string, audience: string, firstPage: boolean) {
 
 function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Project; onClose: () => void; onPreview: () => void; onCommit: (next: Project) => Promise<void> }) {
   const basePages = useMemo(() => designerBasePages(project), [project]);
-  const savedPages = (project.designerPages ?? []).map(hydrateDesignerOverride).map((page) => {
+  const persistedPages = (project.designerPages ?? []).map(hydrateDesignerOverride).map((page) => {
     const base = basePages.find((candidate) => candidate.slotId === page.slotId);
     return base && isLegacyDesignerScaffold(page) ? { ...page, html: base.html } : page;
   });
+  const [flowPageOverrides, setFlowPageOverrides] = useState<DesignerPageOverride[]>([]);
+  const savedPages = [...persistedPages.filter((page) => !flowPageOverrides.some((override) => override.slotId === page.slotId)), ...flowPageOverrides];
   const customPages = savedPages.filter((page) => page.kind === "custom");
-  const allPages = [...basePages, ...customPages.map((page) => ({ slotId: page.slotId, label: page.label, kind: "custom" as const, chapterId: page.chapterId, pageIndex: page.pageIndex, html: page.html }))];
+  const allPages = [...basePages, ...customPages.map((page) => ({ slotId: page.slotId, label: page.label, kind: "custom" as const, chapterId: page.chapterId, pageIndex: page.pageIndex, flowStoryId: page.flowStoryId, flowPageIndex: page.flowPageIndex, html: page.html }))];
   const storedOrder = (project.designerPageOrder ?? []).filter((slotId) => allPages.some((page) => page.slotId === slotId));
   const hasCompletePhysicalOrder = basePages.every((page) => storedOrder.includes(page.slotId));
-  const order = hasCompletePhysicalOrder ? [...storedOrder, ...allPages.map((page) => page.slotId).filter((slotId) => !storedOrder.includes(slotId))] : allPages.map((page) => page.slotId);
+  const defaultOrder = hasCompletePhysicalOrder ? [...storedOrder, ...allPages.map((page) => page.slotId).filter((slotId) => !storedOrder.includes(slotId))] : allPages.map((page) => page.slotId);
+  const [flowPageOrder, setFlowPageOrder] = useState<string[] | null>(null);
+  const order = flowPageOrder ? [...flowPageOrder.filter((slotId) => allPages.some((page) => page.slotId === slotId)), ...allPages.map((page) => page.slotId).filter((slotId) => !flowPageOrder.includes(slotId))] : defaultOrder;
   const orderedPages = order.map((slotId) => allPages.find((page) => page.slotId === slotId)!).filter(Boolean);
   const [selectedId, setSelectedId] = useState(order[0] ?? "cover");
   const selected = orderedPages.find((page) => page.slotId === selectedId) ?? orderedPages[0];
@@ -3202,12 +3255,12 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   const [selectedObject, setSelectedObject] = useState<"page" | "text box" | "image" | "shape">("page");
   const [objectInspector, setObjectInspector] = useState<DesignerElementInspector>(() => inspectDesignerElement(null));
   const [zoom, setZoom] = useState(75);
-  const [saveState, setSaveState] = useState<"saved" | "saving" | "offline" | "failed">("saved");
-  const [assets, setAssets] = useState<DesignerAsset[]>(() => createDesignerDocumentV2(project.designerDocument).assets);
+  const [saveState, setSaveState] = useState<"saved" | "editing" | "reflowing" | "saving" | "offline" | "failed">("saved");
+  const [assets, setAssets] = useState<DesignerAsset[]>(() => createDesignerDocumentV3(project.designerDocument).assets);
   const [layerTick, setLayerTick] = useState(0);
   const [formatState, setFormatState] = useState({ bold: false, italic: false, underline: false, align: "left" });
   const [textSelection, setTextSelection] = useState<{ text: string; words: number; left: number; top: number } | null>(null);
-  const designerDocument = createDesignerDocumentV2(project.designerDocument);
+  const designerDocument = createDesignerDocumentV3(project.designerDocument);
   const printSettings = designerDocument.print;
   const [undoStack, setUndoStack] = useState<DesignerPageRevision[]>([]);
   const [redoStack, setRedoStack] = useState<DesignerPageRevision[]>([]);
@@ -3218,6 +3271,16 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   const bookEditors = useRef(new Map<string, HTMLDivElement>());
   const liveBookHtml = useRef<Record<string, string>>({});
   const liveBookDrafts = useRef<Record<string, DesignerPageRevision>>({});
+  const liveFlowStories = useRef<Record<string, DesignerFlowStory>>({ ...designerDocument.flowStories });
+  const detachedPageSlots = useRef<Record<string, string[]>>({ ...designerDocument.detachedPageSlots });
+  const reflowTimers = useRef(new Map<string, number>());
+  const reflowGeneration = useRef(new Map<string, number>());
+  const pendingFlowHtml = useRef(new Map<string, string>());
+  const composingEditors = useRef(new Set<string>());
+  const pendingCaretMarker = useRef<string | null>(null);
+  const flowHistory = useRef(new Map<string, string[]>());
+  const flowFuture = useRef(new Map<string, string[]>());
+  const flowBatchStart = useRef(new Map<string, string>());
   const [dirtyPages, setDirtyPages] = useState<string[]>([]);
   const selectedNode = useRef<HTMLElement | null>(null);
   const savedTextRange = useRef<Range | null>(null);
@@ -3238,18 +3301,46 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
     const html = liveBookHtml.current[page.slotId] ?? base.html;
     return page.slotId === selectedId ? { ...draft, html } : { ...base, html };
   };
+  const currentDesignerDocument = () => {
+    const nextDocument = createDesignerDocumentV3(project.designerDocument);
+    nextDocument.assets = assets;
+    nextDocument.flowStories = { ...liveFlowStories.current };
+    nextDocument.detachedPageSlots = { ...detachedPageSlots.current };
+    return nextDocument;
+  };
+  const pagesForFlow = (flowId: string) => orderedPages.filter((page) => designerFlowIdentity(page)?.id === flowId && !revisionFor(page).deleted);
+  const collectFlowHtml = (flowId: string) => pagesForFlow(flowId)
+    .map((page) => designerFlowBodyFromDom(bookEditors.current.get(page.slotId)?.innerHTML ?? liveBookHtml.current[page.slotId] ?? revisionFor(page).html))
+    .join("");
+  const rememberFlowHistory = (flowId: string, html: string) => {
+    const stack = flowHistory.current.get(flowId) ?? [];
+    if (stack.at(-1) !== html) flowHistory.current.set(flowId, [...stack.slice(-29), html]);
+    flowFuture.current.set(flowId, []);
+  };
   const rememberLiveHtml = (slotId: string, html: string) => {
     liveBookHtml.current[slotId] = html;
-    const base = liveBookDrafts.current[slotId] ?? savedPages.find((page) => page.slotId === slotId);
-    if (base) liveBookDrafts.current[slotId] = { ...hydrateDesignerRevision(base, html), html, manuallyEdited: true, layoutLocked: true, protectedAt: base.protectedAt || new Date().toISOString() };
+    const descriptor = allPages.find((page) => page.slotId === slotId);
+    const identity = descriptor ? designerFlowIdentity(descriptor) : null;
+    const persisted = savedPages.find((page) => page.slotId === slotId);
+    const base = liveBookDrafts.current[slotId] ?? (descriptor ? hydrateDesignerRevision(persisted, descriptor.html) : persisted);
+    if (base) liveBookDrafts.current[slotId] = { ...hydrateDesignerRevision(base, html), html, manuallyEdited: true, layoutLocked: identity ? Boolean(base.layoutLocked) : true, protectedAt: base.protectedAt || new Date().toISOString() };
     setDirtyPages((current) => current.includes(slotId) ? current : [...current, slotId]);
-    setSaveState("saving");
+    setSaveState(identity ? "editing" : "saving");
+    if (identity && !composingEditors.current.has(slotId)) {
+      const existing = liveFlowStories.current[identity.id];
+      if (!flowBatchStart.current.has(identity.id)) flowBatchStart.current.set(identity.id, existing?.html || collectFlowHtml(identity.id));
+      const nextHtml = collectFlowHtml(identity.id);
+      const protectedAt = existing?.protectedAt || new Date().toISOString();
+      liveFlowStories.current[identity.id] = { id: identity.id, kind: identity.kind, chapterId: identity.chapterId, html: nextHtml, pageSlotIds: pagesForFlow(identity.id).map((page) => page.slotId), contentRevision: (existing?.contentRevision ?? 0) + 1, protectedAt, updatedAt: new Date().toISOString() };
+      scheduleStoryReflow(identity.id);
+    }
   };
   const changeDraft = (patch: Partial<DesignerPageRevision>, remember = true) => {
     if (remember) setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]);
     setRedoStack([]);
     setDraft((current) => {
-      const next = { ...current, ...patch, manuallyEdited: true, layoutLocked: patch.layoutLocked ?? true, protectedAt: current.protectedAt || new Date().toISOString() };
+      const identity = selected ? designerFlowIdentity(selected) : null;
+      const next = { ...current, ...patch, manuallyEdited: true, layoutLocked: patch.layoutLocked ?? (identity ? current.layoutLocked : true), protectedAt: current.protectedAt || new Date().toISOString() };
       liveBookDrafts.current[selectedId] = next;
       return next;
     });
@@ -3273,6 +3364,7 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
     if (selection && storedRange && root.contains(storedRange.commonAncestorContainer)) { selection.removeAllRanges(); selection.addRange(storedRange.cloneRange()); }
     if (!selection?.rangeCount) return;
     const range = selection.getRangeAt(0); if (!root.contains(range.commonAncestorContainer)) return;
+    rememberBeforeFlowInput(selectedId);
     setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]); setRedoStack([]);
     const anchor = (selection.anchorNode instanceof HTMLElement ? selection.anchorNode : selection.anchorNode?.parentElement)?.closest("h1,h2,h3,p,li,blockquote,div") as HTMLElement | null;
     const inlineStyles: Record<string, string> = {};
@@ -3306,7 +3398,7 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   };
   const makeOverride = (descriptor: (typeof allPages)[number], revision: DesignerPageRevision, existing?: DesignerPageOverride): DesignerPageOverride => {
     const snapshot = existing ? (() => { const r = hydrateDesignerRevision(existing, existing.html) as unknown as Record<string, unknown>; const { history: _ignoredHistory, ...rest } = r as { history?: unknown } & typeof r; return { ...rest, savedAt: new Date().toISOString() }; })() : null;
-    return { ...revision, slotId: descriptor.slotId, label: descriptor.label, kind: descriptor.kind, chapterId: descriptor.chapterId, pageIndex: descriptor.pageIndex, history: snapshot ? [snapshot as unknown as DesignerPageRevision & { savedAt: string }, ...existing!.history].slice(0, 5) as unknown as DesignerPageRevision[] : [] };
+    return { ...revision, slotId: descriptor.slotId, label: descriptor.label, kind: descriptor.kind, chapterId: descriptor.chapterId, pageIndex: descriptor.pageIndex, flowStoryId: "flowStoryId" in descriptor ? descriptor.flowStoryId : existing?.flowStoryId, flowPageIndex: "flowPageIndex" in descriptor ? descriptor.flowPageIndex : existing?.flowPageIndex, removedByReflow: existing?.removedByReflow, history: snapshot ? [snapshot as unknown as DesignerPageRevision & { savedAt: string }, ...existing!.history].slice(0, 5) as unknown as DesignerPageRevision[] : [] };
   };
   const saveRevision = async (revisionToSave = draft) => {
     if (!selected) return; setBusy(true);
@@ -3314,12 +3406,13 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
       const html = revisionToSave.intentionalBlank ? revisionToSave.html : (editor.current?.innerHTML ?? revisionToSave.html);
       const revision = { ...revisionToSave, html, savedAt: new Date().toISOString() };
       const replacement = makeOverride(selected, revision, saved);
-      const nextDocument = createDesignerDocumentV2(project.designerDocument);
-      nextDocument.assets = assets;
-      nextDocument.protectedPages[selected.slotId] = { protectedAt: revision.protectedAt || new Date().toISOString(), reason: "manual-edit" };
+      const nextDocument = currentDesignerDocument();
+      const identity = designerFlowIdentity(selected);
+      if (identity) nextDocument.protectedFlows[identity.id] = { protectedAt: revision.protectedAt || new Date().toISOString(), reason: "manual-edit" };
+      else nextDocument.protectedPages[selected.slotId] = { protectedAt: revision.protectedAt || new Date().toISOString(), reason: "manual-edit" };
       const next = { ...project, designerPages: [...savedPages.filter((page) => page.slotId !== selected.slotId), replacement], designerPageOrder: order, designerDocument: nextDocument };
       setSaveState("saving");
-      await onCommit(next); liveBookDrafts.current[selected.slotId] = replacement; setDraft(replacement); setDirtyPages((current) => current.filter((slotId) => slotId !== selected.slotId)); setUndoStack([]); setRedoStack([]); setMessage(`${selected.label} saved. Preview and PDF now use this exact page.`);
+      await onCommit(next); setFlowPageOverrides(next.designerPages ?? []); setFlowPageOrder(next.designerPageOrder ?? null); liveBookDrafts.current[selected.slotId] = replacement; setDraft(replacement); setDirtyPages((current) => current.filter((slotId) => slotId !== selected.slotId)); setUndoStack([]); setRedoStack([]); setMessage(`${selected.label} saved. Preview and PDF now use this exact page.`);
       setSaveState("saved");
     } catch (error) { setSaveState(navigator.onLine ? "failed" : "offline"); throw error; } finally { setBusy(false); }
   };
@@ -3332,9 +3425,10 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
       const current = revisionFor(descriptor);
       const revision = { ...current, html: bookEditors.current.get(slotId)?.innerHTML ?? current.html, savedAt: new Date().toISOString() };
       const replacement = makeOverride(descriptor, revision, existing);
-      const nextDocument = createDesignerDocumentV2(project.designerDocument); nextDocument.assets = assets; nextDocument.protectedPages[slotId] = { protectedAt: revision.protectedAt || new Date().toISOString(), reason: "manual-edit" };
+      const nextDocument = currentDesignerDocument(); const identity = designerFlowIdentity(descriptor); if (identity) nextDocument.protectedFlows[identity.id] = { protectedAt: revision.protectedAt || new Date().toISOString(), reason: "manual-edit" }; else nextDocument.protectedPages[slotId] = { protectedAt: revision.protectedAt || new Date().toISOString(), reason: "manual-edit" };
       const next = { ...project, designerPages: [...savedPages.filter((page) => page.slotId !== slotId), replacement], designerPageOrder: order, designerDocument: nextDocument };
       await onCommit(next);
+      setFlowPageOverrides(next.designerPages ?? []); setFlowPageOrder(next.designerPageOrder ?? null);
       liveBookDrafts.current[slotId] = replacement;
       liveBookHtml.current[slotId] = replacement.html;
       if (slotId === selectedId) { setDraft(replacement); setUndoStack([]); setRedoStack([]); }
@@ -3362,12 +3456,12 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
         if (page.chapterId) { const chapterPages = active.filter((candidate) => candidate.chapterId === page.chapterId); const chapterIndex = chapterPages.findIndex((candidate) => candidate.slotId === page.slotId); const label = holder.querySelector<HTMLElement>(".print-chapter-header span:last-child"); if (label) label.textContent = `PAGE ${chapterIndex + 1} OF ${chapterPages.length}`; }
         if (holder.innerHTML !== base.html) replacements.set(page.slotId, makeOverride(page, { ...base, html: holder.innerHTML, savedAt: new Date().toISOString() }, existing));
       });
-      const nextDocument = createDesignerDocumentV2(project.designerDocument);
-      nextDocument.assets = assets;
-      changed.forEach((slotId) => { nextDocument.protectedPages[slotId] = { protectedAt: new Date().toISOString(), reason: "manual-edit" }; });
+      const nextDocument = currentDesignerDocument();
+      changed.forEach((slotId) => { const page = descriptorFor(slotId); const identity = page ? designerFlowIdentity(page) : null; if (identity) nextDocument.protectedFlows[identity.id] = { protectedAt: new Date().toISOString(), reason: "manual-edit" }; else nextDocument.protectedPages[slotId] = { protectedAt: new Date().toISOString(), reason: "manual-edit" }; });
       const next = { ...project, designerPages: [...replacements.values()], designerPageOrder: order, designerDocument: nextDocument };
       setSaveState("saving");
       await onCommit(next);
+      setFlowPageOverrides(next.designerPages ?? []); setFlowPageOrder(next.designerPageOrder ?? null);
       setDirtyPages([]);
       localStorage.removeItem(designerDraftStorageKey(project.id));
       setUndoStack([]); setRedoStack([]);
@@ -3388,15 +3482,19 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   useEffect(() => {
     const key = designerDraftStorageKey(project.id);
     try {
-      const stored = localStorage.getItem(key);
+      const stored = localStorage.getItem(key) ?? localStorage.getItem(legacyDesignerDraftStorageKey(project.id));
       if (!stored) return;
-      const parsed = JSON.parse(stored) as { drafts?: Record<string, DesignerPageRevision>; html?: Record<string, string>; savedAt?: string };
+      const parsed = JSON.parse(stored) as { drafts?: Record<string, DesignerPageRevision>; html?: Record<string, string>; pages?: DesignerPageOverride[]; order?: string[]; flowStories?: Record<string, DesignerFlowStory>; detachedPageSlots?: Record<string, string[]>; savedAt?: string };
       if (!parsed.drafts || !parsed.savedAt || new Date(parsed.savedAt) <= new Date(project.saveRevision || project.updatedAt || 0)) return;
       liveBookDrafts.current = parsed.drafts;
       liveBookHtml.current = parsed.html ?? {};
+      if (parsed.pages?.length) setFlowPageOverrides(parsed.pages.map(hydrateDesignerOverride));
+      if (parsed.order?.length) setFlowPageOrder(parsed.order);
+      if (parsed.flowStories) liveFlowStories.current = parsed.flowStories;
+      if (parsed.detachedPageSlots) detachedPageSlots.current = parsed.detachedPageSlots;
       const recovered = Object.keys(parsed.drafts).filter((slotId) => allPages.some((page) => page.slotId === slotId));
       if (recovered.length) { setDirtyPages(recovered); setSaveState("offline"); setMessage(`Recovered ${recovered.length} unsaved page${recovered.length === 1 ? "" : "s"} from this device.`); }
-    } catch { localStorage.removeItem(key); }
+    } catch { localStorage.removeItem(key); localStorage.removeItem(legacyDesignerDraftStorageKey(project.id)); }
   }, [project.id]);
 
   useEffect(() => {
@@ -3409,12 +3507,27 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   useEffect(() => {
     if (!dirtyPages.length) return;
     const localTimer = window.setTimeout(() => {
-      localStorage.setItem(designerDraftStorageKey(project.id), JSON.stringify({ drafts: liveBookDrafts.current, html: liveBookHtml.current, savedAt: new Date().toISOString() }));
+      localStorage.setItem(designerDraftStorageKey(project.id), JSON.stringify({ drafts: liveBookDrafts.current, html: liveBookHtml.current, pages: savedPages, order, flowStories: liveFlowStories.current, detachedPageSlots: detachedPageSlots.current, savedAt: new Date().toISOString() }));
       if (!navigator.onLine) setSaveState("offline");
     }, 750);
     const remoteTimer = window.setTimeout(() => { if (navigator.onLine && !busy) void saveWholeBook().catch(() => undefined); }, 6500);
     return () => { window.clearTimeout(localTimer); window.clearTimeout(remoteTimer); };
   }, [dirtyPages, project.id, busy]);
+
+  useEffect(() => {
+    const markerId = pendingCaretMarker.current; if (!markerId) return;
+    const frame = window.requestAnimationFrame(() => {
+      const marker = document.querySelector<HTMLElement>(`[data-designer-caret="${markerId}"]`); if (!marker) return;
+      const rootEntry = Array.from(bookEditors.current.entries()).find(([, root]) => root.contains(marker));
+      const range = document.createRange(); range.setStartBefore(marker); range.collapse(true);
+      const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range);
+      marker.remove(); pendingCaretMarker.current = null;
+      if (rootEntry) { const [slotId, root] = rootEntry; liveBookHtml.current[slotId] = root.innerHTML; editor.current = root; setSelectedId(slotId); root.focus({ preventScroll: true }); document.getElementById(`designer-flow-${slotId}`)?.scrollIntoView({ block: "center", behavior: "smooth" }); }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [flowPageOverrides, flowPageOrder]);
+
+  useEffect(() => () => { reflowTimers.current.forEach((timer) => window.clearTimeout(timer)); reflowTimers.current.clear(); }, []);
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => { if (!dirtyPages.length) return; event.preventDefault(); event.returnValue = ""; };
@@ -3427,7 +3540,10 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
       const target = event.target as HTMLElement | null;
       if (target?.isContentEditable && !event.metaKey && !event.ctrlKey) return;
       const modifier = event.metaKey || event.ctrlKey;
-      if (modifier && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); return; }
+      if (modifier && event.key.toLowerCase() === "z") {
+        if (target?.closest(".designer-continuous-editor[data-flow-story]")) return;
+        event.preventDefault(); event.shiftKey ? redo() : undo(); return;
+      }
       if (modifier && event.key.toLowerCase() === "d" && selectedNode.current) { event.preventDefault(); duplicateObject(); return; }
       if ((event.key === "Delete" || event.key === "Backspace") && selectedNode.current && !target?.isContentEditable) { event.preventDefault(); deleteObject(); return; }
       if (!selectedNode.current || !["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(event.key)) return;
@@ -3548,6 +3664,211 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
     return pages.length ? pages : [normalized];
   };
 
+  const measureFlowPages = async (identity: DesignerFlowIdentity, flowingHtml: string, style: DesignerPageRevision) => {
+    await document.fonts?.ready;
+    const source = document.createElement("div");
+    source.innerHTML = flowingHtml;
+    Array.from(source.childNodes).forEach((node) => {
+      if (node.nodeType === Node.TEXT_NODE && node.textContent?.trim()) {
+        const paragraph = document.createElement("p"); paragraph.textContent = node.textContent; source.replaceChild(paragraph, node);
+      }
+    });
+    const blocks = Array.from(source.children).map((node) => node.outerHTML);
+    if (!blocks.length) return { pages: ["<p><br></p>"], oversized: [] as string[] };
+
+    const sheet = document.createElement("article");
+    sheet.className = `designer-canvas-page designer-measure-page ${identity.kind === "chapter" ? "chapter-preview" : "designer-matter-sheet"}`;
+    Object.assign(sheet.style, { position: "fixed", left: "-10000px", top: "0", width: "794px", minWidth: "794px", height: "1123px", visibility: "hidden", pointerEvents: "none" });
+    const content = document.createElement("div");
+    content.className = "designer-editable-content";
+    Object.assign(content.style, { boxSizing: "border-box", height: "100%", fontFamily: style.fontFamily, fontSize: `${style.fontSize}px`, color: style.textColor, lineHeight: String(style.lineHeight), letterSpacing: `${style.letterSpacing}px`, columnCount: String(style.columns), columnGap: `${style.columnGap}px`, padding: `${style.pagePadding}px` });
+    content.style.setProperty("--designer-paragraph-space", `${style.paragraphSpacing}px`);
+    sheet.append(content); document.body.append(sheet);
+
+    const fits = (pageBlocks: string[], pageIndex: number) => {
+      content.innerHTML = designerFlowPageHtml(project, identity, pageBlocks.join(""), pageIndex, 99);
+      return content.scrollHeight <= content.clientHeight + 1;
+    };
+    const splitPreservingMarkup = (block: string, current: string[], pageIndex: number) => {
+      const holder = document.createElement("div"); holder.innerHTML = block;
+      const element = holder.firstElementChild as HTMLElement | null;
+      if (!element || element.matches("figure,table,.designer-shape,[data-designer-atomic=true]") || ["H1", "H2", "H3"].includes(element.tagName)) return null;
+      const text = element.textContent ?? "";
+      const boundaries = Array.from(text.matchAll(/\s+/gu)).map((match) => (match.index ?? 0) + match[0].length).filter((offset) => offset >= 12 && offset <= text.length - 8);
+      if (!boundaries.length) return null;
+      const splitAt = (offset: number) => {
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        let consumed = 0; let target: Text | null = null; let localOffset = 0;
+        while (walker.nextNode()) { const node = walker.currentNode as Text; const length = node.data.length; if (consumed + length >= offset) { target = node; localOffset = offset - consumed; break; } consumed += length; }
+        if (!target) return null;
+        const prefixRange = document.createRange(); prefixRange.selectNodeContents(element); prefixRange.setEnd(target, localOffset);
+        const suffixRange = document.createRange(); suffixRange.selectNodeContents(element); suffixRange.setStart(target, localOffset);
+        const prefix = element.cloneNode(false) as HTMLElement; prefix.append(prefixRange.cloneContents());
+        const suffix = element.cloneNode(false) as HTMLElement; suffix.append(suffixRange.cloneContents());
+        return [prefix.outerHTML, suffix.outerHTML] as const;
+      };
+      let low = 0; let high = boundaries.length - 1; let best: readonly [string, string] | null = null;
+      while (low <= high) {
+        const middle = Math.floor((low + high) / 2); const candidate = splitAt(boundaries[middle]);
+        if (candidate && fits([...current, candidate[0]], pageIndex)) { best = candidate; low = middle + 1; } else high = middle - 1;
+      }
+      return best;
+    };
+
+    const pages: string[] = []; const oversized: string[] = []; const pending = [...blocks]; let current: string[] = [];
+    while (pending.length) {
+      const block = pending.shift()!; const pageIndex = pages.length;
+      const isHeading = /^<h[1-3]\b/i.test(block); const headingPair = isHeading && pending[0] ? [...current, block, pending[0]] : null;
+      if (current.length && headingPair && !fits(headingPair, pageIndex)) { pages.push(current.join("")); current = []; pending.unshift(block); continue; }
+      if (fits([...current, block], pageIndex)) { current.push(block); continue; }
+      const split = splitPreservingMarkup(block, current, pageIndex);
+      if (split) { current.push(split[0]); pages.push(current.join("")); current = []; pending.unshift(split[1]); continue; }
+      if (current.length) { pages.push(current.join("")); current = []; pending.unshift(block); continue; }
+      const holder = document.createElement("div"); holder.innerHTML = block; oversized.push((holder.textContent || holder.firstElementChild?.tagName || "Object").trim().slice(0, 70)); current.push(block); pages.push(current.join("")); current = [];
+    }
+    if (current.length) pages.push(current.join("")); sheet.remove();
+    return { pages: pages.length ? pages : ["<p><br></p>"], oversized };
+  };
+
+  const captureFlowCaret = (flowId: string) => {
+    const selection = window.getSelection(); if (!selection?.rangeCount || !selection.isCollapsed) return null;
+    const range = selection.getRangeAt(0);
+    const entry = Array.from(bookEditors.current.entries()).find(([slotId, root]) => designerFlowIdentity(allPages.find((page) => page.slotId === slotId)!)?.id === flowId && root.contains(range.commonAncestorContainer));
+    if (!entry) return null;
+    const markerId = `designer-caret-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const marker = document.createElement("span"); marker.dataset.designerCaret = markerId; marker.contentEditable = "false"; marker.textContent = "\u200b";
+    range.insertNode(marker); range.setStartAfter(marker); range.collapse(true); selection.removeAllRanges(); selection.addRange(range);
+    pendingCaretMarker.current = markerId; return markerId;
+  };
+
+  async function reflowStory(flowId: string) {
+    const identity = pagesForFlow(flowId).map(designerFlowIdentity).find(Boolean) ?? (() => {
+      const stored = liveFlowStories.current[flowId]; return stored ? { id: stored.id, kind: stored.kind, chapterId: stored.chapterId, label: stored.kind === "chapter" ? `Chapter ${stored.chapterId}` : stored.kind === "preface" ? "Preface" : "About this book" } satisfies DesignerFlowIdentity : null;
+    })();
+    if (!identity) return;
+    const generation = (reflowGeneration.current.get(flowId) ?? 0) + 1; reflowGeneration.current.set(flowId, generation);
+    setSaveState("reflowing"); setMessage(`Reflowing ${identity.label} across A4 pages…`);
+    const suppliedHtml = pendingFlowHtml.current.get(flowId); pendingFlowHtml.current.delete(flowId);
+    const markerId = suppliedHtml === undefined ? captureFlowCaret(flowId) : null;
+    const activePages = pagesForFlow(flowId); const flowingHtml = suppliedHtml ?? collectFlowHtml(flowId);
+    const firstStyle = activePages[0] ? revisionFor(activePages[0]) : defaultDesignerRevision();
+    try {
+      const measured = await measureFlowPages(identity, flowingHtml, firstStyle);
+      if (reflowGeneration.current.get(flowId) !== generation) return;
+      const replacements = new Map(savedPages.map((page) => [page.slotId, page]));
+      const activeIds = activePages.map((page) => page.slotId);
+      const detached = [...(detachedPageSlots.current[flowId] ?? [])].filter((slotId) => !activeIds.includes(slotId));
+      const insertionCandidates = activeIds.map((slotId) => order.indexOf(slotId)).filter((index) => index >= 0);
+      const insertion = insertionCandidates.length ? Math.min(...insertionCandidates) : Math.max(0, order.indexOf("back"));
+      const nextIds: string[] = [];
+      measured.pages.forEach((body, pageIndex) => {
+        const existingDescriptor = activePages[pageIndex]; const recoveredId = !existingDescriptor ? detached.shift() : undefined;
+        const slotId = existingDescriptor?.slotId ?? recoveredId ?? `flow-${flowId}-${Date.now().toString(36)}-${pageIndex + 1}`;
+        const recovered = savedPages.find((page) => page.slotId === slotId);
+        const descriptor = existingDescriptor ?? (recovered ? { slotId, label: recovered.label, kind: "custom" as const, chapterId: identity.chapterId, pageIndex, flowStoryId: flowId, flowPageIndex: pageIndex, html: recovered.html } : { slotId, label: `${identity.label} · page ${pageIndex + 1}`, kind: "custom" as const, chapterId: identity.chapterId, pageIndex, flowStoryId: flowId, flowPageIndex: pageIndex, html: "" });
+        const style = recovered ?? (existingDescriptor ? revisionFor(existingDescriptor) : firstStyle);
+        const revision = { ...style, html: designerFlowPageHtml(project, identity, body, pageIndex, measured.pages.length), deleted: false, removedByReflow: false, intentionalBlank: false, manuallyEdited: true, layoutLocked: Boolean(style.layoutLocked), protectedAt: style.protectedAt || new Date().toISOString(), savedAt: new Date().toISOString() };
+        const override = { ...makeOverride(descriptor, revision, recovered), flowStoryId: flowId, flowPageIndex: pageIndex, pageIndex, removedByReflow: false };
+        replacements.set(slotId, override); liveBookDrafts.current[slotId] = override; liveBookHtml.current[slotId] = override.html; nextIds.push(slotId);
+      });
+      const removedIds = activePages.slice(measured.pages.length).map((page) => page.slotId);
+      removedIds.forEach((slotId) => { const existing = replacements.get(slotId); if (existing) replacements.set(slotId, { ...existing, deleted: true, removedByReflow: true, savedAt: new Date().toISOString() }); });
+      detachedPageSlots.current[flowId] = [...detached, ...removedIds].filter((slotId, index, values) => values.indexOf(slotId) === index && !nextIds.includes(slotId));
+      const flowIdsInOrder = order.filter((slotId) => designerFlowIdentity(allPages.find((page) => page.slotId === slotId) ?? replacements.get(slotId)!)?.id === flowId);
+      const nextOrder = order.filter((slotId) => !flowIdsInOrder.includes(slotId)); nextOrder.splice(insertion, 0, ...nextIds);
+      const cleanStoryHtml = flowingHtml.replace(/<span[^>]*data-designer-caret=["'][^"']+["'][^>]*>\u200b?<\/span>/gi, "");
+      const existingStory = liveFlowStories.current[flowId];
+      const batchStart = flowBatchStart.current.get(flowId);
+      if (batchStart !== undefined && batchStart !== cleanStoryHtml) rememberFlowHistory(flowId, batchStart);
+      flowBatchStart.current.delete(flowId);
+      liveFlowStories.current[flowId] = { id: flowId, kind: identity.kind, chapterId: identity.chapterId, html: cleanStoryHtml, pageSlotIds: nextIds, contentRevision: (existingStory?.contentRevision ?? 0) + 1, protectedAt: existingStory?.protectedAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
+      setFlowPageOverrides([...replacements.values()]); setFlowPageOrder(nextOrder);
+      setDirtyPages((current) => [...new Set([...current, ...nextIds, ...removedIds])]);
+      if (removedIds.includes(selectedId)) setSelectedId(nextIds.at(-1) ?? selectedId);
+      setSaveState("saving");
+      setMessage(`${identity.label} reflowed into ${nextIds.length} page${nextIds.length === 1 ? "" : "s"}.${measured.oversized.length ? " One oversized object needs review in Preflight." : " Cursor and formatting were preserved."}`);
+      if (markerId) pendingCaretMarker.current = markerId;
+    } catch (error) {
+      setSaveState("failed"); setMessage(error instanceof Error ? `Could not reflow ${identity.label}: ${error.message}. Your edited text is still safe.` : `Could not reflow ${identity.label}. Your edited text is still safe.`);
+    }
+  }
+
+  function scheduleStoryReflow(flowId: string, delay = 300, html?: string) {
+    const active = reflowTimers.current.get(flowId); if (active) window.clearTimeout(active);
+    if (html !== undefined) pendingFlowHtml.current.set(flowId, html);
+    const timer = window.setTimeout(() => { reflowTimers.current.delete(flowId); void reflowStory(flowId); }, delay);
+    reflowTimers.current.set(flowId, timer);
+  }
+
+  const rememberBeforeFlowInput = (slotId: string) => {
+    const descriptor = allPages.find((page) => page.slotId === slotId); const identity = descriptor ? designerFlowIdentity(descriptor) : null;
+    if (!identity) return;
+    const current = liveFlowStories.current[identity.id]?.html || collectFlowHtml(identity.id);
+    if (!flowBatchStart.current.has(identity.id)) flowBatchStart.current.set(identity.id, current);
+  };
+
+  const undoFlow = (flowId: string) => {
+    const stack = flowHistory.current.get(flowId) ?? []; const previous = stack.at(-1); if (previous === undefined) return false;
+    const current = liveFlowStories.current[flowId]?.html || collectFlowHtml(flowId);
+    flowHistory.current.set(flowId, stack.slice(0, -1)); flowFuture.current.set(flowId, [...(flowFuture.current.get(flowId) ?? []), current]);
+    const story = liveFlowStories.current[flowId]; if (story) liveFlowStories.current[flowId] = { ...story, html: previous, contentRevision: story.contentRevision + 1, updatedAt: new Date().toISOString() };
+    scheduleStoryReflow(flowId, 0, previous); setMessage("Undoing the last text edit and reflowing its pages…"); return true;
+  };
+
+  const redoFlow = (flowId: string) => {
+    const future = flowFuture.current.get(flowId) ?? []; const next = future.at(-1); if (next === undefined) return false;
+    const current = liveFlowStories.current[flowId]?.html || collectFlowHtml(flowId);
+    flowFuture.current.set(flowId, future.slice(0, -1)); flowHistory.current.set(flowId, [...(flowHistory.current.get(flowId) ?? []), current]);
+    const story = liveFlowStories.current[flowId]; if (story) liveFlowStories.current[flowId] = { ...story, html: next, contentRevision: story.contentRevision + 1, updatedAt: new Date().toISOString() };
+    scheduleStoryReflow(flowId, 0, next); setMessage("Redoing the text edit and reflowing its pages…"); return true;
+  };
+
+  useEffect(() => {
+    const handleDocumentHistory = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const flowRoot = target?.closest<HTMLElement>(".designer-continuous-editor[data-flow-story]");
+      const flowId = flowRoot?.dataset.flowStory;
+      if (!flowId) return;
+      event.preventDefault(); event.stopPropagation();
+      if (event.shiftKey) redoFlow(flowId); else undoFlow(flowId);
+    };
+    document.addEventListener("keydown", handleDocumentHistory, true);
+    return () => document.removeEventListener("keydown", handleDocumentHistory, true);
+  });
+
+  const boundaryTextNode = (container: HTMLElement, fromEnd: boolean) => {
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, { acceptNode: (node) => node.textContent?.length ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT });
+    let candidate: Text | null = null; while (walker.nextNode()) { candidate = walker.currentNode as Text; if (!fromEnd) break; } return candidate;
+  };
+
+  const handleFlowBoundaryKey = (event: ReactKeyboardEvent<HTMLDivElement>, slotId: string) => {
+    const descriptor = allPages.find((page) => page.slotId === slotId); const identity = descriptor ? designerFlowIdentity(descriptor) : null;
+    if (!identity) return;
+    const modifier = event.metaKey || event.ctrlKey;
+    if (modifier && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redoFlow(identity.id) : undoFlow(identity.id); return; }
+    if (!["Backspace", "Delete", "ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    const selection = window.getSelection(); if (!selection?.rangeCount || !selection.isCollapsed) return;
+    const range = selection.getRangeAt(0); const root = bookEditors.current.get(slotId); if (!root || !root.contains(range.commonAncestorContainer)) return;
+    const container = root.querySelector<HTMLElement>(".preview-body,.matter-page") ?? root;
+    if (!container.contains(range.commonAncestorContainer)) return;
+    const before = document.createRange(); before.selectNodeContents(container); before.setEnd(range.startContainer, range.startOffset);
+    const after = document.createRange(); after.selectNodeContents(container); after.setStart(range.startContainer, range.startOffset);
+    const atStart = before.toString().length === 0; const atEnd = after.toString().length === 0;
+    const pages = pagesForFlow(identity.id); const index = pages.findIndex((page) => page.slotId === slotId);
+    const backwards = event.key === "Backspace" || event.key === "ArrowLeft";
+    if ((backwards && !atStart) || (!backwards && !atEnd)) return;
+    const targetPage = pages[index + (backwards ? -1 : 1)]; if (!targetPage) return;
+    const targetRoot = bookEditors.current.get(targetPage.slotId); const targetContainer = targetRoot?.querySelector<HTMLElement>(".preview-body,.matter-page") ?? targetRoot; if (!targetRoot || !targetContainer) return;
+    event.preventDefault(); rememberBeforeFlowInput(targetPage.slotId);
+    const targetNode = boundaryTextNode(targetContainer, backwards);
+    if (!targetNode) return;
+    if (event.key === "Backspace") targetNode.deleteData(Math.max(0, targetNode.length - 1), 1);
+    if (event.key === "Delete") targetNode.deleteData(0, 1);
+    const nextRange = document.createRange(); nextRange.setStart(targetNode, backwards ? targetNode.length : 0); nextRange.collapse(true); selection.removeAllRanges(); selection.addRange(nextRange);
+    editor.current = targetRoot; setSelectedId(targetPage.slotId); rememberLiveHtml(targetPage.slotId, targetRoot.innerHTML);
+  };
+
   const balanceLayout = async (scope: "chapter" | "book") => {
     const targetChapterIds = scope === "book" ? project.chapters.map((chapter) => chapter.id) : selected.chapterId ? [selected.chapterId] : [];
     if (!targetChapterIds.length) { setMessage("Choose a chapter page before balancing this chapter."); return; }
@@ -3563,7 +3884,7 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
         const chapterPages = orderedPages.filter((page) => page.chapterId === chapterId && page.kind !== "custom" || page.chapterId === chapterId && page.kind === "custom");
         if (!chapter || !chapterPages.length) continue;
         const revisions = chapterPages.map((page) => ({ page, revision: revisionFor(page) })).filter(({ revision }) => !revision.deleted && !revision.intentionalBlank);
-        const protectedPages = revisions.filter(({ revision, page }) => revision.layoutLocked || revision.manuallyEdited || Boolean(designerDocument.protectedPages[page.slotId]));
+        const protectedPages = revisions.filter(({ revision }) => revision.layoutLocked);
         if (protectedPages.length) { locked += protectedPages.length; continue; }
         const combined = revisions.map(({ page, revision }) => flowBodyFromRenderedPage(bookEditors.current.get(page.slotId)?.innerHTML ?? revision.html)).join("");
         const figures = combined.match(/<figure\b[^>]*>[\s\S]*?<\/figure>/gi) ?? [];
@@ -3600,7 +3921,7 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
       const next = { ...project, designerPages: [...replacements.values()], designerPageOrder: nextOrder };
       await onCommit(next);
       setDirtyPages([]);
-      setMessage(`${balanced} chapter${balanced === 1 ? "" : "s"} balanced locally.${locked ? ` ${locked} manually edited page${locked === 1 ? " was" : "s were"} protected; reset those pages explicitly before reflowing them.` : ""} No AI tokens were used.`);
+      setMessage(`${balanced} chapter${balanced === 1 ? "" : "s"} balanced locally.${locked ? ` ${locked} layout-locked page${locked === 1 ? " was" : "s were"} left unchanged.` : ""} Manually edited text stayed protected from regeneration and still reflowed. No AI tokens were used.`);
     } catch (error) {
       setMessage(error instanceof Error ? `Layout balancing failed: ${error.message}` : "Layout balancing failed.");
     } finally { setBusy(false); }
@@ -3710,7 +4031,7 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
     await onCommit({ ...project, designerPages: [...savedPages.filter((page) => page.slotId !== selectedId), replacement] }); setDraft(replacement); setMessage("Previous page version restored.");
   };
   const resetPage = async () => {
-    const nextDocument = createDesignerDocumentV2(project.designerDocument); delete nextDocument.protectedPages[selectedId];
+    const nextDocument = currentDesignerDocument(); delete nextDocument.protectedPages[selectedId]; const identity = selected ? designerFlowIdentity(selected) : null; if (identity) delete nextDocument.protectedFlows[identity.id];
     await onCommit({ ...project, designerPages: savedPages.filter((page) => page.slotId !== selectedId), designerPageOrder: selected?.kind === "custom" ? order.filter((slotId) => slotId !== selectedId) : order, designerDocument: nextDocument });
     if (selected?.kind === "custom") setSelectedId(order.find((slotId) => slotId !== selectedId) ?? "cover"); else setDraft(defaultDesignerRevision(selected?.html));
   };
@@ -3738,7 +4059,7 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   };
   const masterKind = selected.kind === "chapter" ? (selected.pageIndex === 0 ? "chapter" : "body") : selected.kind === "frontmatter" || selected.kind === "backmatter" ? "body" : selected.kind;
   const saveMaster = async () => {
-    const nextDocument = createDesignerDocumentV2(project.designerDocument); const id = `master-${masterKind}`; const style = designerStyleFrom(draft) as Record<string, string | number | boolean | undefined>;
+    const nextDocument = currentDesignerDocument(); const id = `master-${masterKind}`; const style = designerStyleFrom(draft) as Record<string, string | number | boolean | undefined>;
     nextDocument.masters = [...nextDocument.masters.filter((master) => master.id !== id), { id, name: `${selected.label} master`, kind: masterKind === "custom" ? "custom" : masterKind, style, updatedAt: new Date().toISOString() }];
     await onCommit({ ...project, designerDocument: nextDocument }); setMessage(`${selected.label} design saved as its reusable master.`);
   };
@@ -3748,8 +4069,8 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
     const replacements = new Map(savedPages.map((page) => [page.slotId, page])); allPages.forEach((page) => { const existing = replacements.get(page.slotId); const base = hydrateDesignerRevision(existing, page.html); replacements.set(page.slotId, makeOverride(page, { ...base, fontFamily: draft.fontFamily, textColor: draft.textColor, savedAt: new Date().toISOString() }, existing)); });
     await onCommit({ ...project, designerPages: [...replacements.values()], designerPageOrder: order }); setMessage("Book-wide font and body colour replaced. A restore point was created first.");
   };
-  const updatePrintSettings = async (patch: Partial<DesignerDocumentV2["print"]>) => {
-    const nextDocument = createDesignerDocumentV2(project.designerDocument); nextDocument.print = { ...nextDocument.print, ...patch };
+  const updatePrintSettings = async (patch: Partial<DesignerDocumentV3["print"]>) => {
+    const nextDocument = currentDesignerDocument(); nextDocument.print = { ...nextDocument.print, ...patch };
     await onCommit({ ...project, designerDocument: nextDocument }); setMessage("A4 print settings saved.");
   };
   const selectCanvasObject = (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -3840,12 +4161,12 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   const activePageCount = orderedPages.filter((page) => !revisionFor(page).deleted).length;
   if (!selected) return null;
   return <div className="modal-backdrop designer-backdrop"><section className="designer-studio designer-studio-pro" role="dialog" aria-modal="true" aria-label="Designer Studio">
-    <header><div><p className="eyebrow">FINAL PRODUCTION</p><h2>Whole-book Designer</h2><span>The pages below are the same pages used by Preview and PDF.</span></div><div><button className="secondary" onClick={() => void previewWholeBook()} disabled={busy}>Preview</button><button className="primary" onClick={() => void saveRevision()} disabled={busy || !dirtyPages.includes(selectedId)}>{busy ? "Saving…" : dirtyPages.includes(selectedId) ? "Save page" : "Page saved"}</button><details className="designer-more-menu"><summary>More</summary><div><button onClick={runBookPreflight}>Check whole book</button><button onClick={() => void balanceLayout("book")} disabled={busy}>Balance layout</button><button onClick={() => void saveWholeBook()} disabled={busy}>Save whole book</button><button onClick={() => void addBlankPage()}>Add blank page</button><button onClick={() => void duplicatePage()}>Duplicate page</button></div></details><button className="designer-close" onClick={() => { if (!dirtyPages.length || window.confirm("Close Designer? Unsaved changes are safely kept on this device and will be restored next time.")) onClose(); }} aria-label="Close Designer Studio">×</button></div></header>
-    <div className={`designer-status save-${saveState}`}><span>◆</span><b>{message}</b><i>{saveState === "saving" ? "Saving…" : saveState === "offline" ? "Offline draft" : saveState === "failed" ? "Save failed" : "Saved"} · {dirtyPages.length ? `${dirtyPages.length} changed` : `${orderedPages.filter((page) => !revisionFor(page).deleted).length} pages`} · {selected.label}</i></div>
+    <header><div><p className="eyebrow">FINAL PRODUCTION</p><h2>Whole-book Designer</h2><span>Click any word to edit. Reading text flows onto new A4 pages automatically.</span></div><div><button className="secondary" onClick={() => void previewWholeBook()} disabled={busy}>Preview</button><button className="primary" onClick={() => void saveRevision()} disabled={busy || !dirtyPages.includes(selectedId)}>{busy ? "Saving…" : dirtyPages.includes(selectedId) ? "Save page" : "Page saved"}</button><details className="designer-more-menu"><summary>More</summary><div><button onClick={runBookPreflight}>Check whole book</button><button onClick={() => void balanceLayout("book")} disabled={busy}>Repaginate book</button><button onClick={() => void saveWholeBook()} disabled={busy}>Save whole book</button><button onClick={() => void addBlankPage()}>Add blank page</button><button onClick={() => void duplicatePage()}>Duplicate page</button></div></details><button className="designer-close" onClick={() => { if (!dirtyPages.length || window.confirm("Close Designer? Unsaved changes are safely kept on this device and will be restored next time.")) onClose(); }} aria-label="Close Designer Studio">×</button></div></header>
+    <div className={`designer-status save-${saveState}`}><span>◆</span><b>{message}</b><i>{saveState === "editing" ? "Editing…" : saveState === "reflowing" ? "Reflowing…" : saveState === "saving" ? "Saving…" : saveState === "offline" ? "Offline draft" : saveState === "failed" ? "Save failed" : "Saved"} · {dirtyPages.length ? `${dirtyPages.length} changed` : `${orderedPages.filter((page) => !revisionFor(page).deleted).length} pages`} · {selected.label}</i></div>
     <div className="designer-workspace designer-book-workspace"><aside className="designer-pages designer-book-nav"><p className="designer-nav-label">PAGE THUMBNAILS · DRAG TO REORDER</p><div className="designer-thumbnail-list">{orderedPages.filter((page) => !revisionFor(page).deleted).map((page, index) => <button draggable key={page.slotId} className={page.slotId === selectedId ? "active" : ""} onDragStart={() => { draggedPage.current = page.slotId; }} onDragOver={(event) => event.preventDefault()} onDrop={() => void dropPageAt(page.slotId)} onClick={() => selectAndReveal(page.slotId)}><span className={`designer-page-mini ${page.kind}`} style={{ backgroundColor: revisionFor(page).backgroundColor, backgroundImage: revisionFor(page).backgroundImageUrl ? `url(${revisionFor(page).backgroundImageUrl})` : undefined }}><i>{index + 1}</i><b>{page.kind === "chapter" ? page.chapterId : page.kind.slice(0, 1).toUpperCase()}</b></span><div><b>{page.label}</b><small>{revisionFor(page).manuallyEdited ? "Protected edit" : "Generated layout"}</small></div></button>)}</div></aside>
     <main className="designer-stage"><nav className="designer-toolbar designer-book-toolbar" onMouseDown={(event) => { if ((event.target as HTMLElement).closest("button")) event.preventDefault(); }}><button onClick={undo} disabled={!undoStack.length} title="Undo selected page">↶</button><button onClick={redo} disabled={!redoStack.length} title="Redo selected page">↷</button><select aria-label="Selected text font" defaultValue="Georgia" onChange={(event) => command("fontName", event.target.value)}><option>Georgia</option><option>Arial</option><option>Verdana</option><option>Trebuchet MS</option><option>Times New Roman</option><option>Noto Serif</option><option>Noto Sans Devanagari</option></select><select aria-label="Selected text size" defaultValue="3" onChange={(event) => command("fontSize", event.target.value)}><option value="1">Small</option><option value="3">Body</option><option value="5">Subheading</option><option value="7">Title</option></select><button className={formatState.bold ? "active" : ""} aria-pressed={formatState.bold} onClick={() => command("bold")}><b>B</b></button><button className={formatState.italic ? "active" : ""} aria-pressed={formatState.italic} onClick={() => command("italic")}><i>I</i></button><button className={formatState.underline ? "active" : ""} aria-pressed={formatState.underline} onClick={() => command("underline")}><u>U</u></button><button onClick={() => command("insertUnorderedList")}>• List</button><button className={formatState.align === "left" ? "active" : ""} onClick={() => command("justifyLeft")}>Left</button><button className={formatState.align === "center" ? "active" : ""} onClick={() => command("justifyCenter")}>Centre</button><button className={formatState.align === "right" ? "active" : ""} onClick={() => command("justifyRight")}>Right</button><label title="Text colour"><input type="color" defaultValue="#243b34" onChange={(event) => command("foreColor", event.target.value)}/></label><label title="Highlight"><input type="color" defaultValue="#f6e6ad" onChange={(event) => command("hiliteColor", event.target.value)}/></label><span className={`designer-selection-count${textSelection ? " active" : ""}`}>{textSelection ? `${textSelection.words} word${textSelection.words === 1 ? "" : "s"} selected` : "Select text to format"}</span><button onClick={addTextBox}>＋ Text</button><details className="designer-add-menu"><summary>＋ Element</summary><div><button onClick={() => addShape("rectangle")}>Rectangle</button><button onClick={() => addShape("circle")}>Circle</button><button onClick={() => addShape("line")}>Divider</button><button onClick={() => addShape("callout")}>Callout</button></div></details><label className="designer-zoom">Zoom<select value={zoom} onChange={(event) => setZoom(Number(event.target.value))}><option value="50">50%</option><option value="75">75%</option><option value="100">100%</option><option value="125">125%</option><option value="150">150%</option></select></label><button className="balance-chapter-button" onClick={() => void balanceLayout("chapter")} disabled={!selected.chapterId || busy}>Balance this chapter</button></nav>
     {textSelection && <div className="designer-selection-toolbar" role="toolbar" aria-label="Selected text formatting" style={{ left: textSelection.left, top: textSelection.top }} onMouseDown={(event) => event.preventDefault()}><span>{textSelection.words} selected</span><button className={formatState.bold ? "active" : ""} onClick={() => command("bold")} title="Bold"><b>B</b></button><button className={formatState.italic ? "active" : ""} onClick={() => command("italic")} title="Italic"><i>I</i></button><button className={formatState.underline ? "active" : ""} onClick={() => command("underline")} title="Underline"><u>U</u></button><button onClick={() => command("hiliteColor", "#f6e6ad")} title="Highlight selected text">Highlight</button></div>}
-      <div className={`designer-canvas-wrap designer-whole-book-canvas${printSettings.facingPages ? " facing" : ""}`} style={{ "--designer-zoom": zoom / 100 } as CSSProperties} aria-label="Editable whole book">{orderedPages.filter((page) => !revisionFor(page).deleted).map((page, index) => { const revision = revisionFor(page); const fill = page.kind === "chapter" ? designerPageFill(liveBookHtml.current[page.slotId] ?? revision.html, project.audience, page.pageIndex === 0) : { ratio: 100, label: "Designed page", tone: "balanced" }; const pageBackground = { backgroundImage: revision.backgroundImageUrl ? `url(${revision.backgroundImageUrl})` : undefined, backgroundSize: revision.backgroundSize === "repeat" ? "auto" : revision.backgroundSize, backgroundRepeat: revision.backgroundSize === "repeat" ? "repeat" : "no-repeat", backgroundPosition: revision.backgroundPosition, opacity: revision.backgroundOpacity }; const pageBorder = revision.borderStyle === "none" ? undefined : { inset: `${revision.borderInset}px`, border: `${revision.borderWidth}px ${revision.borderStyle} ${revision.borderColor}`, borderRadius: `${revision.borderRadius}px` }; const pageClasses = designerPageClasses(project, page); const isDirty = dirtyPages.includes(page.slotId); return <section className={`designer-flow-page${page.slotId === selectedId ? " selected" : ""}`} id={`designer-flow-${page.slotId}`} key={page.slotId}><div className="designer-flow-page-meta"><span>PAGE {index + 1}</span><b>{page.label}</b>{revision.manuallyEdited && <em title="Protected from automatic reflow">Protected</em>}<button className={`page-fill-badge ${fill.tone}`} onClick={() => { setSelectedId(page.slotId); setPanel("preflight"); }}>{fill.label} · {fill.ratio}%</button><button className={`page-save-button ${isDirty ? "dirty" : "saved"}`} disabled={busy || !isDirty} onClick={() => void savePageById(page.slotId)}>{busy && page.slotId === selectedId ? "Saving…" : isDirty ? "Save page" : "Saved"}</button></div><article className={`designer-canvas-page book-sheet ${bookClasses} ${pageClasses}${revision.backgroundImageUrl ? " has-background" : ""}${revision.intentionalBlank ? " blank" : ""}`} style={{ backgroundColor: revision.backgroundColor }} onMouseDown={() => setSelectedId(page.slotId)}><div className="designer-background-layer" style={pageBackground}/><div className="designer-border-layer" style={pageBorder}/>{printSettings.safeArea && <div className="designer-safe-area" style={{ top: printSettings.topMargin, right: index % 2 ? printSettings.innerMargin : printSettings.outerMargin, bottom: printSettings.bottomMargin, left: index % 2 ? printSettings.outerMargin : printSettings.innerMargin }}/>}<div className={`designer-watermark-layer${revision.watermarkRepeat ? " repeat" : ""}`} style={{ opacity: revision.watermarkOpacity, left: `${revision.watermarkX}%`, top: `${revision.watermarkY}%`, transform: `translate(-50%,-50%) rotate(${revision.watermarkRotation}deg)`, display: revision.watermarkVisible ? "grid" : "none" }}>{Array.from({ length: revision.watermarkRepeat ? 6 : 1 }, (_, watermarkIndex) => <span key={watermarkIndex}>{revision.watermarkImageUrl && <img src={revision.watermarkImageUrl} alt="Custom watermark"/>}{revision.watermarkText}</span>)}</div>{!revision.intentionalBlank && revision.contentVisible && <div ref={(node) => { if (node) { bookEditors.current.set(page.slotId, node); if (page.slotId === selectedId) editor.current = node; } else bookEditors.current.delete(page.slotId); }} className="designer-editable-content" style={pageStyleFor(revision)} contentEditable suppressContentEditableWarning onFocus={() => setSelectedId(page.slotId)} onInput={(event) => rememberLiveHtml(page.slotId, event.currentTarget.innerHTML)} onClick={selectCanvasObject} onPointerDown={startObjectDrag} dangerouslySetInnerHTML={{ __html: liveBookHtml.current[page.slotId] ?? revision.html }}/>}<div className="designer-global-page-number">Book page {index+1} of {activePageCount}</div></article>{revision.intentionalBlank && <div className="intentional-blank-label">INTENTIONAL BLANK PAGE</div>}</section>; })}{pendingBackground && <div className="designer-background-choice" role="dialog" aria-modal="true" aria-labelledby="background-choice-title"><img src={pendingBackground.url} alt="Uploaded background preview"/><div><p className="eyebrow">BACKGROUND READY</p><h3 id="background-choice-title">Where should this background be used?</h3><span>{pendingBackground.fileName}</span><div className="designer-background-choice-actions"><button onClick={() => void applyUploadedBackground("page")} disabled={busy}>This page only</button><button className="primary" onClick={() => void applyUploadedBackground("book")} disabled={busy}>All pages</button></div><button className="designer-choice-cancel" onClick={() => { setPendingBackground(null); setMessage("Background choice cancelled. The current design was not changed."); }} disabled={busy}>Cancel</button></div></div>}</div>
+      <div className={`designer-canvas-wrap designer-whole-book-canvas${printSettings.facingPages ? " facing" : ""}`} style={{ "--designer-zoom": zoom / 100 } as CSSProperties} aria-label="Editable whole book">{orderedPages.filter((page) => !revisionFor(page).deleted).map((page, index) => { const revision = revisionFor(page); const identity = designerFlowIdentity(page); const fill = identity ? designerPageFill(liveBookHtml.current[page.slotId] ?? revision.html, project.audience, (page.flowPageIndex ?? page.pageIndex) === 0) : { ratio: 100, label: "Designed page", tone: "balanced" }; const pageBackground = { backgroundImage: revision.backgroundImageUrl ? `url(${revision.backgroundImageUrl})` : undefined, backgroundSize: revision.backgroundSize === "repeat" ? "auto" : revision.backgroundSize, backgroundRepeat: revision.backgroundSize === "repeat" ? "repeat" : "no-repeat", backgroundPosition: revision.backgroundPosition, opacity: revision.backgroundOpacity }; const pageBorder = revision.borderStyle === "none" ? undefined : { inset: `${revision.borderInset}px`, border: `${revision.borderWidth}px ${revision.borderStyle} ${revision.borderColor}`, borderRadius: `${revision.borderRadius}px` }; const pageClasses = designerPageClasses(project, page); const isDirty = dirtyPages.includes(page.slotId); return <section className={`designer-flow-page${page.slotId === selectedId ? " selected" : ""}`} id={`designer-flow-${page.slotId}`} key={page.slotId}><div className="designer-flow-page-meta"><span>PAGE {index + 1}</span><b>{page.label}</b>{revision.manuallyEdited && <em title="Protected from regeneration; its text still reflows">Protected text</em>}<button className={`page-fill-badge ${fill.tone}`} onClick={() => { setSelectedId(page.slotId); setPanel("preflight"); }}>{fill.label} · {fill.ratio}%</button><button className={`page-save-button ${isDirty ? "dirty" : "saved"}`} disabled={busy || !isDirty} onClick={() => void savePageById(page.slotId)}>{busy && page.slotId === selectedId ? "Saving…" : isDirty ? "Save page" : "Saved"}</button></div><article className={`designer-canvas-page book-sheet ${bookClasses} ${pageClasses}${revision.backgroundImageUrl ? " has-background" : ""}${revision.intentionalBlank ? " blank" : ""}`} style={{ backgroundColor: revision.backgroundColor }} onMouseDown={() => setSelectedId(page.slotId)}><div className="designer-background-layer" style={pageBackground}/><div className="designer-border-layer" style={pageBorder}/>{printSettings.safeArea && <div className="designer-safe-area" style={{ top: printSettings.topMargin, right: index % 2 ? printSettings.innerMargin : printSettings.outerMargin, bottom: printSettings.bottomMargin, left: index % 2 ? printSettings.outerMargin : printSettings.innerMargin }}/>}<div className={`designer-watermark-layer${revision.watermarkRepeat ? " repeat" : ""}`} style={{ opacity: revision.watermarkOpacity, left: `${revision.watermarkX}%`, top: `${revision.watermarkY}%`, transform: `translate(-50%,-50%) rotate(${revision.watermarkRotation}deg)`, display: revision.watermarkVisible ? "grid" : "none" }}>{Array.from({ length: revision.watermarkRepeat ? 6 : 1 }, (_, watermarkIndex) => <span key={watermarkIndex}>{revision.watermarkImageUrl && <img src={revision.watermarkImageUrl} alt="Custom watermark"/>}{revision.watermarkText}</span>)}</div>{!revision.intentionalBlank && revision.contentVisible && <div ref={(node) => { if (node) { bookEditors.current.set(page.slotId, node); if (page.slotId === selectedId) editor.current = node; } else bookEditors.current.delete(page.slotId); }} className={`designer-editable-content${identity ? " designer-continuous-editor" : ""}`} data-flow-story={identity?.id} style={pageStyleFor(revision)} contentEditable suppressContentEditableWarning onFocus={() => setSelectedId(page.slotId)} onBeforeInput={() => rememberBeforeFlowInput(page.slotId)} onCompositionStart={() => composingEditors.current.add(page.slotId)} onCompositionEnd={(event) => { composingEditors.current.delete(page.slotId); rememberLiveHtml(page.slotId, event.currentTarget.innerHTML); }} onKeyDown={(event) => handleFlowBoundaryKey(event, page.slotId)} onInput={(event) => rememberLiveHtml(page.slotId, event.currentTarget.innerHTML)} onClick={selectCanvasObject} onPointerDown={startObjectDrag} dangerouslySetInnerHTML={{ __html: liveBookHtml.current[page.slotId] ?? revision.html }}/>}<div className="designer-global-page-number">Book page {index+1} of {activePageCount}</div></article>{revision.intentionalBlank && <div className="intentional-blank-label">INTENTIONAL BLANK PAGE</div>}</section>; })}{pendingBackground && <div className="designer-background-choice" role="dialog" aria-modal="true" aria-labelledby="background-choice-title"><img src={pendingBackground.url} alt="Uploaded background preview"/><div><p className="eyebrow">BACKGROUND READY</p><h3 id="background-choice-title">Where should this background be used?</h3><span>{pendingBackground.fileName}</span><div className="designer-background-choice-actions"><button onClick={() => void applyUploadedBackground("page")} disabled={busy}>This page only</button><button className="primary" onClick={() => void applyUploadedBackground("book")} disabled={busy}>All pages</button></div><button className="designer-choice-cancel" onClick={() => { setPendingBackground(null); setMessage("Background choice cancelled. The current design was not changed."); }} disabled={busy}>Cancel</button></div></div>}</div>
     </main>
     <aside className="designer-controls designer-inspector"><nav>{(["page","text","image","layers","styles","print","preflight"] as const).map((name) => <button key={name} className={panel === name ? "active" : ""} onClick={() => setPanel(name)}>{name}</button>)}</nav>
       {panel === "page" && <><section><h3>Page structure</h3><label className="designer-check"><input type="checkbox" checked={draft.intentionalBlank} onChange={(event) => changeDraft({ intentionalBlank: event.target.checked })}/> Intentional blank</label><label className="designer-check"><input type="checkbox" checked={draft.layoutLocked} onChange={(event) => changeDraft({ layoutLocked: event.target.checked })}/> Lock this page during reflow</label><label className="designer-check"><input type="checkbox" checked={draft.deleted} onChange={(event) => changeDraft({ deleted: event.target.checked })}/> Remove from final book</label><div className="designer-row"><button onClick={() => void movePage(-1)}>Move up</button><button onClick={() => void movePage(1)}>Move down</button></div><div className="designer-row" style={{marginTop:"8px"}}><label style={{display:"flex",alignItems:"center",gap:"6px",fontSize:"9px",fontWeight:"800"}}>Move to #<input key={selectedId} id="move-page-input" type="number" min="1" max={order.length} defaultValue={order.indexOf(selectedId)+1} style={{width:"60px",border:"1px solid #d6ccbd",padding:"6px",textAlign:"center"}} /></label><button onClick={() => { const el=document.getElementById("move-page-input") as HTMLInputElement | null; const v=Number(el?.value); if(v>=1 && v<=order.length) void movePageTo(v-1); }} disabled={busy} style={{padding:"7px 10px",fontSize:"9px",fontWeight:"800"}}>Go</button></div><div style={{fontSize:"8px",color:"var(--muted)",marginTop:"4px"}}>Page {order.indexOf(selectedId)+1} of {order.length} — built-in number system</div><button onClick={() => void deletePage()} disabled={busy} style={{marginTop:"8px",background:"#a9322e",color:"white",borderColor:"#a9322e",width:"100%",padding:"9px",fontWeight:"800"}}>Delete page</button>{selected.chapterId && <button className="primary" onClick={() => void balanceLayout("chapter")} disabled={busy || draft.layoutLocked}>Balance this chapter</button>}</section><section><h3>Page layout</h3><label>Margins <span>{draft.pagePadding}px</span><input type="range" min="28" max="100" value={draft.pagePadding} onChange={(event) => changeDraft({ pagePadding: Number(event.target.value) })}/></label><label>Columns<select value={draft.columns} onChange={(event) => changeDraft({ columns: Number(event.target.value) })}><option value="1">One</option><option value="2">Two</option></select></label><label>Column gap <span>{draft.columnGap}px</span><input type="range" min="12" max="60" value={draft.columnGap} onChange={(event) => changeDraft({ columnGap: Number(event.target.value) })}/></label></section><section><h3>Page border</h3><label>Style<select value={draft.borderStyle} onChange={(event) => changeDraft({ borderStyle: event.target.value as DesignerPageRevision["borderStyle"] })}><option value="none">None</option><option value="solid">Single</option><option value="double">Double</option><option value="dashed">Decorative dashed</option></select></label><div className="designer-row"><label>Colour<input type="color" value={draft.borderColor} onChange={(event) => changeDraft({ borderColor: event.target.value })}/></label><label>Width<input type="number" min="1" max="12" value={draft.borderWidth} onChange={(event) => changeDraft({ borderWidth: Number(event.target.value) })}/></label></div><label>Inset <span>{draft.borderInset}px</span><input type="range" min="0" max="50" value={draft.borderInset} onChange={(event) => changeDraft({ borderInset: Number(event.target.value) })}/></label><label>Corner radius <span>{draft.borderRadius}px</span><input type="range" min="0" max="60" value={draft.borderRadius} onChange={(event) => changeDraft({ borderRadius: Number(event.target.value) })}/></label></section><section><h3>Background</h3><label>Colour<input type="color" value={draft.backgroundColor} onChange={(event) => changeDraft({ backgroundColor: event.target.value })}/></label><label className="designer-upload">{busy ? "Uploading background…" : "Upload background"}<input type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={(event) => void uploadBackground(event)}/></label><p className="designer-help">After upload, choose whether to use the background on this page only or throughout the whole book.</p><label>Fit<select value={draft.backgroundSize} onChange={(event) => changeDraft({ backgroundSize: event.target.value as DesignerPageRevision["backgroundSize"] })}><option value="cover">Cover</option><option value="contain">Contain</option><option value="auto">Original size</option><option value="repeat">Tile</option></select></label><label>Opacity <span>{Math.round(draft.backgroundOpacity * 100)}%</span><input type="range" min="0" max="1" step=".05" value={draft.backgroundOpacity} onChange={(event) => changeDraft({ backgroundOpacity: Number(event.target.value) })}/></label>{draft.backgroundImageUrl && <button onClick={() => changeDraft({ backgroundImageKey: undefined, backgroundImageUrl: undefined })}>Remove background</button>}</section></>}
