@@ -137,7 +137,7 @@ type CanvaPageVersion = {
 type CanvaPageOverride = {
   slotId: string;
   label: string;
-  kind: "cover" | "contents" | "chapter" | "back";
+  kind: "cover" | "contents" | "frontmatter" | "chapter" | "backmatter" | "back";
   chapterId?: number;
   pageIndex?: number;
   active: boolean;
@@ -188,7 +188,7 @@ type DesignerPageRevision = {
 type DesignerPageOverride = DesignerPageRevision & {
   slotId: string;
   label: string;
-  kind: "cover" | "contents" | "chapter" | "back" | "custom";
+  kind: "cover" | "contents" | "frontmatter" | "chapter" | "backmatter" | "back" | "custom";
   chapterId?: number;
   pageIndex?: number;
   history: DesignerPageRevision[];
@@ -2812,14 +2812,17 @@ function AiRoundTrip({ request, onChange, onClose, onApply }: { request: { actio
   return <div className="modal-backdrop"><section className={`ai-modal${illustrationRequest ? " illustration-prompt-modal" : ""}`}><header><div><p className="eyebrow">{illustrationRequest ? "CHAPTER-CONTEXT IMAGE PROMPT" : "CHATGPT EDIT"}</p><h2>{request.action}</h2></div><button onClick={onClose}>×</button></header>{illustrationRequest ? <><p className="illustration-prompt-help">This prompt already contains the selected chapter’s meaning, concepts, reader age, visual world, accuracy rules and print requirements. Generate the image, then upload it from the Design tab.</p><label className="illustration-prompt-label">Complete prompt<textarea readOnly value={request.prompt}/></label><footer><button className="secondary" onClick={() => void copyPrompt()}>Copy prompt</button><button className="primary" onClick={() => void openChatGPT()}>Generate in ChatGPT ↗</button><button className="secondary" onClick={onClose}>Close</button></footer></> : <><ol><li><button className="primary" onClick={openChatGPT}>Open this edit in ChatGPT ↗</button><small>The instruction is also copied automatically.</small></li><li><label>Paste ChatGPT’s revised text here<textarea value={request.result} onChange={(e) => onChange(e.target.value)} placeholder="Paste the approved revision…"/></label></li></ol><footer><button className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={!request.result.trim()} onClick={onApply}>Apply and save revision</button></footer></>}</section></div>;
 }
 
-function paginateReaderHtml(html: string, audience: string) {
+function paginateReaderHtml(html: string, audience: string, targetPages?: number) {
   const clean = authorialReaderHtml(html);
   const flattened = clean.replace(/<\/?(?:section|div)\b[^>]*>/gi, "");
   const rawBlocks = flattened.match(/<(h2|h3|p|blockquote|ul|ol|b)\b[^>]*>[\s\S]*?<\/\1>/gi) ?? [flattened];
   const age = childAgeBand(audience);
   // Calibrated to the usable A4 text area. The opening sheet reserves room for
   // the chapter title; continuation sheets use more of the page.
-  const pageCapacity = age === "7-9" ? 2550 : age === "13-15" ? 3000 : 2750;
+  const naturalPageCapacity = age === "7-9" ? 2550 : age === "13-15" ? 3000 : 2750;
+  const totalTextLength = flattened.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().length;
+  const targetCapacity = targetPages ? Math.max(220, Math.ceil(totalTextLength / Math.max(1, targetPages - .22))) : naturalPageCapacity;
+  const pageCapacity = Math.min(naturalPageCapacity, targetCapacity);
   const firstPageCapacity = Math.round(pageCapacity * .78);
   const textLength = (block: string) => block.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().length;
   const blockWeightFor = (block: string) => textLength(block) + (/^<h[23]/i.test(block) ? 145 : 0) + (/^<(?:ul|ol|blockquote)/i.test(block) ? 100 : 0);
@@ -2953,7 +2956,56 @@ function paginateReaderHtml(html: string, audience: string) {
     weight += blockWeight;
   }
   if (current.length) pages.push(current.join(""));
-  return pages.length ? pages : [clean];
+  const fitted = pages.length ? pages : [clean];
+  if (!targetPages) return fitted;
+
+  const target = Math.max(1, Math.round(targetPages));
+  const visibleLength = (value: string) => value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().length;
+  const splitPage = (value: string): [string, string] | null => {
+    const blocks = value.match(/<(h2|h3|p|blockquote|ul|ol|b)\b[^>]*>[\s\S]*?<\/\1>/gi) ?? [];
+    if (blocks.length > 2) {
+      const total = blocks.reduce((sum, block) => sum + visibleLength(block), 0);
+      let running = 0;
+      let splitAt = 1;
+      for (let index = 0; index < blocks.length - 1; index += 1) {
+        running += visibleLength(blocks[index]);
+        splitAt = index + 1;
+        if (running >= total / 2) break;
+      }
+      if (splitAt === 1 && /^<h[23]/i.test(blocks[0])) splitAt = 2;
+      if (splitAt < blocks.length) return [blocks.slice(0, splitAt).join(""), blocks.slice(splitAt).join("")];
+    }
+    const heading = blocks[0] && /^<h[23]/i.test(blocks[0]) ? blocks[0] : "";
+    const proseSource = heading ? blocks.slice(1).join(" ") : value;
+    const prose = proseSource.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    const words = prose.split(/\s+/).filter(Boolean);
+    if (words.length < 2) return null;
+    const midpoint = Math.ceil(words.length / 2);
+    return [`${heading}<p>${escapeHtml(words.slice(0, midpoint).join(" "))}</p>`, `<p>${escapeHtml(words.slice(midpoint).join(" "))}</p>`];
+  };
+  while (fitted.length < target) {
+    const candidates = fitted.map((value, index) => ({ index, length: visibleLength(value) })).sort((a, b) => b.length - a.length);
+    let didSplit = false;
+    for (const candidate of candidates) {
+      const split = splitPage(fitted[candidate.index]);
+      if (!split) continue;
+      fitted.splice(candidate.index, 1, split[0], split[1]);
+      didSplit = true;
+      break;
+    }
+    if (!didSplit) break;
+  }
+  while (fitted.length > target) {
+    let smallestIndex = 0;
+    let smallestWeight = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < fitted.length - 1; index += 1) {
+      const weight = visibleLength(fitted[index]) + visibleLength(fitted[index + 1]);
+      if (weight < smallestWeight) { smallestWeight = weight; smallestIndex = index; }
+    }
+    fitted.splice(smallestIndex, 2, `${fitted[smallestIndex]}${fitted[smallestIndex + 1]}`);
+  }
+  while (fitted.length < target) fitted.push("<p></p>");
+  return fitted;
 }
 
 function readerTextLength(html: string) {
@@ -3020,7 +3072,7 @@ function Preview({ project, exportBusy, pdfProgress, onClose, onDownload }: { pr
 type DesignerBasePage = {
   slotId: string;
   label: string;
-  kind: "cover" | "contents" | "chapter" | "back";
+  kind: "cover" | "contents" | "frontmatter" | "chapter" | "backmatter" | "back";
   chapterId?: number;
   pageIndex?: number;
   html: string;
@@ -3030,27 +3082,36 @@ function designerBasePages(project: Project): DesignerBasePage[] {
   const printable = printableChapters(project.chapters);
   const pages: DesignerBasePage[] = [
     { slotId: "cover", label: "Front cover", kind: "cover", html: `<div class="cover-edition">IKS BOOK STUDIO · ${escapeHtml(project.audience.toUpperCase())}</div><h1>${escapeHtml(project.title)}</h1><span>An illustrated book shaped from your source</span><b>✦</b>` },
+    { slotId: "half-title", label: "Title page", kind: "frontmatter", html: `<div class="matter-page"><span>TITLE PAGE</span><h1>${escapeHtml(project.title)}</h1><p>An illustrated adaptation for ${escapeHtml(project.audience)}</p></div>` },
+    { slotId: "copyright", label: "Copyright", kind: "frontmatter", html: `<div class="matter-page matter-page-small"><span>PUBLICATION DETAILS</span><h2>${escapeHtml(project.title)}</h2><p>Prepared in IKS Book Studio. All text, images and permissions should be reviewed by the publisher before printing.</p></div>` },
+    { slotId: "dedication", label: "Dedication", kind: "frontmatter", html: `<div class="matter-page matter-page-centred"><span>DEDICATION</span><p>For every curious reader who asks thoughtful questions and carries knowledge forward.</p></div>` },
     { slotId: "contents", label: "Contents page", kind: "contents", html: `<span>CONTENTS</span><h2>Inside this book</h2><ol>${printable.chapters.map((chapter, index) => `<li><b>${String(index + 1).padStart(2, "0")}</b><span>${escapeHtml(chapter.title)}</span><i>${isPublishApproved(chapter) ? `${chapter.pages} pages` : "In progress"}</i></li>`).join("")}</ol>` },
+    { slotId: "preface", label: "Preface", kind: "frontmatter", html: `<div class="matter-page"><span>PREFACE</span><h2>How to use this book</h2><p>Read slowly, pause at unfamiliar ideas, and use the questions and activities to connect each chapter with everyday life.</p></div>` },
   ];
   printable.chapters.forEach((chapter) => {
-    const textPages = chapter.importValidated && chapter.importedPages?.length ? chapter.importedPages.map((page) => page.body) : paginateReaderHtml(chapter.body, project.audience);
+    const plannedPageCount = Math.max(1, chapter.pages || 1);
+    const separateIllustration = Boolean(chapter.imageUrl) && plannedPageCount > 1;
+    const textPageTarget = Math.max(1, plannedPageCount - (separateIllustration ? 1 : 0));
+    const textPages = chapter.importValidated && chapter.importedPages?.length ? chapter.importedPages.map((page) => page.body) : paginateReaderHtml(chapter.body, project.audience, textPageTarget);
+    const chapterPageCount = chapter.importValidated && chapter.importedPages?.length ? textPages.length : plannedPageCount;
     textPages.forEach((body, pageIndex) => pages.push({
       slotId: `chapter-${chapter.id}-page-${pageIndex + 1}`,
       label: `Chapter ${chapter.id} · page ${pageIndex + 1}`,
       kind: "chapter",
       chapterId: chapter.id,
       pageIndex,
-      html: `<header class="print-chapter-header"><span>CHAPTER ${chapter.id}</span><span>PAGE ${pageIndex + 1} OF ${textPages.length}</span></header>${pageIndex === 0 ? `<h2>${escapeHtml(chapter.title)}</h2>` : `<p class="continued-title">${escapeHtml(chapter.title)} · continued</p>`}<div class="preview-body">${body}</div>${chapter.imageUrl && pageIndex === textPages.length - 1 ? `<figure class="chapter-image"><img src="${escapeHtml(chapter.imageUrl)}" alt="${escapeHtml(chapter.imageAlt || chapter.title)}"><figcaption>${escapeHtml(chapter.imageCaption || chapter.title)}</figcaption></figure>` : ""}<footer class="sheet-number"><span>${escapeHtml(project.title)}</span><span>${pageIndex + 1}</span></footer>`,
+      html: `<header class="print-chapter-header"><span>CHAPTER ${chapter.id}</span><span>PAGE ${pageIndex + 1} OF ${chapterPageCount}</span></header>${pageIndex === 0 ? `<h2>${escapeHtml(chapter.title)}</h2>` : `<p class="continued-title">${escapeHtml(chapter.title)} · continued</p>`}<div class="preview-body">${body}</div>${chapter.imageUrl && !separateIllustration && pageIndex === textPages.length - 1 ? `<figure class="chapter-image"><img src="${escapeHtml(chapter.imageUrl)}" alt="${escapeHtml(chapter.imageAlt || chapter.title)}"><figcaption>${escapeHtml(chapter.imageCaption || chapter.title)}</figcaption></figure>` : ""}<footer class="sheet-number"><span>${escapeHtml(project.title)}</span><span>${pageIndex + 1}</span></footer>`,
     }));
-    if (chapter.imageUrl && !textPages.some((body) => body.includes(chapter.imageUrl!))) pages.push({
+    if (separateIllustration && !chapter.importValidated) pages.push({
       slotId: `chapter-${chapter.id}-page-${textPages.length + 1}`,
       label: `Chapter ${chapter.id} · illustration`,
       kind: "chapter",
       chapterId: chapter.id,
       pageIndex: textPages.length,
-      html: `<header class="print-chapter-header"><span>CHAPTER ${chapter.id}</span><span>PAGE ${textPages.length + 1} OF ${textPages.length + 1}</span></header><figure class="chapter-image designer-full-figure"><img src="${escapeHtml(chapter.imageUrl)}" alt="${escapeHtml(chapter.imageAlt || chapter.title)}"><figcaption>${escapeHtml(chapter.imageCaption || chapter.title)}</figcaption></figure><footer class="sheet-number"><span>${escapeHtml(project.title)}</span><span>${textPages.length + 1}</span></footer>`,
+      html: `<header class="print-chapter-header"><span>CHAPTER ${chapter.id}</span><span>PAGE ${textPages.length + 1} OF ${chapterPageCount}</span></header><figure class="chapter-image designer-full-figure"><img src="${escapeHtml(chapter.imageUrl!)}" alt="${escapeHtml(chapter.imageAlt || chapter.title)}"><figcaption>${escapeHtml(chapter.imageCaption || chapter.title)}</figcaption></figure><footer class="sheet-number"><span>${escapeHtml(project.title)}</span><span>${textPages.length + 1}</span></footer>`,
     });
   });
+  pages.push({ slotId: "about-book", label: "About this book", kind: "backmatter", html: `<div class="matter-page"><span>ABOUT THIS BOOK</span><h2>${escapeHtml(project.title)}</h2><p>This edition was shaped for ${escapeHtml(project.audience.toLowerCase())}, with chapter-by-chapter explanations, visual thinking and room for reflection.</p></div>` });
   pages.push({ slotId: "back", label: "Back cover", kind: "back", html: "<span>A FINAL THOUGHT</span><h2>Keep wondering</h2><p>The most powerful ideas do not end on the last page. They grow when we ask careful questions, notice new connections and share what we discover.</p><p>Carry one idea from this book into the world—and see where it leads.</p>" });
   return pages;
 }
@@ -3062,6 +3123,8 @@ function designerBookClasses(project: Project) {
 function designerPageClasses(project: Project, page: { kind: string; chapterId?: number }) {
   if (page.kind === "cover") return "preview-cover";
   if (page.kind === "contents") return "preview-page contents-page";
+  if (page.kind === "frontmatter") return "preview-page designer-matter-sheet frontmatter";
+  if (page.kind === "backmatter") return "preview-page designer-matter-sheet backmatter";
   if (page.kind === "back") return "preview-page backmatter";
   const ageClass = `age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}`;
   return `preview-page chapter-preview ${ageClass}`;
@@ -3125,7 +3188,9 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   });
   const customPages = savedPages.filter((page) => page.kind === "custom");
   const allPages = [...basePages, ...customPages.map((page) => ({ slotId: page.slotId, label: page.label, kind: "custom" as const, chapterId: page.chapterId, pageIndex: page.pageIndex, html: page.html }))];
-  const order = [...(project.designerPageOrder ?? []).filter((slotId) => allPages.some((page) => page.slotId === slotId)), ...allPages.map((page) => page.slotId).filter((slotId) => !(project.designerPageOrder ?? []).includes(slotId))];
+  const storedOrder = (project.designerPageOrder ?? []).filter((slotId) => allPages.some((page) => page.slotId === slotId));
+  const hasCompletePhysicalOrder = basePages.every((page) => storedOrder.includes(page.slotId));
+  const order = hasCompletePhysicalOrder ? [...storedOrder, ...allPages.map((page) => page.slotId).filter((slotId) => !storedOrder.includes(slotId))] : allPages.map((page) => page.slotId);
   const orderedPages = order.map((slotId) => allPages.find((page) => page.slotId === slotId)!).filter(Boolean);
   const [selectedId, setSelectedId] = useState(order[0] ?? "cover");
   const selected = orderedPages.find((page) => page.slotId === selectedId) ?? orderedPages[0];
@@ -3141,6 +3206,7 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   const [assets, setAssets] = useState<DesignerAsset[]>(() => createDesignerDocumentV2(project.designerDocument).assets);
   const [layerTick, setLayerTick] = useState(0);
   const [formatState, setFormatState] = useState({ bold: false, italic: false, underline: false, align: "left" });
+  const [textSelection, setTextSelection] = useState<{ text: string; words: number; left: number; top: number } | null>(null);
   const designerDocument = createDesignerDocumentV2(project.designerDocument);
   const printSettings = designerDocument.print;
   const [undoStack, setUndoStack] = useState<DesignerPageRevision[]>([]);
@@ -3154,6 +3220,7 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   const liveBookDrafts = useRef<Record<string, DesignerPageRevision>>({});
   const [dirtyPages, setDirtyPages] = useState<string[]>([]);
   const selectedNode = useRef<HTMLElement | null>(null);
+  const savedTextRange = useRef<Range | null>(null);
   const draggedPage = useRef<string | null>(null);
 
   useEffect(() => {
@@ -3161,7 +3228,7 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
     const next = hydrateDesignerRevision(nextSaved, selected?.html);
     const liveDraft = liveBookDrafts.current[selected?.slotId ?? ""];
     setDraft(liveDraft ?? { ...next, html: liveBookHtml.current[selected?.slotId ?? ""] ?? next.html });
-    setUndoStack([]); setRedoStack([]); setIssues([]); setPendingBackground(null); setSelectedObject("page"); setObjectInspector(inspectDesignerElement(null)); selectedNode.current = null;
+    setUndoStack([]); setRedoStack([]); setIssues([]); setPendingBackground(null); setSelectedObject("page"); setObjectInspector(inspectDesignerElement(null)); setTextSelection(null); savedTextRange.current = null; selectedNode.current = null;
   }, [selectedId]);
 
   const currentSnapshot = () => ({ ...draft, html: editor.current?.innerHTML ?? draft.html });
@@ -3199,7 +3266,13 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
     setUndoStack((stack) => [...stack, draft]); setRedoStack((stack) => stack.slice(0, -1)); liveBookDrafts.current[selectedId] = next; setDraft(next);
   };
   const command = (name: string, value?: string) => {
-    const root = editor.current; if (!root) return; root.focus(); const selection = window.getSelection(); if (!selection?.rangeCount) return; const range = selection.getRangeAt(0); if (!root.contains(range.commonAncestorContainer)) return;
+    const root = editor.current; if (!root) return;
+    root.focus({ preventScroll: true });
+    const selection = window.getSelection();
+    const storedRange = savedTextRange.current;
+    if (selection && storedRange && root.contains(storedRange.commonAncestorContainer)) { selection.removeAllRanges(); selection.addRange(storedRange.cloneRange()); }
+    if (!selection?.rangeCount) return;
+    const range = selection.getRangeAt(0); if (!root.contains(range.commonAncestorContainer)) return;
     setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]); setRedoStack([]);
     const anchor = (selection.anchorNode instanceof HTMLElement ? selection.anchorNode : selection.anchorNode?.parentElement)?.closest("h1,h2,h3,p,li,blockquote,div") as HTMLElement | null;
     const inlineStyles: Record<string, string> = {};
@@ -3212,7 +3285,7 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
     if (name === "hiliteColor" && value) inlineStyles.backgroundColor = value;
     if (Object.keys(inlineStyles).length) {
       const span = document.createElement("span"); Object.assign(span.style, inlineStyles);
-      if (range.collapsed && anchor) Object.assign(anchor.style, inlineStyles); else { span.append(range.extractContents()); range.insertNode(span); selection.removeAllRanges(); const next = document.createRange(); next.selectNodeContents(span); selection.addRange(next); }
+      if (range.collapsed && anchor) Object.assign(anchor.style, inlineStyles); else { span.append(range.extractContents()); range.insertNode(span); selection.removeAllRanges(); const next = document.createRange(); next.selectNodeContents(span); selection.addRange(next); savedTextRange.current = next.cloneRange(); }
     } else if (name.startsWith("justify") && anchor) anchor.style.textAlign = name.replace("justify", "").toLowerCase();
     else if (name === "formatBlock" && value && anchor) { const replacement = document.createElement(value); replacement.innerHTML = anchor.innerHTML; Array.from(anchor.attributes).forEach((attribute) => replacement.setAttribute(attribute.name, attribute.value)); anchor.replaceWith(replacement); }
     else if (name === "insertUnorderedList" && anchor) { const list = document.createElement("ul"); const item = document.createElement("li"); item.innerHTML = anchor.innerHTML; list.append(item); anchor.replaceWith(list); }
@@ -3366,7 +3439,25 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   });
 
   useEffect(() => {
-    const update = () => { const selection = window.getSelection(); const node = selection?.anchorNode instanceof HTMLElement ? selection.anchorNode : selection?.anchorNode?.parentElement; if (!node || !editor.current?.contains(node)) return; const style = getComputedStyle(node); setFormatState({ bold: Number(style.fontWeight) >= 600, italic: style.fontStyle === "italic", underline: style.textDecorationLine.includes("underline"), align: style.textAlign || "left" }); };
+    const update = () => {
+      const selection = window.getSelection();
+      if (!selection?.rangeCount) return;
+      const range = selection.getRangeAt(0);
+      const activeEntry = Array.from(bookEditors.current.entries()).find(([, root]) => root.contains(range.commonAncestorContainer));
+      if (!activeEntry) return;
+      const [slotId, root] = activeEntry;
+      editor.current = root;
+      if (slotId !== selectedId) setSelectedId(slotId);
+      const node = selection.anchorNode instanceof HTMLElement ? selection.anchorNode : selection.anchorNode?.parentElement;
+      if (!node) return;
+      const style = getComputedStyle(node);
+      setFormatState({ bold: Number(style.fontWeight) >= 600, italic: style.fontStyle === "italic", underline: style.textDecorationLine.includes("underline"), align: style.textAlign || "left" });
+      if (range.collapsed || !selection.toString().trim()) { setTextSelection(null); savedTextRange.current = range.cloneRange(); return; }
+      const rect = range.getBoundingClientRect();
+      const selectedText = selection.toString().trim();
+      savedTextRange.current = range.cloneRange();
+      setTextSelection({ text: selectedText, words: selectedText.split(/\s+/).filter(Boolean).length, left: Math.max(12, Math.min(window.innerWidth - 300, rect.left + rect.width / 2 - 140)), top: Math.max(72, rect.top - 48) });
+    };
     document.addEventListener("selectionchange", update);
     return () => document.removeEventListener("selectionchange", update);
   }, [selectedId]);
@@ -3645,7 +3736,7 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
       captureSelectedPageHtml(); setMessage(`${style.name} style applied to the selected paragraph.`);
     } else changeDraft({ fontFamily: style.fontFamily, fontSize: style.fontSize, lineHeight: style.lineHeight, textColor: style.color });
   };
-  const masterKind = selected.kind === "chapter" ? (selected.pageIndex === 0 ? "chapter" : "body") : selected.kind;
+  const masterKind = selected.kind === "chapter" ? (selected.pageIndex === 0 ? "chapter" : "body") : selected.kind === "frontmatter" || selected.kind === "backmatter" ? "body" : selected.kind;
   const saveMaster = async () => {
     const nextDocument = createDesignerDocumentV2(project.designerDocument); const id = `master-${masterKind}`; const style = designerStyleFrom(draft) as Record<string, string | number | boolean | undefined>;
     nextDocument.masters = [...nextDocument.masters.filter((master) => master.id !== id), { id, name: `${selected.label} master`, kind: masterKind === "custom" ? "custom" : masterKind, style, updatedAt: new Date().toISOString() }];
@@ -3752,7 +3843,8 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
     <header><div><p className="eyebrow">FINAL PRODUCTION</p><h2>Whole-book Designer</h2><span>The pages below are the same pages used by Preview and PDF.</span></div><div><button className="secondary" onClick={() => void previewWholeBook()} disabled={busy}>Preview</button><button className="primary" onClick={() => void saveRevision()} disabled={busy || !dirtyPages.includes(selectedId)}>{busy ? "Saving…" : dirtyPages.includes(selectedId) ? "Save page" : "Page saved"}</button><details className="designer-more-menu"><summary>More</summary><div><button onClick={runBookPreflight}>Check whole book</button><button onClick={() => void balanceLayout("book")} disabled={busy}>Balance layout</button><button onClick={() => void saveWholeBook()} disabled={busy}>Save whole book</button><button onClick={() => void addBlankPage()}>Add blank page</button><button onClick={() => void duplicatePage()}>Duplicate page</button></div></details><button className="designer-close" onClick={() => { if (!dirtyPages.length || window.confirm("Close Designer? Unsaved changes are safely kept on this device and will be restored next time.")) onClose(); }} aria-label="Close Designer Studio">×</button></div></header>
     <div className={`designer-status save-${saveState}`}><span>◆</span><b>{message}</b><i>{saveState === "saving" ? "Saving…" : saveState === "offline" ? "Offline draft" : saveState === "failed" ? "Save failed" : "Saved"} · {dirtyPages.length ? `${dirtyPages.length} changed` : `${orderedPages.filter((page) => !revisionFor(page).deleted).length} pages`} · {selected.label}</i></div>
     <div className="designer-workspace designer-book-workspace"><aside className="designer-pages designer-book-nav"><p className="designer-nav-label">PAGE THUMBNAILS · DRAG TO REORDER</p><div className="designer-thumbnail-list">{orderedPages.filter((page) => !revisionFor(page).deleted).map((page, index) => <button draggable key={page.slotId} className={page.slotId === selectedId ? "active" : ""} onDragStart={() => { draggedPage.current = page.slotId; }} onDragOver={(event) => event.preventDefault()} onDrop={() => void dropPageAt(page.slotId)} onClick={() => selectAndReveal(page.slotId)}><span className={`designer-page-mini ${page.kind}`} style={{ backgroundColor: revisionFor(page).backgroundColor, backgroundImage: revisionFor(page).backgroundImageUrl ? `url(${revisionFor(page).backgroundImageUrl})` : undefined }}><i>{index + 1}</i><b>{page.kind === "chapter" ? page.chapterId : page.kind.slice(0, 1).toUpperCase()}</b></span><div><b>{page.label}</b><small>{revisionFor(page).manuallyEdited ? "Protected edit" : "Generated layout"}</small></div></button>)}</div></aside>
-    <main className="designer-stage"><nav className="designer-toolbar designer-book-toolbar"><button onClick={undo} disabled={!undoStack.length} title="Undo selected page">↶</button><button onClick={redo} disabled={!redoStack.length} title="Redo selected page">↷</button><select aria-label="Selected text font" defaultValue="Georgia" onChange={(event) => command("fontName", event.target.value)}><option>Georgia</option><option>Arial</option><option>Verdana</option><option>Trebuchet MS</option><option>Times New Roman</option><option>Noto Serif</option><option>Noto Sans Devanagari</option></select><select aria-label="Selected text size" defaultValue="3" onChange={(event) => command("fontSize", event.target.value)}><option value="1">Small</option><option value="3">Body</option><option value="5">Subheading</option><option value="7">Title</option></select><button className={formatState.bold ? "active" : ""} aria-pressed={formatState.bold} onClick={() => command("bold")}><b>B</b></button><button className={formatState.italic ? "active" : ""} aria-pressed={formatState.italic} onClick={() => command("italic")}><i>I</i></button><button className={formatState.underline ? "active" : ""} aria-pressed={formatState.underline} onClick={() => command("underline")}><u>U</u></button><button onClick={() => command("insertUnorderedList")}>• List</button><button className={formatState.align === "left" ? "active" : ""} onClick={() => command("justifyLeft")}>Left</button><button className={formatState.align === "center" ? "active" : ""} onClick={() => command("justifyCenter")}>Centre</button><button className={formatState.align === "right" ? "active" : ""} onClick={() => command("justifyRight")}>Right</button><label title="Text colour"><input type="color" defaultValue="#243b34" onChange={(event) => command("foreColor", event.target.value)}/></label><label title="Highlight"><input type="color" defaultValue="#f6e6ad" onChange={(event) => command("hiliteColor", event.target.value)}/></label><button onClick={addTextBox}>＋ Text</button><details className="designer-add-menu"><summary>＋ Element</summary><div><button onClick={() => addShape("rectangle")}>Rectangle</button><button onClick={() => addShape("circle")}>Circle</button><button onClick={() => addShape("line")}>Divider</button><button onClick={() => addShape("callout")}>Callout</button></div></details><label className="designer-zoom">Zoom<select value={zoom} onChange={(event) => setZoom(Number(event.target.value))}><option value="50">50%</option><option value="75">75%</option><option value="100">100%</option><option value="125">125%</option><option value="150">150%</option></select></label><button className="balance-chapter-button" onClick={() => void balanceLayout("chapter")} disabled={!selected.chapterId || busy}>Balance this chapter</button></nav>
+    <main className="designer-stage"><nav className="designer-toolbar designer-book-toolbar" onMouseDown={(event) => { if ((event.target as HTMLElement).closest("button")) event.preventDefault(); }}><button onClick={undo} disabled={!undoStack.length} title="Undo selected page">↶</button><button onClick={redo} disabled={!redoStack.length} title="Redo selected page">↷</button><select aria-label="Selected text font" defaultValue="Georgia" onChange={(event) => command("fontName", event.target.value)}><option>Georgia</option><option>Arial</option><option>Verdana</option><option>Trebuchet MS</option><option>Times New Roman</option><option>Noto Serif</option><option>Noto Sans Devanagari</option></select><select aria-label="Selected text size" defaultValue="3" onChange={(event) => command("fontSize", event.target.value)}><option value="1">Small</option><option value="3">Body</option><option value="5">Subheading</option><option value="7">Title</option></select><button className={formatState.bold ? "active" : ""} aria-pressed={formatState.bold} onClick={() => command("bold")}><b>B</b></button><button className={formatState.italic ? "active" : ""} aria-pressed={formatState.italic} onClick={() => command("italic")}><i>I</i></button><button className={formatState.underline ? "active" : ""} aria-pressed={formatState.underline} onClick={() => command("underline")}><u>U</u></button><button onClick={() => command("insertUnorderedList")}>• List</button><button className={formatState.align === "left" ? "active" : ""} onClick={() => command("justifyLeft")}>Left</button><button className={formatState.align === "center" ? "active" : ""} onClick={() => command("justifyCenter")}>Centre</button><button className={formatState.align === "right" ? "active" : ""} onClick={() => command("justifyRight")}>Right</button><label title="Text colour"><input type="color" defaultValue="#243b34" onChange={(event) => command("foreColor", event.target.value)}/></label><label title="Highlight"><input type="color" defaultValue="#f6e6ad" onChange={(event) => command("hiliteColor", event.target.value)}/></label><span className={`designer-selection-count${textSelection ? " active" : ""}`}>{textSelection ? `${textSelection.words} word${textSelection.words === 1 ? "" : "s"} selected` : "Select text to format"}</span><button onClick={addTextBox}>＋ Text</button><details className="designer-add-menu"><summary>＋ Element</summary><div><button onClick={() => addShape("rectangle")}>Rectangle</button><button onClick={() => addShape("circle")}>Circle</button><button onClick={() => addShape("line")}>Divider</button><button onClick={() => addShape("callout")}>Callout</button></div></details><label className="designer-zoom">Zoom<select value={zoom} onChange={(event) => setZoom(Number(event.target.value))}><option value="50">50%</option><option value="75">75%</option><option value="100">100%</option><option value="125">125%</option><option value="150">150%</option></select></label><button className="balance-chapter-button" onClick={() => void balanceLayout("chapter")} disabled={!selected.chapterId || busy}>Balance this chapter</button></nav>
+    {textSelection && <div className="designer-selection-toolbar" role="toolbar" aria-label="Selected text formatting" style={{ left: textSelection.left, top: textSelection.top }} onMouseDown={(event) => event.preventDefault()}><span>{textSelection.words} selected</span><button className={formatState.bold ? "active" : ""} onClick={() => command("bold")} title="Bold"><b>B</b></button><button className={formatState.italic ? "active" : ""} onClick={() => command("italic")} title="Italic"><i>I</i></button><button className={formatState.underline ? "active" : ""} onClick={() => command("underline")} title="Underline"><u>U</u></button><button onClick={() => command("hiliteColor", "#f6e6ad")} title="Highlight selected text">Highlight</button></div>}
       <div className={`designer-canvas-wrap designer-whole-book-canvas${printSettings.facingPages ? " facing" : ""}`} style={{ "--designer-zoom": zoom / 100 } as CSSProperties} aria-label="Editable whole book">{orderedPages.filter((page) => !revisionFor(page).deleted).map((page, index) => { const revision = revisionFor(page); const fill = page.kind === "chapter" ? designerPageFill(liveBookHtml.current[page.slotId] ?? revision.html, project.audience, page.pageIndex === 0) : { ratio: 100, label: "Designed page", tone: "balanced" }; const pageBackground = { backgroundImage: revision.backgroundImageUrl ? `url(${revision.backgroundImageUrl})` : undefined, backgroundSize: revision.backgroundSize === "repeat" ? "auto" : revision.backgroundSize, backgroundRepeat: revision.backgroundSize === "repeat" ? "repeat" : "no-repeat", backgroundPosition: revision.backgroundPosition, opacity: revision.backgroundOpacity }; const pageBorder = revision.borderStyle === "none" ? undefined : { inset: `${revision.borderInset}px`, border: `${revision.borderWidth}px ${revision.borderStyle} ${revision.borderColor}`, borderRadius: `${revision.borderRadius}px` }; const pageClasses = designerPageClasses(project, page); const isDirty = dirtyPages.includes(page.slotId); return <section className={`designer-flow-page${page.slotId === selectedId ? " selected" : ""}`} id={`designer-flow-${page.slotId}`} key={page.slotId}><div className="designer-flow-page-meta"><span>PAGE {index + 1}</span><b>{page.label}</b>{revision.manuallyEdited && <em title="Protected from automatic reflow">Protected</em>}<button className={`page-fill-badge ${fill.tone}`} onClick={() => { setSelectedId(page.slotId); setPanel("preflight"); }}>{fill.label} · {fill.ratio}%</button><button className={`page-save-button ${isDirty ? "dirty" : "saved"}`} disabled={busy || !isDirty} onClick={() => void savePageById(page.slotId)}>{busy && page.slotId === selectedId ? "Saving…" : isDirty ? "Save page" : "Saved"}</button></div><article className={`designer-canvas-page book-sheet ${bookClasses} ${pageClasses}${revision.backgroundImageUrl ? " has-background" : ""}${revision.intentionalBlank ? " blank" : ""}`} style={{ backgroundColor: revision.backgroundColor }} onMouseDown={() => setSelectedId(page.slotId)}><div className="designer-background-layer" style={pageBackground}/><div className="designer-border-layer" style={pageBorder}/>{printSettings.safeArea && <div className="designer-safe-area" style={{ top: printSettings.topMargin, right: index % 2 ? printSettings.innerMargin : printSettings.outerMargin, bottom: printSettings.bottomMargin, left: index % 2 ? printSettings.outerMargin : printSettings.innerMargin }}/>}<div className={`designer-watermark-layer${revision.watermarkRepeat ? " repeat" : ""}`} style={{ opacity: revision.watermarkOpacity, left: `${revision.watermarkX}%`, top: `${revision.watermarkY}%`, transform: `translate(-50%,-50%) rotate(${revision.watermarkRotation}deg)`, display: revision.watermarkVisible ? "grid" : "none" }}>{Array.from({ length: revision.watermarkRepeat ? 6 : 1 }, (_, watermarkIndex) => <span key={watermarkIndex}>{revision.watermarkImageUrl && <img src={revision.watermarkImageUrl} alt="Custom watermark"/>}{revision.watermarkText}</span>)}</div>{!revision.intentionalBlank && revision.contentVisible && <div ref={(node) => { if (node) { bookEditors.current.set(page.slotId, node); if (page.slotId === selectedId) editor.current = node; } else bookEditors.current.delete(page.slotId); }} className="designer-editable-content" style={pageStyleFor(revision)} contentEditable suppressContentEditableWarning onFocus={() => setSelectedId(page.slotId)} onInput={(event) => rememberLiveHtml(page.slotId, event.currentTarget.innerHTML)} onClick={selectCanvasObject} onPointerDown={startObjectDrag} dangerouslySetInnerHTML={{ __html: liveBookHtml.current[page.slotId] ?? revision.html }}/>}<div className="designer-global-page-number">Book page {index+1} of {activePageCount}</div></article>{revision.intentionalBlank && <div className="intentional-blank-label">INTENTIONAL BLANK PAGE</div>}</section>; })}{pendingBackground && <div className="designer-background-choice" role="dialog" aria-modal="true" aria-labelledby="background-choice-title"><img src={pendingBackground.url} alt="Uploaded background preview"/><div><p className="eyebrow">BACKGROUND READY</p><h3 id="background-choice-title">Where should this background be used?</h3><span>{pendingBackground.fileName}</span><div className="designer-background-choice-actions"><button onClick={() => void applyUploadedBackground("page")} disabled={busy}>This page only</button><button className="primary" onClick={() => void applyUploadedBackground("book")} disabled={busy}>All pages</button></div><button className="designer-choice-cancel" onClick={() => { setPendingBackground(null); setMessage("Background choice cancelled. The current design was not changed."); }} disabled={busy}>Cancel</button></div></div>}</div>
     </main>
     <aside className="designer-controls designer-inspector"><nav>{(["page","text","image","layers","styles","print","preflight"] as const).map((name) => <button key={name} className={panel === name ? "active" : ""} onClick={() => setPanel(name)}>{name}</button>)}</nav>
@@ -3794,20 +3886,21 @@ function CanvaPreview({ project, exportBusy, pdfProgress, onClose, onDownload, o
   const typographyClass = `typography-${normalizedTitle(project.fontTheme).replace(/[^a-z]+/g, "-")}`;
   const watermarkSlug = normalizedTitle(project.pageWatermark).replace(/[^a-z]+/g, "-");
   const ageClass = `age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}`;
-  const chapterSheets = printable.chapters.flatMap((chapter) => {
+  type CanvaChapterSheet = { kind: "chapter"; chapter: Chapter; body: string; pageIndex: number; pageCount: number; imageUrl?: string; imageCaption?: string; imageAlt?: string };
+  const chapterSheets: CanvaChapterSheet[] = printable.chapters.flatMap((chapter): CanvaChapterSheet[] => {
     if (chapter.importValidated && chapter.importedPages?.length) return chapter.importedPages.map((page, index) => ({ kind: "chapter" as const, chapter, body: page.body, pageIndex: index, pageCount: chapter.importedPages!.length, imageUrl: page.imageUrl, imageCaption: page.imageCaption, imageAlt: page.imageAlt }));
-    const pages = paginateReaderHtml(chapter.body, project.audience);
-    const age = childAgeBand(project.audience);
-    const shareLimit = age === "7-9" ? 1500 : age === "13-15" ? 1750 : 1625;
-    const shareIllustration = Boolean(chapter.imageUrl) && readerTextLength(pages[pages.length - 1] ?? "") <= shareLimit;
-    const pageCount = pages.length + (chapter.imageUrl && !shareIllustration ? 1 : 0);
-    const text = pages.map((body, index) => ({ kind: "chapter" as const, chapter, body, pageIndex: index, pageCount, imageUrl: shareIllustration && index === pages.length - 1 ? chapter.imageUrl : undefined, imageCaption: shareIllustration && index === pages.length - 1 ? chapter.imageCaption : undefined, imageAlt: shareIllustration && index === pages.length - 1 ? chapter.imageAlt : undefined }));
-    return chapter.imageUrl && !shareIllustration ? [...text, { kind: "chapter" as const, chapter, body: "", pageIndex: pages.length, pageCount, imageUrl: chapter.imageUrl, imageCaption: chapter.imageCaption, imageAlt: chapter.imageAlt }] : text;
+    const pageCount = Math.max(1, chapter.pages || 1);
+    const separateIllustration = Boolean(chapter.imageUrl) && pageCount > 1;
+    const textTarget = Math.max(1, pageCount - (separateIllustration ? 1 : 0));
+    const pages = paginateReaderHtml(chapter.body, project.audience, textTarget);
+    const text = pages.map((body, index) => ({ kind: "chapter" as const, chapter, body, pageIndex: index, pageCount, imageUrl: !separateIllustration && index === pages.length - 1 ? chapter.imageUrl : undefined, imageCaption: !separateIllustration && index === pages.length - 1 ? chapter.imageCaption : undefined, imageAlt: !separateIllustration && index === pages.length - 1 ? chapter.imageAlt : undefined }));
+    return separateIllustration ? [...text, { kind: "chapter" as const, chapter, body: "", pageIndex: pages.length, pageCount, imageUrl: chapter.imageUrl, imageCaption: chapter.imageCaption, imageAlt: chapter.imageAlt }] : text;
   });
-  const baseSheets: ({ kind: "cover" | "contents" | "back" } | (typeof chapterSheets)[number])[] = [{ kind: "cover" }, { kind: "contents" }, ...chapterSheets, { kind: "back" }];
+  type CanvaMatterSheet = { kind: "cover" } | { kind: "half-title" } | { kind: "copyright" } | { kind: "dedication" } | { kind: "contents" } | { kind: "preface" } | { kind: "about-book" } | { kind: "back" };
+  const baseSheets: (CanvaMatterSheet | CanvaChapterSheet)[] = [{ kind: "cover" }, { kind: "half-title" }, { kind: "copyright" }, { kind: "dedication" }, { kind: "contents" }, { kind: "preface" }, ...chapterSheets, { kind: "about-book" }, { kind: "back" }];
   type BaseSheet = (typeof baseSheets)[number];
   type Sheet = BaseSheet | { kind: "custom"; designerPage: DesignerPageOverride };
-  const baseSlotId = (sheet: BaseSheet) => sheet.kind === "cover" || sheet.kind === "contents" || sheet.kind === "back" ? sheet.kind : `chapter-${sheet.chapter.id}-page-${sheet.pageIndex + 1}`;
+  const baseSlotId = (sheet: BaseSheet) => sheet.kind !== "chapter" ? sheet.kind : `chapter-${sheet.chapter.id}-page-${sheet.pageIndex + 1}`;
   const customSheets: Sheet[] = (project.designerPages ?? []).filter((page) => page.kind === "custom" && !page.deleted).map((designerPage) => ({ kind: "custom", designerPage }));
   const availableSheets: Sheet[] = [...baseSheets.filter((sheet) => !(project.designerPages ?? []).find((page) => page.slotId === baseSlotId(sheet))?.deleted), ...customSheets];
   const desiredOrder = project.designerPageOrder ?? [];
@@ -3820,7 +3913,12 @@ function CanvaPreview({ project, exportBusy, pdfProgress, onClose, onDownload, o
   const slotFor = (sheet: Sheet): Omit<CanvaPageOverride, "active" | "current" | "history"> => {
     if (sheet.kind === "custom") return { slotId: sheet.designerPage.slotId, label: sheet.designerPage.label, kind: "chapter", chapterId: sheet.designerPage.chapterId, pageIndex: sheet.designerPage.pageIndex };
     if (sheet.kind === "cover") return { slotId: "cover", label: "Front cover", kind: "cover" };
+    if (sheet.kind === "half-title") return { slotId: "half-title", label: "Title page", kind: "frontmatter" };
+    if (sheet.kind === "copyright") return { slotId: "copyright", label: "Copyright", kind: "frontmatter" };
+    if (sheet.kind === "dedication") return { slotId: "dedication", label: "Dedication", kind: "frontmatter" };
     if (sheet.kind === "contents") return { slotId: "contents", label: "Contents page", kind: "contents" };
+    if (sheet.kind === "preface") return { slotId: "preface", label: "Preface", kind: "frontmatter" };
+    if (sheet.kind === "about-book") return { slotId: "about-book", label: "About this book", kind: "backmatter" };
     if (sheet.kind === "back") return { slotId: "back", label: "Back cover", kind: "back" };
     return { slotId: `chapter-${sheet.chapter.id}-page-${sheet.pageIndex + 1}`, label: `Chapter ${sheet.chapter.id} · page ${sheet.pageIndex + 1}`, kind: "chapter", chapterId: sheet.chapter.id, pageIndex: sheet.pageIndex };
   };
@@ -3840,7 +3938,12 @@ function CanvaPreview({ project, exportBusy, pdfProgress, onClose, onDownload, o
     const base = `book-sheet ${worldClass} ${pageClass} ${borderClass} ${typographyClass}`;
     if (sheet.kind === "custom") return renderDesignerSheet(sheet.designerPage, key);
     if (sheet.kind === "cover") return <article data-page-slot={slot.slotId} className={`${base} preview-cover`} key={key}><div className="cover-edition">IKS BOOK STUDIO · {project.audience.toUpperCase()}</div><h1>{project.title}</h1><span>An illustrated book shaped from your source</span><b>✦</b>{unresolved.length > 0 && <small className="draft-status">Working preview · {unresolved.length} chapter{unresolved.length === 1 ? "" : "s"} still in progress</small>}</article>;
+    if (sheet.kind === "half-title") return <article data-page-slot={slot.slotId} className={`${base} preview-page designer-matter-sheet`} key={key}><div className="matter-page"><span>TITLE PAGE</span><h1>{project.title}</h1><p>An illustrated adaptation for {project.audience}</p></div></article>;
+    if (sheet.kind === "copyright") return <article data-page-slot={slot.slotId} className={`${base} preview-page designer-matter-sheet`} key={key}><div className="matter-page matter-page-small"><span>PUBLICATION DETAILS</span><h2>{project.title}</h2><p>Prepared in IKS Book Studio. All text, images and permissions should be reviewed by the publisher before printing.</p></div></article>;
+    if (sheet.kind === "dedication") return <article data-page-slot={slot.slotId} className={`${base} preview-page designer-matter-sheet`} key={key}><div className="matter-page matter-page-centred"><span>DEDICATION</span><p>For every curious reader who asks thoughtful questions and carries knowledge forward.</p></div></article>;
     if (sheet.kind === "contents") return <article data-page-slot={slot.slotId} className={`${base} preview-page contents-page`} key={key}><span>CONTENTS</span><h2>Inside this book</h2><ol>{printable.chapters.map((chapter, index) => <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{isPublishApproved(chapter) ? `${chapter.pages} pages` : "In progress"}</i></li>)}</ol></article>;
+    if (sheet.kind === "preface") return <article data-page-slot={slot.slotId} className={`${base} preview-page designer-matter-sheet`} key={key}><div className="matter-page"><span>PREFACE</span><h2>How to use this book</h2><p>Read slowly, pause at unfamiliar ideas, and use the questions and activities to connect each chapter with everyday life.</p></div></article>;
+    if (sheet.kind === "about-book") return <article data-page-slot={slot.slotId} className={`${base} preview-page designer-matter-sheet backmatter`} key={key}><div className="matter-page"><span>ABOUT THIS BOOK</span><h2>{project.title}</h2><p>This edition was shaped for {project.audience.toLowerCase()}, with chapter-by-chapter explanations, visual thinking and room for reflection.</p></div></article>;
     if (sheet.kind === "back") return <article data-page-slot={slot.slotId} className={`${base} preview-page backmatter`} key={key}><span>A FINAL THOUGHT</span><h2>Keep wondering</h2><p>The most powerful ideas do not end on the last page. They grow when we ask careful questions, notice new connections and share what we discover.</p><p>Carry one idea from this book into the world—and see where it leads.</p></article>;
     const image = Boolean(sheet.imageUrl) && !sheet.body;
     const combined = Boolean(sheet.imageUrl) && Boolean(sheet.body);

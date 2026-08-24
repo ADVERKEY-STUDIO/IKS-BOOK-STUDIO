@@ -129,6 +129,20 @@ test("Designer preview and PDF preserve the shared 794 by 1123 A4 layout", () =>
   assert.match(page, /await saveWholeBook\(\);[\s\S]*onPreview\(\)/);
 });
 
+test("Designer materializes the complete planned book and preserves Word-style text ranges", () => {
+  assert.match(page, /paginateReaderHtml\(chapter\.body, project\.audience, textPageTarget\)/);
+  assert.match(page, /slotId: "half-title"/);
+  assert.match(page, /slotId: "copyright"/);
+  assert.match(page, /slotId: "dedication"/);
+  assert.match(page, /slotId: "preface"/);
+  assert.match(page, /slotId: "about-book"/);
+  assert.match(page, /hasCompletePhysicalOrder/);
+  assert.match(page, /savedTextRange/);
+  assert.match(page, /designer-selection-toolbar/);
+  assert.match(page, /designer-selection-count/);
+  assert.match(css, /designer-editable-content::selection/);
+});
+
 test("Designer uses the final publication template and saves individual pages", () => {
   assert.match(page, /function designerBookClasses/);
   assert.match(page, /function designerPageClasses/);
