@@ -3503,6 +3503,81 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   const duplicateObject = () => { const node = selectedNode.current; if (!node) return; const clone = node.cloneNode(true) as HTMLElement; clone.classList.remove("designer-object-selected"); node.after(clone); captureSelectedPageHtml(); };
   const deleteObject = () => { selectedNode.current?.remove(); selectedNode.current = null; setSelectedObject("page"); captureSelectedPageHtml(); };
   const addTextBox = () => { editor.current?.insertAdjacentHTML("beforeend", '<div class="designer-free-text" style="position:relative;padding:12px;border:1px solid #d7cbb8;min-height:48px">Edit this text box</div>'); captureSelectedPageHtml(); setMessage("Text box added. Select it to move, resize or style it."); };
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const addFreeImage = async (file: File) => {
+    try {
+      setBusy(true);
+      const image = await uploadAsset(file);
+      const html = `<div class="designer-free-image" data-free-image="true" style="position:absolute;left:80px;top:80px;width:280px;height:180px;cursor:move;z-index:3;border:1px dashed #b7a98e;background:#fff;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.08)"><img src="${'${image.url}'}" alt="Free image" style="width:100%;height:100%;object-fit:contain;display:block;pointer-events:none" /><div class="free-image-handle" data-handle="se" style="position:absolute;right:-6px;bottom:-6px;width:12px;height:12px;background:#a9322e;border:2px solid #fff;border-radius:50%;cursor:nwse-resize;box-shadow:0 1px 4px rgba(0,0,0,0.2)"></div><div class="free-image-handle" data-handle="e" style="position:absolute;right:-6px;top:50%;transform:translateY(-50%);width:10px;height:10px;background:#fff;border:1px solid #a9322e;border-radius:50%;cursor:ew-resize"></div><div class="free-image-handle" data-handle="s" style="position:absolute;left:50%;bottom:-6px;transform:translateX(-50%);width:10px;height:10px;background:#fff;border:1px solid #a9322e;border-radius:50%;cursor:ns-resize"></div></div>`;
+      // Use template literal with actual url - we need to interpolate correctly in JS
+      const finalHtml = html.replace('${image.url}', image.url);
+      editor.current?.insertAdjacentHTML("beforeend", finalHtml);
+      // Make the new image draggable/resizable via pointer
+      const container = editor.current?.lastElementChild as HTMLElement | null;
+      if (container && container.classList.contains("designer-free-image")) {
+        let startX=0, startY=0, startW=0, startH=0, startL=0, startT=0, mode:"move"|"se"|"e"|"s"="move";
+        const onPointerMove = (e: PointerEvent) => {
+          const dx = e.clientX - startX;
+          const dy = e.clientY - startY;
+          if (mode === "move") {
+            container.style.left = `${startL + dx}px`;
+            container.style.top = `${startT + dy}px`;
+          } else if (mode === "se") {
+            container.style.width = `${Math.max(40, startW + dx)}px`;
+            container.style.height = `${Math.max(40, startH + dy)}px`;
+          } else if (mode === "e") {
+            container.style.width = `${Math.max(40, startW + dx)}px`;
+          } else if (mode === "s") {
+            container.style.height = `${Math.max(40, startH + dy)}px`;
+          }
+        };
+        const onPointerUp = () => {
+          document.removeEventListener("pointermove", onPointerMove);
+          document.removeEventListener("pointerup", onPointerUp);
+          captureSelectedPageHtml();
+          setMessage("Image positioned — drag to move, drag handles to resize height/width, then Save page");
+        };
+        container.addEventListener("pointerdown", (e: PointerEvent) => {
+          const target = e.target as HTMLElement;
+          const handle = target.closest(".free-image-handle") as HTMLElement | null;
+          if (handle) {
+            mode = handle.dataset.handle as any || "se";
+            e.preventDefault();
+            e.stopPropagation();
+          } else {
+            mode = "move";
+            // select it
+            selectedNode.current?.classList.remove("designer-object-selected");
+            selectedNode.current = container;
+            container.classList.add("designer-object-selected");
+            setSelectedObject("image");
+            setPanel("image");
+          }
+          const rect = container.getBoundingClientRect();
+          const parentRect = editor.current!.getBoundingClientRect();
+          startX = e.clientX; startY = e.clientY;
+          startW = rect.width; startH = rect.height;
+          startL = rect.left - parentRect.left;
+          startT = rect.top - parentRect.top;
+          // Ensure container is positioned relative to editor
+          container.style.left = `${startL}px`;
+          container.style.top = `${startT}px`;
+          document.addEventListener("pointermove", onPointerMove);
+          document.addEventListener("pointerup", onPointerUp);
+        });
+        // Select it immediately
+        selectedNode.current?.classList.remove("designer-object-selected");
+        selectedNode.current = container;
+        container.classList.add("designer-object-selected");
+        setSelectedObject("image");
+        setPanel("image");
+      }
+      captureSelectedPageHtml();
+      setMessage("Image added anywhere — drag to move, handles to resize height/width, then Save page");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Image upload failed");
+    } finally { setBusy(false); if (imageInputRef.current) imageInputRef.current.value = ""; }
+  };
   const runPreflight = () => {
     const found: string[] = []; const root = editor.current;
     if (draft.deleted) found.push("This page is removed from the final book.");
@@ -3555,7 +3630,7 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
     <header><div><p className="eyebrow">FINAL PRODUCTION</p><h2>Whole-book Designer</h2><span>The pages below are the same pages used by Preview and PDF.</span></div><div><button className="secondary" onClick={() => void previewWholeBook()} disabled={busy}>Preview</button><button className="primary" onClick={() => void saveRevision()} disabled={busy || !dirtyPages.includes(selectedId)}>{busy ? "Saving…" : dirtyPages.includes(selectedId) ? "Save page" : "Page saved"}</button><details className="designer-more-menu"><summary>More</summary><div><button onClick={runBookPreflight}>Check whole book</button><button onClick={() => void balanceLayout("book")} disabled={busy}>Balance layout</button><button onClick={() => void saveWholeBook()} disabled={busy}>Save whole book</button><button onClick={() => void addBlankPage()}>Add blank page</button><button onClick={() => void duplicatePage()}>Duplicate page</button></div></details><button className="designer-close" onClick={onClose} aria-label="Close Designer Studio">×</button></div></header>
     <div className="designer-status"><span>◆</span><b>{message}</b><i>{dirtyPages.length ? `${dirtyPages.length} unsaved page${dirtyPages.length === 1 ? "" : "s"}` : `${orderedPages.filter((page) => !revisionFor(page).deleted).length} pages`} · {selected.label}</i></div>
     <div className="designer-workspace designer-book-workspace"><aside className="designer-pages designer-book-nav"><p className="designer-nav-label">BOOK SECTIONS</p>{orderedPages.filter((page) => page.kind === "cover" || page.kind === "contents").map((page) => <button key={page.slotId} className={page.slotId === selectedId ? "active" : ""} onClick={() => selectAndReveal(page.slotId)}><span>{page.kind === "cover" ? "C" : "T"}</span><div><b>{page.label}</b><small>Book matter</small></div></button>)}{project.chapters.map((chapter) => { const pages = orderedPages.filter((page) => page.chapterId === chapter.id && !revisionFor(page).deleted); const hasIssue = pages.some((page) => ["empty", "overflow"].includes(designerPageFill(liveBookHtml.current[page.slotId] ?? revisionFor(page).html, project.audience, page.pageIndex === 0).tone)); return <button key={chapter.id} className={selected.chapterId === chapter.id ? "active" : ""} onClick={() => jumpToChapter(chapter.id)}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small>{pages.length} page{pages.length === 1 ? "" : "s"}{hasIssue ? " · check spacing" : " · balanced"}</small></div></button>; })}{orderedPages.filter((page) => page.kind === "back").map((page) => <button key={page.slotId} className={page.slotId === selectedId ? "active" : ""} onClick={() => selectAndReveal(page.slotId)}><span>B</span><div><b>{page.label}</b><small>Book matter</small></div></button>)}</aside>
-    <main className="designer-stage"><nav className="designer-toolbar designer-book-toolbar"><button onClick={undo} disabled={!undoStack.length} title="Undo selected page">↶</button><button onClick={redo} disabled={!redoStack.length} title="Redo selected page">↷</button><select aria-label="Selected text font" defaultValue="Georgia" onChange={(event) => command("fontName", event.target.value)}><option>Georgia</option><option>Arial</option><option>Verdana</option><option>Trebuchet MS</option><option>Times New Roman</option><option>Noto Serif</option><option>Noto Sans Devanagari</option></select><select aria-label="Selected text size" defaultValue="3" onChange={(event) => command("fontSize", event.target.value)}><option value="1">Small</option><option value="3">Body</option><option value="5">Subheading</option><option value="7">Title</option></select><button onClick={() => command("bold")}><b>B</b></button><button onClick={() => command("italic")}><i>I</i></button><button onClick={() => command("underline")}><u>U</u></button><button onClick={() => command("insertUnorderedList")}>• List</button><button onClick={() => command("justifyLeft")}>Left</button><button onClick={() => command("justifyCenter")}>Centre</button><button onClick={() => command("justifyRight")}>Right</button><label title="Text colour"><input type="color" defaultValue="#243b34" onChange={(event) => command("foreColor", event.target.value)}/></label><label title="Highlight"><input type="color" defaultValue="#f6e6ad" onChange={(event) => command("hiliteColor", event.target.value)}/></label><button onClick={addTextBox}>＋ Text box</button><button className="balance-chapter-button" onClick={() => void balanceLayout("chapter")} disabled={!selected.chapterId || busy}>Balance this chapter</button></nav>
+    <main className="designer-stage"><nav className="designer-toolbar designer-book-toolbar"><button onClick={undo} disabled={!undoStack.length} title="Undo selected page">↶</button><button onClick={redo} disabled={!redoStack.length} title="Redo selected page">↷</button><select aria-label="Selected text font" defaultValue="Georgia" onChange={(event) => command("fontName", event.target.value)}><option>Georgia</option><option>Arial</option><option>Verdana</option><option>Trebuchet MS</option><option>Times New Roman</option><option>Noto Serif</option><option>Noto Sans Devanagari</option></select><select aria-label="Selected text size" defaultValue="3" onChange={(event) => command("fontSize", event.target.value)}><option value="1">Small</option><option value="3">Body</option><option value="5">Subheading</option><option value="7">Title</option></select><button onClick={() => command("bold")}><b>B</b></button><button onClick={() => command("italic")}><i>I</i></button><button onClick={() => command("underline")}><u>U</u></button><button onClick={() => command("insertUnorderedList")}>• List</button><button onClick={() => command("justifyLeft")}>Left</button><button onClick={() => command("justifyCenter")}>Centre</button><button onClick={() => command("justifyRight")}>Right</button><label title="Text colour"><input type="color" defaultValue="#243b34" onChange={(event) => command("foreColor", event.target.value)}/></label><label title="Highlight"><input type="color" defaultValue="#f6e6ad" onChange={(event) => command("hiliteColor", event.target.value)}/></label><button onClick={addTextBox}>＋ Text box</button><input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp" style={{display:"none"}} onChange={(e)=>{const f=e.target.files?.[0]; if(f) void addFreeImage(f)}} /><button onClick={()=>imageInputRef.current?.click()} disabled={busy} title="Add image anywhere, drag to move, handles to resize">＋ Image</button><button className="balance-chapter-button" onClick={() => void balanceLayout("chapter")} disabled={!selected.chapterId || busy}>Balance this chapter</button></nav>
       <div className="designer-canvas-wrap designer-whole-book-canvas" aria-label="Editable whole book">{orderedPages.filter((page) => !revisionFor(page).deleted).map((page, index) => { const revision = revisionFor(page); const fill = page.kind === "chapter" ? designerPageFill(liveBookHtml.current[page.slotId] ?? revision.html, project.audience, page.pageIndex === 0) : { ratio: 100, label: "Designed page", tone: "balanced" }; const pageBackground = { backgroundImage: revision.backgroundImageUrl ? `url(${revision.backgroundImageUrl})` : undefined, backgroundSize: revision.backgroundSize === "repeat" ? "auto" : revision.backgroundSize, backgroundRepeat: revision.backgroundSize === "repeat" ? "repeat" : "no-repeat", backgroundPosition: revision.backgroundPosition, opacity: revision.backgroundOpacity }; const pageBorder = revision.borderStyle === "none" ? undefined : { inset: `${revision.borderInset}px`, border: `${revision.borderWidth}px ${revision.borderStyle} ${revision.borderColor}`, borderRadius: `${revision.borderRadius}px` }; const pageClasses = designerPageClasses(project, page); const isDirty = dirtyPages.includes(page.slotId); return <section className={`designer-flow-page${page.slotId === selectedId ? " selected" : ""}`} id={`designer-flow-${page.slotId}`} key={page.slotId}><div className="designer-flow-page-meta"><span>PAGE {index + 1}</span><b>{page.label}</b><button className={`page-fill-badge ${fill.tone}`} onClick={() => { setSelectedId(page.slotId); setPanel("preflight"); }}>{fill.label} · {fill.ratio}%</button><button className={`page-save-button ${isDirty ? "dirty" : "saved"}`} disabled={busy || !isDirty} onClick={() => void savePageById(page.slotId)}>{busy && page.slotId === selectedId ? "Saving…" : isDirty ? "Save page" : "Saved"}</button></div><article className={`designer-canvas-page book-sheet ${bookClasses} ${pageClasses}${revision.backgroundImageUrl ? " has-background" : ""}${revision.intentionalBlank ? " blank" : ""}`} style={{ backgroundColor: revision.backgroundColor }} onMouseDown={() => setSelectedId(page.slotId)}><div className="designer-background-layer" style={pageBackground}/><div className="designer-border-layer" style={pageBorder}/><div className={`designer-watermark-layer${revision.watermarkRepeat ? " repeat" : ""}`} style={{ opacity: revision.watermarkOpacity, left: `${revision.watermarkX}%`, top: `${revision.watermarkY}%`, transform: `translate(-50%,-50%) rotate(${revision.watermarkRotation}deg)`, display: revision.watermarkVisible ? "grid" : "none" }}>{Array.from({ length: revision.watermarkRepeat ? 6 : 1 }, (_, watermarkIndex) => <span key={watermarkIndex}>{revision.watermarkImageUrl && <img src={revision.watermarkImageUrl} alt="Custom watermark"/>}{revision.watermarkText}</span>)}</div>{!revision.intentionalBlank && revision.contentVisible && <div ref={(node) => { if (node) { bookEditors.current.set(page.slotId, node); if (page.slotId === selectedId) editor.current = node; } else bookEditors.current.delete(page.slotId); }} className="designer-editable-content" style={pageStyleFor(revision)} contentEditable suppressContentEditableWarning onFocus={() => setSelectedId(page.slotId)} onInput={(event) => rememberLiveHtml(page.slotId, event.currentTarget.innerHTML)} onClick={selectCanvasObject} dangerouslySetInnerHTML={{ __html: liveBookHtml.current[page.slotId] ?? revision.html }}/>}<div style={{position:"absolute",bottom:"10px",left:"50%",transform:"translateX(-50%)",fontSize:"12px",letterSpacing:"0.04em",color:"#1a2e1a",background:"#ffffff",padding:"6px 14px",borderRadius:"999px",border:"1px solid #b4532a",boxShadow:"0 2px 10px rgba(0,0,0,0.12)",fontWeight:"800",zIndex:4,pointerEvents:"none"}}>Book page {index+1} of {order.length}</div></article>{revision.intentionalBlank && <div className="intentional-blank-label">INTENTIONAL BLANK PAGE</div>}</section>; })}{pendingBackground && <div className="designer-background-choice" role="dialog" aria-modal="true" aria-labelledby="background-choice-title"><img src={pendingBackground.url} alt="Uploaded background preview"/><div><p className="eyebrow">BACKGROUND READY</p><h3 id="background-choice-title">Where should this background be used?</h3><span>{pendingBackground.fileName}</span><div className="designer-background-choice-actions"><button onClick={() => void applyUploadedBackground("page")} disabled={busy}>This page only</button><button className="primary" onClick={() => void applyUploadedBackground("book")} disabled={busy}>All pages</button></div><button className="designer-choice-cancel" onClick={() => { setPendingBackground(null); setMessage("Background choice cancelled. The current design was not changed."); }} disabled={busy}>Cancel</button></div></div>}</div>
     </main>
     <aside className="designer-controls designer-inspector"><nav>{(["page","text","image","layers","preflight"] as const).map((name) => <button key={name} className={panel === name ? "active" : ""} onClick={() => setPanel(name)}>{name}</button>)}</nav>
