@@ -3130,13 +3130,17 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   const liveBookDrafts = useRef<Record<string, DesignerPageRevision>>({});
   const [dirtyPages, setDirtyPages] = useState<string[]>([]);
   const selectedNode = useRef<HTMLElement | null>(null);
+  const wiredFreeImages = useRef(new WeakSet<HTMLElement>());
 
   useEffect(() => {
     const nextSaved = savedPages.find((page) => page.slotId === selected?.slotId);
     const next = hydrateDesignerRevision(nextSaved, selected?.html);
     const liveDraft = liveBookDrafts.current[selected?.slotId ?? ""];
+    const selectedRoot = bookEditors.current.get(selected?.slotId ?? "");
+    const keepObjectSelection = Boolean(selectedNode.current && selectedRoot?.contains(selectedNode.current));
     setDraft(liveDraft ?? { ...next, html: liveBookHtml.current[selected?.slotId ?? ""] ?? next.html });
-    setUndoStack([]); setRedoStack([]); setIssues([]); setPendingBackground(null); setSelectedObject("page"); selectedNode.current = null;
+    setUndoStack([]); setRedoStack([]); setIssues([]); setPendingBackground(null);
+    if (!keepObjectSelection) { setSelectedObject("page"); selectedNode.current = null; }
   }, [selectedId]);
 
   const currentSnapshot = () => ({ ...draft, html: editor.current?.innerHTML ?? draft.html });
@@ -3493,17 +3497,136 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   };
   const selectCanvasObject = (event: ReactMouseEvent<HTMLDivElement>) => {
     selectedNode.current?.classList.remove("designer-object-selected");
-    const target = event.target as HTMLElement; const node = target.closest("img,.designer-free-text") as HTMLElement | null;
-    if (node) { selectedNode.current = node; node.classList.add("designer-object-selected"); const kind = node.tagName === "IMG" ? "image" : "text box"; setSelectedObject(kind); setPanel(kind === "image" ? "image" : "text"); }
+    const target = event.target as HTMLElement;
+    const freeImage = target.closest(".designer-free-image") as HTMLElement | null;
+    const node = freeImage ?? target.closest("img,.designer-free-text") as HTMLElement | null;
+    if (node) { selectedNode.current = node; node.classList.add("designer-object-selected"); const kind = freeImage || node.tagName === "IMG" ? "image" : "text box"; setSelectedObject(kind); setPanel(kind === "image" ? "image" : "text"); }
     else { selectedNode.current = null; setSelectedObject("page"); }
   };
   const mutateObject = (property: string, value: string) => { const node = selectedNode.current; if (!node || node.dataset.designerLocked === "true") return; setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]); setRedoStack([]); (node.style as unknown as Record<string, string>)[property] = value; if (editor.current) rememberLiveHtml(selectedId, editor.current.innerHTML); setMessage(`${selectedObject} updated.`); };
-  const captureSelectedPageHtml = () => { if (editor.current) rememberLiveHtml(selectedId, editor.current.innerHTML); };
-  const moveObject = (x: number, y: number) => { const node = selectedNode.current; if (!node || node.dataset.designerLocked === "true") return; node.style.position = "relative"; node.style.left = `${(parseFloat(node.style.left) || 0) + x}px`; node.style.top = `${(parseFloat(node.style.top) || 0) + y}px`; captureSelectedPageHtml(); };
+  const captureSelectedPageHtml = () => { const root = bookEditors.current.get(selectedId) ?? editor.current; if (root) rememberLiveHtml(selectedId, root.innerHTML); };
+  const moveObject = (x: number, y: number) => { const node = selectedNode.current; if (!node || node.dataset.designerLocked === "true") return; if (!node.style.position) node.style.position = node.classList.contains("designer-free-image") ? "absolute" : "relative"; node.style.left = `${(parseFloat(node.style.left) || 0) + x}px`; node.style.top = `${(parseFloat(node.style.top) || 0) + y}px`; captureSelectedPageHtml(); };
   const duplicateObject = () => { const node = selectedNode.current; if (!node) return; const clone = node.cloneNode(true) as HTMLElement; clone.classList.remove("designer-object-selected"); node.after(clone); captureSelectedPageHtml(); };
   const deleteObject = () => { selectedNode.current?.remove(); selectedNode.current = null; setSelectedObject("page"); captureSelectedPageHtml(); };
   const addTextBox = () => { editor.current?.insertAdjacentHTML("beforeend", '<div class="designer-free-text" style="position:relative;padding:12px;border:1px solid #d7cbb8;min-height:48px">Edit this text box</div>'); captureSelectedPageHtml(); setMessage("Text box added. Select it to move, resize or style it."); };
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const wireFreeImageControls = (container: HTMLElement, root: HTMLDivElement, slotId: string, selectImmediately = false) => {
+    const selectImage = () => {
+      selectedNode.current?.classList.remove("designer-object-selected");
+      selectedNode.current = container;
+      container.classList.add("designer-object-selected");
+      setSelectedId(slotId);
+      setSelectedObject("image");
+      setPanel("image");
+    };
+    if (wiredFreeImages.current.has(container)) {
+      if (selectImmediately) selectImage();
+      return;
+    }
+
+    wiredFreeImages.current.add(container);
+    container.classList.remove("designer-object-selected");
+    container.tabIndex = 0;
+    const dragBar = container.querySelector(".free-image-dragbar") as HTMLElement | null;
+    let startX = 0; let startY = 0; let startW = 0; let startH = 0; let startL = 0; let startT = 0;
+    let scaleX = 1; let scaleY = 1; let activePointerId: number | null = null;
+    let mode: "move" | "se" | "e" | "s" = "move";
+    const rememberPosition = () => rememberLiveHtml(slotId, root.innerHTML);
+    const onPointerMove = (event: PointerEvent) => {
+      if (activePointerId !== event.pointerId) return;
+      const dx = (event.clientX - startX) / scaleX;
+      const dy = (event.clientY - startY) / scaleY;
+      if (mode === "move") {
+        container.style.left = `${startL + dx}px`;
+        container.style.top = `${startT + dy}px`;
+      } else if (mode === "se") {
+        container.style.width = `${Math.max(40, startW + dx)}px`;
+        container.style.height = `${Math.max(40, startH + dy)}px`;
+      } else if (mode === "e") {
+        container.style.width = `${Math.max(40, startW + dx)}px`;
+      } else {
+        container.style.height = `${Math.max(40, startH + dy)}px`;
+      }
+    };
+    const finishPointerAction = (event: PointerEvent) => {
+      if (activePointerId !== event.pointerId) return;
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", finishPointerAction);
+      document.removeEventListener("pointercancel", finishPointerAction);
+      try { container.releasePointerCapture?.(event.pointerId); } catch {}
+      activePointerId = null;
+      container.style.cursor = "";
+      if (dragBar) dragBar.style.cursor = "grab";
+      selectImage();
+      rememberPosition();
+      setMessage("Image position saved locally. Use Save page or Save whole book to keep it permanently.");
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement;
+      if (target.closest("[data-nudge]")) { selectImage(); return; }
+      const handle = target.closest(".free-image-handle") as HTMLElement | null;
+      const isDragArea = Boolean(target.closest(".free-image-dragbar")) || target === container || Boolean(target.closest(".designer-free-image"));
+      if (!handle && !isDragArea) return;
+      selectImage();
+      if (container.dataset.designerLocked === "true") return;
+      mode = handle ? ((handle.dataset.handle as "se" | "e" | "s") || "se") : "move";
+      const rootRect = root.getBoundingClientRect();
+      const rect = container.getBoundingClientRect();
+      scaleX = root.offsetWidth ? rootRect.width / root.offsetWidth : 1;
+      scaleY = root.offsetHeight ? rootRect.height / root.offsetHeight : scaleX;
+      if (!Number.isFinite(scaleX) || scaleX <= 0) scaleX = 1;
+      if (!Number.isFinite(scaleY) || scaleY <= 0) scaleY = 1;
+      startX = event.clientX; startY = event.clientY;
+      startW = rect.width / scaleX; startH = rect.height / scaleY;
+      startL = Number.isFinite(parseFloat(container.style.left)) ? parseFloat(container.style.left) : (rect.left - rootRect.left) / scaleX;
+      startT = Number.isFinite(parseFloat(container.style.top)) ? parseFloat(container.style.top) : (rect.top - rootRect.top) / scaleY;
+      container.style.position = "absolute";
+      container.style.left = `${startL}px`;
+      container.style.top = `${startT}px`;
+      activePointerId = event.pointerId;
+      container.style.cursor = mode === "move" ? "grabbing" : "";
+      if (dragBar && mode === "move") dragBar.style.cursor = "grabbing";
+      container.setPointerCapture?.(event.pointerId);
+      document.addEventListener("pointermove", onPointerMove);
+      document.addEventListener("pointerup", finishPointerAction);
+      document.addEventListener("pointercancel", finishPointerAction);
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!container.classList.contains("designer-object-selected") || container.dataset.designerLocked === "true") return;
+      const distance = event.shiftKey ? 1 : 5;
+      const movement: Record<string, [number, number]> = { ArrowLeft: [-distance, 0], ArrowRight: [distance, 0], ArrowUp: [0, -distance], ArrowDown: [0, distance] };
+      const delta = movement[event.key];
+      if (!delta) return;
+      event.preventDefault();
+      container.style.left = `${(parseFloat(container.style.left) || 0) + delta[0]}px`;
+      container.style.top = `${(parseFloat(container.style.top) || 0) + delta[1]}px`;
+      rememberPosition();
+    };
+    container.addEventListener("pointerdown", onPointerDown);
+    container.addEventListener("keydown", onKeyDown);
+    container.querySelectorAll<HTMLElement>("[data-nudge]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault(); event.stopPropagation(); selectImage();
+        if (container.dataset.designerLocked === "true") return;
+        const movement: Record<string, [number, number]> = { left: [-10, 0], right: [10, 0], up: [0, -10], down: [0, 10] };
+        const delta = movement[button.dataset.nudge ?? ""];
+        if (!delta) return;
+        container.style.left = `${(parseFloat(container.style.left) || 0) + delta[0]}px`;
+        container.style.top = `${(parseFloat(container.style.top) || 0) + delta[1]}px`;
+        rememberPosition();
+      });
+    });
+    if (selectImmediately) { selectImage(); container.focus({ preventScroll: true }); }
+  };
+
+  useEffect(() => {
+    bookEditors.current.forEach((root, slotId) => {
+      root.querySelectorAll<HTMLElement>(".designer-free-image").forEach((container) => wireFreeImageControls(container, root, slotId));
+    });
+  });
+
   const addFreeImage = async (file: File) => {
     try {
       setBusy(true);
@@ -3515,126 +3638,7 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
       // Make the new image draggable/resizable via pointer — find the actual free image (not the global badge)
       const allFree = editor.current?.querySelectorAll(".designer-free-image");
       const container = (allFree && allFree.length ? allFree[allFree.length - 1] : null) as HTMLElement | null;
-      if (container && container.classList.contains("designer-free-image")) {
-        let startX=0, startY=0, startW=0, startH=0, startL=0, startT=0, mode:"move"|"se"|"e"|"s"="move";
-        const onPointerMove = (e: PointerEvent) => {
-          const dx = e.clientX - startX;
-          const dy = e.clientY - startY;
-          if (mode === "move") {
-            container.style.left = `${startL + dx}px`;
-            container.style.top = `${startT + dy}px`;
-          } else if (mode === "se") {
-            container.style.width = `${Math.max(40, startW + dx)}px`;
-            container.style.height = `${Math.max(40, startH + dy)}px`;
-          } else if (mode === "e") {
-            container.style.width = `${Math.max(40, startW + dx)}px`;
-          } else if (mode === "s") {
-            container.style.height = `${Math.max(40, startH + dy)}px`;
-          }
-        };
-        const onPointerUp = (e?: PointerEvent) => {
-          document.removeEventListener("pointermove", onPointerMove);
-          document.removeEventListener("pointerup", onPointerUp);
-          try { if (e) container.releasePointerCapture?.(e.pointerId); } catch {}
-          container.style.cursor = "";
-          if (dragBar) dragBar.style.cursor = "grab";
-          captureSelectedPageHtml();
-          setMessage("Image positioned — drag top bar to move (trackpad friendly), handles to resize, arrows to nudge, then Save page");
-        };
-        // Trackpad-friendly: larger grab area, pointer capture, smooth
-        const dragBar = container.querySelector(".free-image-dragbar") as HTMLElement | null;
-        const onPointerDown = (e: PointerEvent) => {
-          const target = e.target as HTMLElement;
-          const handle = target.closest(".free-image-handle") as HTMLElement | null;
-          const isDragBar = target.closest(".free-image-dragbar");
-          if (handle) {
-            mode = handle.dataset.handle as any || "se";
-            e.preventDefault();
-            e.stopPropagation();
-          } else if (isDragBar || target === container || target.closest(".designer-free-image")) {
-            mode = "move";
-            // select it
-            selectedNode.current?.classList.remove("designer-object-selected");
-            selectedNode.current = container;
-            container.classList.add("designer-object-selected");
-            setSelectedObject("image");
-            setPanel("image");
-            container.style.cursor = "grabbing";
-            if (dragBar) dragBar.style.cursor = "grabbing";
-          } else {
-            return;
-          }
-          const rect = container.getBoundingClientRect();
-          const parentRect = editor.current!.getBoundingClientRect();
-          startX = e.clientX; startY = e.clientY;
-          startW = rect.width; startH = rect.height;
-          startL = rect.left - parentRect.left;
-          startT = rect.top - parentRect.top;
-          container.style.left = `${startL}px`;
-          container.style.top = `${startT}px`;
-          container.setPointerCapture?.(e.pointerId);
-          document.addEventListener("pointermove", onPointerMove);
-          document.addEventListener("pointerup", onPointerUp);
-          e.preventDefault();
-        };
-        container.addEventListener("pointerdown", onPointerDown as any);
-        // Also allow arrow keys to nudge when selected
-        container.tabIndex = 0;
-        container.addEventListener("keydown", (e: KeyboardEvent) => {
-          if (!container.classList.contains("designer-object-selected")) return;
-          let dx=0, dy=0;
-          if (e.key === "ArrowLeft") dx=-5;
-          else if (e.key === "ArrowRight") dx=5;
-          else if (e.key === "ArrowUp") dy=-5;
-          else if (e.key === "ArrowDown") dy=5;
-          else return;
-          e.preventDefault();
-          const curL = parseFloat(container.style.left) || 0;
-          const curT = parseFloat(container.style.top) || 0;
-          container.style.left = `${curL + dx}px`;
-          container.style.top = `${curT + dy}px`;
-          captureSelectedPageHtml();
-        });
-        // Select it immediately
-        selectedNode.current?.classList.remove("designer-object-selected");
-        selectedNode.current = container;
-        container.classList.add("designer-object-selected");
-        setSelectedObject("image");
-        setPanel("image");
-        // Nudge pad click handlers — single tap, no drag needed, trackpad perfect
-        container.querySelectorAll("[data-nudge]").forEach((btn) => {
-          btn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            const dir = (btn as HTMLElement).dataset.nudge;
-            let dx=0, dy=0;
-            if (dir==="left") dx=-10;
-            else if (dir==="right") dx=10;
-            else if (dir==="up") dy=-10;
-            else if (dir==="down") dy=10;
-            const curL = parseFloat(container.style.left) || 0;
-            const curT = parseFloat(container.style.top) || 0;
-            container.style.left = `${curL + dx}px`;
-            container.style.top = `${curT + dy}px`;
-            captureSelectedPageHtml();
-            setMessage(`Nudged ${dir} 10px — tap again or drag bar, then Save page`);
-          });
-        });
-        // Show nudge pad only when selected — ensure parent allows pointer events
-        const style = document.createElement("style");
-        style.textContent = ".designer-free-image.designer-object-selected .free-image-nudge{opacity:1 !important;pointer-events:auto !important} .designer-free-image .free-image-nudge{pointer-events:none} .designer-free-image.designer-object-selected .free-image-nudge button{pointer-events:auto !important}";
-        if (!document.getElementById("free-image-nudge-style")) {
-          style.id = "free-image-nudge-style";
-          document.head.appendChild(style);
-        }
-        // Ensure nudge pad is visible immediately for testing
-        setTimeout(() => {
-          const nudge = container?.querySelector(".free-image-nudge") as HTMLElement | null;
-          if (nudge && container?.classList.contains("designer-object-selected")) {
-            nudge.style.opacity = "1";
-            nudge.style.pointerEvents = "auto";
-          }
-        }, 100);
-      }
+      if (container && editor.current) wireFreeImageControls(container, editor.current, selectedId, true);
       captureSelectedPageHtml();
       setMessage("Image added anywhere — drag to move, handles to resize height/width, then Save page");
     } catch (error) {

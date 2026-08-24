@@ -26,6 +26,16 @@ test("advanced typography, object, border and image controls are selection-aware
   assert.match(page, /Lock \/ unlock object/);
 });
 
+test("saved free-placement images regain drag and resize controls after reopening", () => {
+  assert.match(page, /wiredFreeImages = useRef\(new WeakSet<HTMLElement>\(\)\)/);
+  assert.match(page, /wireFreeImageControls/);
+  assert.match(page, /bookEditors\.current\.forEach/);
+  assert.match(page, /querySelectorAll<HTMLElement>\("\.designer-free-image"\)/);
+  assert.match(page, /document\.addEventListener\("pointercancel", finishPointerAction\)/);
+  assert.match(page, /rememberLiveHtml\(slotId, root\.innerHTML\)/);
+  assert.match(css, /\.designer-free-image\.designer-object-selected \.free-image-nudge/);
+});
+
 test("designer supports reusable styles, scoped application and local preflight", () => {
   assert.match(page, /applyStyle\("chapter"\)/);
   assert.match(page, /applyStyle\("book"\)/);
