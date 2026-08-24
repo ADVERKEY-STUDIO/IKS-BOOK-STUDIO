@@ -3083,6 +3083,29 @@ type DesignerBasePage = {
   html: string;
 };
 
+function designerPlannedChapterPageCount(project: Project, chapter: Chapter) {
+  const flowStory = createDesignerDocumentV3(project.designerDocument).flowStories[`chapter-${chapter.id}`];
+  if (flowStory?.pageSlotIds.length) return Math.max(1, flowStory.pageSlotIds.length);
+  const prefix = `chapter-${chapter.id}-page-`;
+  const legacyPageNumbers = [
+    ...(project.designerPageOrder ?? []),
+    ...(project.designerPages ?? []).filter((page) => !page.removedByReflow).map((page) => page.slotId),
+  ].flatMap((slotId) => {
+    if (!slotId.startsWith(prefix)) return [];
+    const pageNumber = Number(slotId.slice(prefix.length));
+    return Number.isFinite(pageNumber) && pageNumber > 0 ? [pageNumber] : [];
+  });
+  return Math.max(1, chapter.pages || 1, chapter.importedPages?.length ?? 0, ...legacyPageNumbers);
+}
+
+function designerPageIsRemoved(project: Project, page: Pick<DesignerPageOverride, "slotId" | "deleted" | "removedByReflow">) {
+  if (!page.deleted) return false;
+  // Old Designer builds left manually deleted pages inside the final physical
+  // order, making the order and the visible book disagree. The order is now
+  // authoritative; current deletions remove their slot from it atomically.
+  return Boolean(page.removedByReflow || !(project.designerPageOrder ?? []).includes(page.slotId));
+}
+
 function designerBasePages(project: Project): DesignerBasePage[] {
   const printable = printableChapters(project.chapters);
   const pages: DesignerBasePage[] = [
@@ -3094,7 +3117,10 @@ function designerBasePages(project: Project): DesignerBasePage[] {
     { slotId: "preface", label: "Preface", kind: "frontmatter", html: `<div class="matter-page"><span>PREFACE</span><h2>How to use this book</h2><p>Read slowly, pause at unfamiliar ideas, and use the questions and activities to connect each chapter with everyday life.</p></div>` },
   ];
   printable.chapters.forEach((chapter) => {
-    const plannedPageCount = Math.max(1, chapter.pages || 1);
+    // A saved physical order is the authority for legacy books. Older projects
+    // can contain every page slot even when a later chapter plan was reduced to
+    // one page; never collapse those books merely by opening Designer.
+    const plannedPageCount = designerPlannedChapterPageCount(project, chapter);
     const separateIllustration = Boolean(chapter.imageUrl) && plannedPageCount > 1;
     const textPageTarget = Math.max(1, plannedPageCount - (separateIllustration ? 1 : 0));
     const textPages = chapter.importValidated && chapter.importedPages?.length ? chapter.importedPages.map((page) => page.body) : paginateReaderHtml(chapter.body, project.audience, textPageTarget);
@@ -3192,7 +3218,11 @@ function designerFlowBodyFromDom(html: string) {
     return `${body.innerHTML}${inlineFigures}`;
   }
   const matter = root.querySelector<HTMLElement>(".matter-page");
-  if (matter) return matter.innerHTML;
+  if (matter) {
+    const cleanMatter = matter.cloneNode(true) as HTMLElement;
+    cleanMatter.querySelectorAll(".continued-title").forEach((node) => node.remove());
+    return cleanMatter.innerHTML;
+  }
   Array.from(root.children).forEach((node) => {
     if (node.tagName === "HEADER" || node.tagName === "FOOTER" || node.matches(".continued-title")) node.remove();
   });
@@ -3233,17 +3263,18 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
   const basePages = useMemo(() => designerBasePages(project), [project]);
   const persistedPages = (project.designerPages ?? []).map(hydrateDesignerOverride).map((page) => {
     const base = basePages.find((candidate) => candidate.slotId === page.slotId);
-    return base && isLegacyDesignerScaffold(page) ? { ...page, html: base.html } : page;
+    const recovered = page.deleted && !designerPageIsRemoved(project, page) ? { ...page, deleted: false } : page;
+    return base && isLegacyDesignerScaffold(recovered) ? { ...recovered, html: base.html } : recovered;
   });
   const [flowPageOverrides, setFlowPageOverrides] = useState<DesignerPageOverride[]>([]);
   const savedPages = [...persistedPages.filter((page) => !flowPageOverrides.some((override) => override.slotId === page.slotId)), ...flowPageOverrides];
-  const customPages = savedPages.filter((page) => page.kind === "custom");
-  const allPages = [...basePages, ...customPages.map((page) => ({ slotId: page.slotId, label: page.label, kind: "custom" as const, chapterId: page.chapterId, pageIndex: page.pageIndex, flowStoryId: page.flowStoryId, flowPageIndex: page.flowPageIndex, html: page.html }))];
+  const supplementalPages = savedPages.filter((page) => !basePages.some((base) => base.slotId === page.slotId));
+  const allPages = [...basePages, ...supplementalPages.map((page) => ({ slotId: page.slotId, label: page.label, kind: "custom" as const, chapterId: page.chapterId, pageIndex: page.pageIndex, flowStoryId: page.flowStoryId, flowPageIndex: page.flowPageIndex, html: page.html }))];
   const storedOrder = (project.designerPageOrder ?? []).filter((slotId) => allPages.some((page) => page.slotId === slotId));
-  const hasCompletePhysicalOrder = basePages.every((page) => storedOrder.includes(page.slotId));
-  const defaultOrder = hasCompletePhysicalOrder ? [...storedOrder, ...allPages.map((page) => page.slotId).filter((slotId) => !storedOrder.includes(slotId))] : allPages.map((page) => page.slotId);
+  const hasCompletePhysicalOrder = Boolean(project.designerPageOrder?.length) && storedOrder.length === project.designerPageOrder!.length;
+  const defaultOrder = hasCompletePhysicalOrder ? storedOrder : [...storedOrder, ...allPages.map((page) => page.slotId).filter((slotId) => !storedOrder.includes(slotId))];
   const [flowPageOrder, setFlowPageOrder] = useState<string[] | null>(null);
-  const order = flowPageOrder ? [...flowPageOrder.filter((slotId) => allPages.some((page) => page.slotId === slotId)), ...allPages.map((page) => page.slotId).filter((slotId) => !flowPageOrder.includes(slotId))] : defaultOrder;
+  const order = flowPageOrder ? flowPageOrder.filter((slotId) => allPages.some((page) => page.slotId === slotId)) : defaultOrder;
   const orderedPages = order.map((slotId) => allPages.find((page) => page.slotId === slotId)!).filter(Boolean);
   const [selectedId, setSelectedId] = useState(order[0] ?? "cover");
   const selected = orderedPages.find((page) => page.slotId === selectedId) ?? orderedPages[0];
@@ -3842,6 +3873,40 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
     let candidate: Text | null = null; while (walker.nextNode()) { candidate = walker.currentNode as Text; if (!fromEnd) break; } return candidate;
   };
 
+  const boundaryFlowBlock = (container: HTMLElement, fromEnd: boolean) => {
+    const selector = "p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption";
+    const blocks = Array.from(container.querySelectorAll<HTMLElement>(selector)).filter((block) =>
+      !block.matches(".continued-title") &&
+      !block.closest("figure,table,.designer-shape,[data-designer-atomic=true]") &&
+      !block.querySelector(selector),
+    );
+    return (fromEnd ? blocks.at(-1) : blocks[0]) ?? null;
+  };
+
+  const removeEmptyFlowWrapper = (block: HTMLElement, container: HTMLElement) => {
+    const parent = block.parentElement;
+    block.remove();
+    if (parent && parent !== container && parent.matches("ul,ol") && !parent.querySelector("li")) parent.remove();
+  };
+
+  const joinFlowBlocks = (left: HTMLElement, right: HTMLElement, container: HTMLElement) => {
+    const marker = document.createElement("span");
+    marker.dataset.designerBoundaryCaret = "true";
+    marker.contentEditable = "false";
+    marker.textContent = "\u200b";
+    left.append(marker, ...Array.from(right.childNodes));
+    removeEmptyFlowWrapper(right, container);
+    const range = document.createRange(); range.setStartBefore(marker); range.collapse(true);
+    marker.remove();
+    return range;
+  };
+
+  const flowRangeText = (range: Range) => {
+    const holder = document.createElement("div"); holder.append(range.cloneContents());
+    holder.querySelectorAll(".continued-title").forEach((node) => node.remove());
+    return holder.textContent ?? "";
+  };
+
   const handleFlowBoundaryKey = (event: ReactKeyboardEvent<HTMLDivElement>, slotId: string) => {
     const descriptor = allPages.find((page) => page.slotId === slotId); const identity = descriptor ? designerFlowIdentity(descriptor) : null;
     if (!identity) return;
@@ -3854,19 +3919,35 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
     if (!container.contains(range.commonAncestorContainer)) return;
     const before = document.createRange(); before.selectNodeContents(container); before.setEnd(range.startContainer, range.startOffset);
     const after = document.createRange(); after.selectNodeContents(container); after.setStart(range.startContainer, range.startOffset);
-    const atStart = before.toString().length === 0; const atEnd = after.toString().length === 0;
+    const atStart = flowRangeText(before).trim().length === 0; const atEnd = flowRangeText(after).trim().length === 0;
     const pages = pagesForFlow(identity.id); const index = pages.findIndex((page) => page.slotId === slotId);
     const backwards = event.key === "Backspace" || event.key === "ArrowLeft";
     if ((backwards && !atStart) || (!backwards && !atEnd)) return;
     const targetPage = pages[index + (backwards ? -1 : 1)]; if (!targetPage) return;
     const targetRoot = bookEditors.current.get(targetPage.slotId); const targetContainer = targetRoot?.querySelector<HTMLElement>(".preview-body,.matter-page") ?? targetRoot; if (!targetRoot || !targetContainer) return;
-    event.preventDefault(); rememberBeforeFlowInput(targetPage.slotId);
-    const targetNode = boundaryTextNode(targetContainer, backwards);
-    if (!targetNode) return;
-    if (event.key === "Backspace") targetNode.deleteData(Math.max(0, targetNode.length - 1), 1);
-    if (event.key === "Delete") targetNode.deleteData(0, 1);
-    const nextRange = document.createRange(); nextRange.setStart(targetNode, backwards ? targetNode.length : 0); nextRange.collapse(true); selection.removeAllRanges(); selection.addRange(nextRange);
-    editor.current = targetRoot; setSelectedId(targetPage.slotId); rememberLiveHtml(targetPage.slotId, targetRoot.innerHTML);
+    event.preventDefault();
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      const targetNode = boundaryTextNode(targetContainer, backwards); if (!targetNode) return;
+      const nextRange = document.createRange(); nextRange.setStart(targetNode, backwards ? targetNode.length : 0); nextRange.collapse(true);
+      selection.removeAllRanges(); selection.addRange(nextRange); editor.current = targetRoot; setSelectedId(targetPage.slotId); targetRoot.focus({ preventScroll: true });
+      return;
+    }
+    rememberBeforeFlowInput(slotId);
+    const leftPage = backwards ? targetPage : descriptor;
+    const rightPage = backwards ? descriptor : targetPage;
+    const leftRoot = backwards ? targetRoot : root;
+    const rightRoot = backwards ? root : targetRoot;
+    const leftContainer = backwards ? targetContainer : container;
+    const rightContainer = backwards ? container : targetContainer;
+    const leftBlock = boundaryFlowBlock(leftContainer, true);
+    const rightBlock = boundaryFlowBlock(rightContainer, false);
+    if (!leftBlock || !rightBlock || !leftPage || !rightPage) return;
+    const nextRange = joinFlowBlocks(leftBlock, rightBlock, rightContainer);
+    liveBookHtml.current[leftPage.slotId] = leftRoot.innerHTML;
+    liveBookHtml.current[rightPage.slotId] = rightRoot.innerHTML;
+    selection.removeAllRanges(); selection.addRange(nextRange);
+    editor.current = leftRoot; setSelectedId(leftPage.slotId); leftRoot.focus({ preventScroll: true });
+    rememberLiveHtml(leftPage.slotId, leftRoot.innerHTML);
   };
 
   const balanceLayout = async (scope: "chapter" | "book") => {
@@ -4021,7 +4102,13 @@ function DesignerStudio({ project, onClose, onPreview, onCommit }: { project: Pr
         setSelectedId(fallback);
         setMessage(`${selected.label} deleted.`);
       } else {
-        await saveRevision({ ...currentSnapshot(), deleted: true });
+        const existing = savedPages.find((page) => page.slotId === selectedId);
+        const revision = { ...currentSnapshot(), deleted: true, savedAt: new Date().toISOString() };
+        const replacement = makeOverride(selected, revision, existing);
+        const nextOrder = order.filter((slotId) => slotId !== selectedId);
+        const next = { ...project, designerPages: [...savedPages.filter((page) => page.slotId !== selectedId), replacement], designerPageOrder: nextOrder, designerDocument: currentDesignerDocument() };
+        await onCommit(next); setFlowPageOverrides(next.designerPages); setFlowPageOrder(nextOrder);
+        setSelectedId(nextOrder[Math.max(0, Math.min(nextOrder.length - 1, order.indexOf(selectedId) - 1))] ?? "cover");
         setMessage(`${selected.label} deleted — removed from final book.`);
       }
     } finally { setBusy(false); }
@@ -4210,7 +4297,7 @@ function CanvaPreview({ project, exportBusy, pdfProgress, onClose, onDownload, o
   type CanvaChapterSheet = { kind: "chapter"; chapter: Chapter; body: string; pageIndex: number; pageCount: number; imageUrl?: string; imageCaption?: string; imageAlt?: string };
   const chapterSheets: CanvaChapterSheet[] = printable.chapters.flatMap((chapter): CanvaChapterSheet[] => {
     if (chapter.importValidated && chapter.importedPages?.length) return chapter.importedPages.map((page, index) => ({ kind: "chapter" as const, chapter, body: page.body, pageIndex: index, pageCount: chapter.importedPages!.length, imageUrl: page.imageUrl, imageCaption: page.imageCaption, imageAlt: page.imageAlt }));
-    const pageCount = Math.max(1, chapter.pages || 1);
+    const pageCount = designerPlannedChapterPageCount(project, chapter);
     const separateIllustration = Boolean(chapter.imageUrl) && pageCount > 1;
     const textTarget = Math.max(1, pageCount - (separateIllustration ? 1 : 0));
     const pages = paginateReaderHtml(chapter.body, project.audience, textTarget);
@@ -4222,12 +4309,19 @@ function CanvaPreview({ project, exportBusy, pdfProgress, onClose, onDownload, o
   type BaseSheet = (typeof baseSheets)[number];
   type Sheet = BaseSheet | { kind: "custom"; designerPage: DesignerPageOverride };
   const baseSlotId = (sheet: BaseSheet) => sheet.kind !== "chapter" ? sheet.kind : `chapter-${sheet.chapter.id}-page-${sheet.pageIndex + 1}`;
-  const customSheets: Sheet[] = (project.designerPages ?? []).filter((page) => page.kind === "custom" && !page.deleted).map((designerPage) => ({ kind: "custom", designerPage }));
-  const availableSheets: Sheet[] = [...baseSheets.filter((sheet) => !(project.designerPages ?? []).find((page) => page.slotId === baseSlotId(sheet))?.deleted), ...customSheets];
+  const baseSlotIds = new Set(baseSheets.map(baseSlotId));
+  const supplementalSheets: Sheet[] = (project.designerPages ?? []).filter((page) => !baseSlotIds.has(page.slotId) && !designerPageIsRemoved(project, page)).map((designerPage) => ({ kind: "custom", designerPage: page.deleted ? { ...page, deleted: false } : page }));
+  const availableSheets: Sheet[] = [...baseSheets.filter((sheet) => {
+    const savedPage = (project.designerPages ?? []).find((page) => page.slotId === baseSlotId(sheet));
+    return !savedPage || !designerPageIsRemoved(project, savedPage);
+  }), ...supplementalSheets];
   const desiredOrder = project.designerPageOrder ?? [];
-  const sheets = [...availableSheets].sort((left, right) => {
-    const leftId = left.kind === "custom" ? left.designerPage.slotId : baseSlotId(left);
-    const rightId = right.kind === "custom" ? right.designerPage.slotId : baseSlotId(right);
+  const sheetSlotId = (sheet: Sheet) => sheet.kind === "custom" ? sheet.designerPage.slotId : baseSlotId(sheet);
+  const orderedSavedSheets = desiredOrder.map((slotId) => availableSheets.find((sheet) => sheetSlotId(sheet) === slotId)).filter((sheet): sheet is Sheet => Boolean(sheet));
+  const hasCompletePhysicalOrder = Boolean(desiredOrder.length) && orderedSavedSheets.length === desiredOrder.length;
+  const sheets = hasCompletePhysicalOrder ? orderedSavedSheets : [...availableSheets].sort((left, right) => {
+    const leftId = sheetSlotId(left);
+    const rightId = sheetSlotId(right);
     const leftIndex = desiredOrder.indexOf(leftId); const rightIndex = desiredOrder.indexOf(rightId);
     return (leftIndex < 0 ? Number.MAX_SAFE_INTEGER : leftIndex) - (rightIndex < 0 ? Number.MAX_SAFE_INTEGER : rightIndex);
   });

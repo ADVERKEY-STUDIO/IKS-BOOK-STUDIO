@@ -132,12 +132,17 @@ test("Designer preview and PDF preserve the shared 794 by 1123 A4 layout", () =>
 
 test("Designer materializes the complete planned book and preserves Word-style text ranges", () => {
   assert.match(page, /paginateReaderHtml\(chapter\.body, project\.audience, textPageTarget\)/);
+  assert.match(page, /designerPlannedChapterPageCount\(project, chapter\)/);
+  assert.match(page, /function designerPageIsRemoved/);
+  assert.match(page, /project\.designerPageOrder/);
+  assert.match(page, /supplementalPages/);
   assert.match(page, /slotId: "half-title"/);
   assert.match(page, /slotId: "copyright"/);
   assert.match(page, /slotId: "dedication"/);
   assert.match(page, /slotId: "preface"/);
   assert.match(page, /slotId: "about-book"/);
   assert.match(page, /hasCompletePhysicalOrder/);
+  assert.match(page, /const nextOrder = order\.filter\(\(slotId\) => slotId !== selectedId\)/);
   assert.match(page, /savedTextRange/);
   assert.match(page, /designer-selection-toolbar/);
   assert.match(page, /designer-selection-count/);
@@ -184,6 +189,9 @@ test("Designer provides Word-style continuous section editing and automatic A4 r
   assert.match(page, /onCompositionStart/);
   assert.match(page, /onCompositionEnd/);
   assert.match(page, /handleFlowBoundaryKey/);
+  assert.match(page, /joinFlowBlocks/);
+  assert.match(page, /boundaryFlowBlock/);
+  assert.doesNotMatch(page, /targetNode\.deleteData/);
   assert.match(page, /removedByReflow/);
   assert.match(page, /detachedPageSlots/);
   assert.match(page, /Protected from regeneration; its text still reflows/);
