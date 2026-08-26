@@ -52,6 +52,24 @@ test("saved free-placement images regain drag and resize controls after reopenin
   assert.match(css, /\.designer-free-image\.designer-object-selected \.free-image-nudge/);
 });
 
+test("image inspector keeps a stable selection and resizes both image types continuously", () => {
+  assert.match(page, /type DesignerObjectIdentity/);
+  assert.match(page, /data-designer-object-id/);
+  assert.match(page, /selectedObjectIdentityRef/);
+  assert.match(page, /findDesignerObject/);
+  assert.match(page, /resolveSelectedObject/);
+  assert.match(page, /imageParts/);
+  assert.match(page, /selectedImageSize/);
+  assert.match(page, /resizeSelectedImage/);
+  assert.match(page, /beginImageResize/);
+  assert.match(page, /finishImageResize/);
+  assert.match(page, /aria-label="Image width in pixels"/);
+  assert.match(page, /aria-label="Image height in pixels"/);
+  assert.match(page, /frame\.style\[dimension\]/);
+  assert.match(page, /visual\.src = image\.url/);
+  assert.match(css, /\.designer-size-control/);
+});
+
 test("free images hide editing chrome outside selection and can be deleted", () => {
   assert.match(page, /persistableDesignerHtml/);
   assert.match(page, /html: persistableDesignerHtml\(revision\.html\)/);

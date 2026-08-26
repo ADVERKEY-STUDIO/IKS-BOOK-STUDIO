@@ -3138,6 +3138,17 @@ type DesignerStudioHandle = {
   previewWholeBook: () => Promise<void>;
 };
 
+type DesignerObjectIdentity = {
+  slotId: string;
+  objectId: string;
+  kind: "text box" | "image";
+};
+
+type DesignerImageSize = {
+  width: number;
+  height: number;
+};
+
 type DesignerStudioProps = {
   project: Project;
   embedded?: boolean;
@@ -3164,6 +3175,8 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
   const [message, setMessage] = useState("Designer edits are local and use no AI tokens.");
   const [panel, setPanel] = useState<"page" | "text" | "image" | "layers" | "preflight">("page");
   const [selectedObject, setSelectedObject] = useState<"page" | "text box" | "image">("page");
+  const [selectedObjectIdentity, setSelectedObjectIdentity] = useState<DesignerObjectIdentity | null>(null);
+  const [selectedImageSize, setSelectedImageSize] = useState<DesignerImageSize>({ width: 420, height: 300 });
   const [undoStack, setUndoStack] = useState<DesignerPageRevision[]>([]);
   const [redoStack, setRedoStack] = useState<DesignerPageRevision[]>([]);
   const [issues, setIssues] = useState<string[]>([]);
@@ -3186,6 +3199,8 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
   const liveBookDrafts = useRef<Record<string, DesignerPageRevision>>({});
   const [dirtyPages, setDirtyPages] = useState<string[]>([]);
   const selectedNode = useRef<HTMLElement | null>(null);
+  const selectedObjectIdentityRef = useRef<DesignerObjectIdentity | null>(null);
+  const imageResizeSession = useRef(false);
   const wiredFreeImages = useRef(new WeakSet<HTMLElement>());
 
   useEffect(() => {
@@ -3196,7 +3211,12 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     const keepObjectSelection = Boolean(selectedNode.current && selectedRoot?.contains(selectedNode.current));
     setDraft(liveDraft ?? { ...next, html: liveBookHtml.current[selected?.slotId ?? ""] ?? next.html });
     setUndoStack([]); setRedoStack([]); setIssues([]);
-    if (!keepObjectSelection) { setSelectedObject("page"); selectedNode.current = null; }
+    if (!keepObjectSelection) {
+      setSelectedObject("page");
+      setSelectedObjectIdentity(null);
+      selectedObjectIdentityRef.current = null;
+      selectedNode.current = null;
+    }
   }, [selectedId]);
 
   const dismissBackgroundChoice = (nextMessage: string) => {
@@ -3231,6 +3251,60 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
   const rememberLiveHtml = (slotId: string, html: string) => {
     liveBookHtml.current[slotId] = html;
     setDirtyPages((current) => current.includes(slotId) ? current : [...current, slotId]);
+  };
+  const rootForNode = (node: HTMLElement) => {
+    for (const [slotId, root] of bookEditors.current.entries()) if (root.contains(node)) return { slotId, root };
+    return null;
+  };
+  const imageParts = (node: HTMLElement) => {
+    const freeFrame = node.classList.contains("designer-free-image") ? node : node.closest<HTMLElement>(".designer-free-image");
+    const frame = freeFrame ?? node;
+    const visual = (freeFrame?.querySelector(":scope > img") ?? (node.tagName === "IMG" ? node : node.querySelector("img"))) as HTMLImageElement | null;
+    return { frame, visual };
+  };
+  const readImageSize = (node: HTMLElement): DesignerImageSize => {
+    const { frame } = imageParts(node);
+    return {
+      width: Math.round(parseFloat(frame.style.width) || frame.offsetWidth || 420),
+      height: Math.round(parseFloat(frame.style.height) || frame.offsetHeight || 300),
+    };
+  };
+  const findDesignerObject = (identity = selectedObjectIdentityRef.current) => {
+    if (!identity) return null;
+    const root = bookEditors.current.get(identity.slotId);
+    if (!root) return null;
+    return root.querySelector<HTMLElement>(`[data-designer-object-id="${identity.objectId}"]`);
+  };
+  const selectDesignerObject = (node: HTMLElement, slotId: string, kind: "text box" | "image") => {
+    selectedNode.current?.classList.remove("designer-object-selected");
+    const objectId = node.dataset.designerObjectId || crypto.randomUUID();
+    const gainedIdentity = !node.dataset.designerObjectId;
+    node.dataset.designerObjectId = objectId;
+    const identity = { slotId, objectId, kind } satisfies DesignerObjectIdentity;
+    selectedObjectIdentityRef.current = identity;
+    setSelectedObjectIdentity(identity);
+    selectedNode.current = node;
+    node.classList.add("designer-object-selected");
+    setSelectedObject(kind);
+    setPanel(kind === "image" ? "image" : "text");
+    if (kind === "image") setSelectedImageSize(readImageSize(node));
+    if (gainedIdentity) {
+      const root = bookEditors.current.get(slotId);
+      if (root) rememberLiveHtml(slotId, root.innerHTML);
+    }
+  };
+  const resolveSelectedObject = () => {
+    const liveNode = findDesignerObject();
+    if (liveNode) {
+      selectedNode.current = liveNode;
+      liveNode.classList.add("designer-object-selected");
+      return liveNode;
+    }
+    return selectedNode.current?.isConnected ? selectedNode.current : null;
+  };
+  const captureObjectPageHtml = (slotId = selectedObjectIdentityRef.current?.slotId ?? selectedId) => {
+    const root = bookEditors.current.get(slotId);
+    if (root) rememberLiveHtml(slotId, root.innerHTML);
   };
   const changeDraft = (patch: Partial<DesignerPageRevision>, remember = true) => {
     if (remember) setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]);
@@ -3605,38 +3679,81 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     await onCommit({ ...project, designerPresets: [...(project.designerPresets ?? []), preset] }); setMessage(`${preset.name} saved for reuse.`);
   };
   const selectCanvasObject = (event: ReactMouseEvent<HTMLDivElement>) => {
-    selectedNode.current?.classList.remove("designer-object-selected");
     const target = event.target as HTMLElement;
     const freeImage = target.closest(".designer-free-image") as HTMLElement | null;
     const node = freeImage ?? target.closest("img,.designer-free-text") as HTMLElement | null;
-    if (node) { selectedNode.current = node; node.classList.add("designer-object-selected"); const kind = freeImage || node.tagName === "IMG" ? "image" : "text box"; setSelectedObject(kind); setPanel(kind === "image" ? "image" : "text"); }
-    else { selectedNode.current = null; setSelectedObject("page"); setPanel("page"); }
+    if (node) {
+      const location = rootForNode(node);
+      const kind = freeImage || node.tagName === "IMG" ? "image" : "text box";
+      selectDesignerObject(node, location?.slotId ?? selectedId, kind);
+    } else {
+      selectedNode.current?.classList.remove("designer-object-selected");
+      selectedNode.current = null;
+      selectedObjectIdentityRef.current = null;
+      setSelectedObjectIdentity(null);
+      setSelectedObject("page");
+      setPanel("page");
+    }
   };
-  const mutateObject = (property: string, value: string) => { const node = selectedNode.current; if (!node || node.dataset.designerLocked === "true") return; setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]); setRedoStack([]); (node.style as unknown as Record<string, string>)[property] = value; if (editor.current) rememberLiveHtml(selectedId, editor.current.innerHTML); setMessage(`${selectedObject} updated.`); };
-  const captureSelectedPageHtml = () => { const root = bookEditors.current.get(selectedId) ?? editor.current; if (root) rememberLiveHtml(selectedId, root.innerHTML); };
-  const moveObject = (x: number, y: number) => { const node = selectedNode.current; if (!node || node.dataset.designerLocked === "true") return; if (!node.style.position) node.style.position = node.classList.contains("designer-free-image") ? "absolute" : "relative"; node.style.left = `${(parseFloat(node.style.left) || 0) + x}px`; node.style.top = `${(parseFloat(node.style.top) || 0) + y}px`; captureSelectedPageHtml(); };
-  const duplicateObject = () => { const node = selectedNode.current; if (!node) return; const clone = node.cloneNode(true) as HTMLElement; clone.classList.remove("designer-object-selected"); node.after(clone); captureSelectedPageHtml(); };
+  const mutateObject = (property: string, value: string) => {
+    const node = resolveSelectedObject();
+    if (!node || node.dataset.designerLocked === "true") return;
+    setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]);
+    setRedoStack([]);
+    const { frame, visual } = imageParts(node);
+    const visualProperties = new Set(["objectFit", "objectPosition", "opacity", "borderRadius", "borderWidth", "borderColor", "borderStyle", "boxShadow", "transform"]);
+    const target = selectedObject === "image" && visual && visualProperties.has(property) ? visual : frame;
+    (target.style as unknown as Record<string, string>)[property] = value;
+    captureObjectPageHtml();
+    setMessage(`${selectedObject} updated.`);
+  };
+  const captureSelectedPageHtml = () => captureObjectPageHtml(selectedId);
+  const moveObject = (x: number, y: number) => { const node = resolveSelectedObject(); if (!node || node.dataset.designerLocked === "true") return; const { frame } = imageParts(node); if (!frame.style.position) frame.style.position = frame.classList.contains("designer-free-image") ? "absolute" : "relative"; frame.style.left = `${(parseFloat(frame.style.left) || 0) + x}px`; frame.style.top = `${(parseFloat(frame.style.top) || 0) + y}px`; captureObjectPageHtml(); };
+  const duplicateObject = () => { const node = resolveSelectedObject(); if (!node) return; const clone = node.cloneNode(true) as HTMLElement; clone.classList.remove("designer-object-selected"); clone.dataset.designerObjectId = crypto.randomUUID(); node.after(clone); captureObjectPageHtml(); };
   const deleteObject = () => {
-    const node = selectedNode.current;
+    const node = resolveSelectedObject();
     if (!node) return;
     const deletedImage = node.classList.contains("designer-free-image") || node.tagName === "IMG";
+    const slotId = selectedObjectIdentityRef.current?.slotId ?? selectedId;
     node.remove();
     selectedNode.current = null;
+    selectedObjectIdentityRef.current = null;
+    setSelectedObjectIdentity(null);
     setSelectedObject("page");
     setPanel("page");
-    captureSelectedPageHtml();
+    captureObjectPageHtml(slotId);
     setMessage(deletedImage ? "Image deleted. Save the page or whole book to keep this change." : "Object deleted.");
   };
   const addTextBox = () => { editor.current?.insertAdjacentHTML("beforeend", '<div class="designer-free-text" style="position:relative;padding:12px;border:1px solid #d7cbb8;min-height:48px">Edit this text box</div>'); captureSelectedPageHtml(); setMessage("Text box added. Select it to move, resize or style it."); };
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const beginImageResize = () => {
+    if (imageResizeSession.current) return;
+    imageResizeSession.current = true;
+    setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]);
+    setRedoStack([]);
+  };
+  const resizeSelectedImage = (dimension: keyof DesignerImageSize, rawValue: number) => {
+    const node = resolveSelectedObject();
+    if (!node || node.dataset.designerLocked === "true" || !Number.isFinite(rawValue)) return;
+    beginImageResize();
+    const value = Math.max(80, Math.min(520, Math.round(rawValue)));
+    const { frame } = imageParts(node);
+    frame.style[dimension] = `${value}px`;
+    setSelectedImageSize((current) => ({ ...current, [dimension]: value }));
+    captureObjectPageHtml();
+  };
+  const finishImageResize = () => {
+    if (!imageResizeSession.current) return;
+    imageResizeSession.current = false;
+    const node = resolveSelectedObject();
+    if (node) setSelectedImageSize(readImageSize(node));
+    captureObjectPageHtml();
+    setMessage("Image size updated. Save the page or whole book to keep this change.");
+  };
   const wireFreeImageControls = (container: HTMLElement, root: HTMLDivElement, slotId: string, selectImmediately = false) => {
     const selectImage = () => {
-      selectedNode.current?.classList.remove("designer-object-selected");
-      selectedNode.current = container;
-      container.classList.add("designer-object-selected");
       setSelectedId(slotId);
-      setSelectedObject("image");
-      setPanel("image");
+      selectDesignerObject(container, slotId, "image");
     };
     if (wiredFreeImages.current.has(container)) {
       if (selectImmediately) selectImage();
@@ -3744,15 +3861,22 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     bookEditors.current.forEach((root, slotId) => {
       root.querySelectorAll<HTMLElement>(".designer-free-image").forEach((container) => wireFreeImageControls(container, root, slotId));
     });
+    const identity = selectedObjectIdentityRef.current;
+    const liveNode = findDesignerObject(identity);
+    if (identity && liveNode) {
+      selectedNode.current = liveNode;
+      liveNode.classList.add("designer-object-selected");
+    }
   });
 
   const addFreeImage = async (file: File) => {
     try {
       setBusy(true);
       const image = await uploadAsset(file);
-      const html = `<div class="designer-free-image" data-free-image="true" contenteditable="false" style="position:absolute;left:80px;top:80px;width:280px;height:180px;z-index:3;border:1.5px dashed #b7a98e;background:#fff;overflow:visible;box-shadow:0 4px 12px rgba(0,0,0,0.08);touch-action:none;user-select:none"><div class="free-image-dragbar" style="position:absolute;top:0;left:0;right:0;height:32px;background:#a9322e;color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;font-size:11px;font-weight:800;letter-spacing:0.08em;cursor:grab;user-select:none;border-radius:4px 4px 0 0;touch-action:none">⋮⋮ HOLD & DRAG — trackpad friendly</div><img src="${'${image.url}'}" alt="Free image" draggable="false" style="width:100%;height:100%;object-fit:contain;display:block;pointer-events:none;padding-top:32px;box-sizing:border-box" /><div class="free-image-handle" data-handle="se" style="position:absolute;right:-10px;bottom:-10px;width:20px;height:20px;background:#a9322e;border:2px solid #fff;border-radius:50%;cursor:nwse-resize;box-shadow:0 2px 8px rgba(0,0,0,0.3);touch-action:none"></div><div class="free-image-handle" data-handle="e" style="position:absolute;right:-10px;top:50%;transform:translateY(-50%);width:16px;height:48px;background:rgba(255,255,255,0.98);border:1px solid #a9322e;border-radius:8px;cursor:ew-resize;box-shadow:0 2px 6px rgba(0,0,0,0.2);touch-action:none"></div><div class="free-image-handle" data-handle="s" style="position:absolute;left:50%;bottom:-10px;transform:translateX(-50%);width:48px;height:16px;background:rgba(255,255,255,0.98);border:1px solid #a9322e;border-radius:8px;cursor:ns-resize;box-shadow:0 2px 6px rgba(0,0,0,0.2);touch-action:none"></div><div class="free-image-nudge" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:grid;grid-template-columns:28px 28px 28px;grid-template-rows:28px 28px;gap:4px;opacity:0;pointer-events:none;transition:opacity 0.15s"><button data-nudge="up" style="grid-column:2;grid-row:1;width:28px;height:28px;background:rgba(0,0,0,0.75);color:#fff;border:1px solid #fff;border-radius:50%;font-size:12px;cursor:pointer;pointer-events:auto">↑</button><button data-nudge="left" style="grid-column:1;grid-row:2;width:28px;height:28px;background:rgba(0,0,0,0.75);color:#fff;border:1px solid #fff;border-radius:50%;font-size:12px;cursor:pointer;pointer-events:auto">←</button><button data-nudge="right" style="grid-column:3;grid-row:2;width:28px;height:28px;background:rgba(0,0,0,0.75);color:#fff;border:1px solid #fff;border-radius:50%;font-size:12px;cursor:pointer;pointer-events:auto">→</button><button data-nudge="down" style="grid-column:2;grid-row:2;width:28px;height:28px;background:rgba(0,0,0,0.75);color:#fff;border:1px solid #fff;border-radius:50%;font-size:12px;cursor:pointer;pointer-events:auto">↓</button></div></div>`;
+      const objectId = crypto.randomUUID();
+      const html = `<div class="designer-free-image" data-free-image="true" data-designer-object-id="${'${objectId}'}" contenteditable="false" style="position:absolute;left:80px;top:80px;width:280px;height:180px;z-index:3;border:1.5px dashed #b7a98e;background:#fff;overflow:visible;box-shadow:0 4px 12px rgba(0,0,0,0.08);touch-action:none;user-select:none"><div class="free-image-dragbar" style="position:absolute;top:0;left:0;right:0;height:32px;background:#a9322e;color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;font-size:11px;font-weight:800;letter-spacing:0.08em;cursor:grab;user-select:none;border-radius:4px 4px 0 0;touch-action:none">⋮⋮ HOLD & DRAG — trackpad friendly</div><img src="${'${image.url}'}" alt="Free image" draggable="false" style="width:100%;height:100%;object-fit:contain;display:block;pointer-events:none;padding-top:32px;box-sizing:border-box" /><div class="free-image-handle" data-handle="se" style="position:absolute;right:-10px;bottom:-10px;width:20px;height:20px;background:#a9322e;border:2px solid #fff;border-radius:50%;cursor:nwse-resize;box-shadow:0 2px 8px rgba(0,0,0,0.3);touch-action:none"></div><div class="free-image-handle" data-handle="e" style="position:absolute;right:-10px;top:50%;transform:translateY(-50%);width:16px;height:48px;background:rgba(255,255,255,0.98);border:1px solid #a9322e;border-radius:8px;cursor:ew-resize;box-shadow:0 2px 6px rgba(0,0,0,0.2);touch-action:none"></div><div class="free-image-handle" data-handle="s" style="position:absolute;left:50%;bottom:-10px;transform:translateX(-50%);width:48px;height:16px;background:rgba(255,255,255,0.98);border:1px solid #a9322e;border-radius:8px;cursor:ns-resize;box-shadow:0 2px 6px rgba(0,0,0,0.2);touch-action:none"></div><div class="free-image-nudge" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:grid;grid-template-columns:28px 28px 28px;grid-template-rows:28px 28px;gap:4px;opacity:0;pointer-events:none;transition:opacity 0.15s"><button data-nudge="up" style="grid-column:2;grid-row:1;width:28px;height:28px;background:rgba(0,0,0,0.75);color:#fff;border:1px solid #fff;border-radius:50%;font-size:12px;cursor:pointer;pointer-events:auto">↑</button><button data-nudge="left" style="grid-column:1;grid-row:2;width:28px;height:28px;background:rgba(0,0,0,0.75);color:#fff;border:1px solid #fff;border-radius:50%;font-size:12px;cursor:pointer;pointer-events:auto">←</button><button data-nudge="right" style="grid-column:3;grid-row:2;width:28px;height:28px;background:rgba(0,0,0,0.75);color:#fff;border:1px solid #fff;border-radius:50%;font-size:12px;cursor:pointer;pointer-events:auto">→</button><button data-nudge="down" style="grid-column:2;grid-row:2;width:28px;height:28px;background:rgba(0,0,0,0.75);color:#fff;border:1px solid #fff;border-radius:50%;font-size:12px;cursor:pointer;pointer-events:auto">↓</button></div></div>`;
       // Use template literal with actual url - we need to interpolate correctly in JS
-      const finalHtml = html.replace('${image.url}', image.url);
+      const finalHtml = html.replace('${image.url}', image.url).replace('${objectId}', objectId);
       editor.current?.insertAdjacentHTML("beforeend", finalHtml);
       // Make the new image draggable/resizable via pointer — find the actual free image (not the global badge)
       const allFree = editor.current?.querySelectorAll(".designer-free-image");
@@ -3823,7 +3947,11 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
       {panel === "image" && selectedObject === "image" && <button className="designer-delete-image" onClick={deleteObject}>Delete selected image</button>}
       {panel === "page" && <><section><h3>Page structure</h3><label className="designer-check"><input type="checkbox" checked={draft.intentionalBlank} onChange={(event) => changeDraft({ intentionalBlank: event.target.checked })}/> Intentional blank</label><label className="designer-check"><input type="checkbox" checked={draft.layoutLocked} onChange={(event) => changeDraft({ layoutLocked: event.target.checked })}/> Lock this page during reflow</label><label className="designer-check"><input type="checkbox" checked={draft.deleted} onChange={(event) => changeDraft({ deleted: event.target.checked })}/> Remove from final book</label><div className="designer-row"><button onClick={() => void movePage(-1)}>Move up</button><button onClick={() => void movePage(1)}>Move down</button></div><div className="designer-row" style={{marginTop:"8px"}}><label style={{display:"flex",alignItems:"center",gap:"6px",fontSize:"9px",fontWeight:"800"}}>Move to #<input key={selectedId} id="move-page-input" type="number" min="1" max={order.length} defaultValue={order.indexOf(selectedId)+1} style={{width:"60px",border:"1px solid #d6ccbd",padding:"6px",textAlign:"center"}} /></label><button onClick={() => { const el=document.getElementById("move-page-input") as HTMLInputElement | null; const v=Number(el?.value); if(v>=1 && v<=order.length) void movePageTo(v-1); }} disabled={busy} style={{padding:"7px 10px",fontSize:"9px",fontWeight:"800"}}>Go</button></div><div style={{fontSize:"8px",color:"var(--muted)",marginTop:"4px"}}>Page {order.indexOf(selectedId)+1} of {order.length} — built-in number system</div><button onClick={() => void deletePage()} disabled={busy} style={{marginTop:"8px",background:"#a9322e",color:"white",borderColor:"#a9322e",width:"100%",padding:"9px",fontWeight:"800"}}>Delete page</button>{selected.chapterId && <button className="primary" onClick={() => void balanceLayout("chapter")} disabled={busy || draft.layoutLocked}>Balance this chapter</button>}</section><section><h3>Page layout</h3><label>Margins <span>{draft.pagePadding}px</span><input type="range" min="28" max="100" value={draft.pagePadding} onChange={(event) => changeDraft({ pagePadding: Number(event.target.value) })}/></label><label>Columns<select value={draft.columns} onChange={(event) => changeDraft({ columns: Number(event.target.value) })}><option value="1">One</option><option value="2">Two</option></select></label><label>Column gap <span>{draft.columnGap}px</span><input type="range" min="12" max="60" value={draft.columnGap} onChange={(event) => changeDraft({ columnGap: Number(event.target.value) })}/></label></section><section><h3>Page border</h3><label>Style<select value={draft.borderStyle} onChange={(event) => changeDraft({ borderStyle: event.target.value as DesignerPageRevision["borderStyle"] })}><option value="none">None</option><option value="solid">Single</option><option value="double">Double</option><option value="dashed">Decorative dashed</option></select></label><div className="designer-row"><label>Colour<input type="color" value={draft.borderColor} onChange={(event) => changeDraft({ borderColor: event.target.value })}/></label><label>Width<input type="number" min="1" max="12" value={draft.borderWidth} onChange={(event) => changeDraft({ borderWidth: Number(event.target.value) })}/></label></div><label>Inset <span>{draft.borderInset}px</span><input type="range" min="0" max="50" value={draft.borderInset} onChange={(event) => changeDraft({ borderInset: Number(event.target.value) })}/></label><label>Corner radius <span>{draft.borderRadius}px</span><input type="range" min="0" max="60" value={draft.borderRadius} onChange={(event) => changeDraft({ borderRadius: Number(event.target.value) })}/></label></section><section><h3>Background</h3><label>Colour<input type="color" value={draft.backgroundColor} onChange={(event) => changeDraft({ backgroundColor: event.target.value })}/></label><label className="designer-upload">{busy ? "Uploading background…" : "Upload background"}<input ref={backgroundUploadInputRef} type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={(event) => void uploadBackground(event)}/></label><p className="designer-help">After upload, choose whether to use the background on this page only or throughout the whole book.</p><label>Fit<select value={draft.backgroundSize} onChange={(event) => changeDraft({ backgroundSize: event.target.value as DesignerPageRevision["backgroundSize"] })}><option value="cover">Cover</option><option value="contain">Contain</option><option value="auto">Original size</option><option value="repeat">Tile</option></select></label><label>Opacity <span>{Math.round(draft.backgroundOpacity * 100)}%</span><input type="range" min="0" max="1" step=".05" value={draft.backgroundOpacity} onChange={(event) => changeDraft({ backgroundOpacity: Number(event.target.value) })}/></label>{draft.backgroundImageUrl && <button onClick={() => changeDraft({ backgroundImageKey: undefined, backgroundImageUrl: undefined })}>Remove background</button>}</section></>}
       {panel === "text" && <><section><h3>Typography</h3><label>Page font<select value={draft.fontFamily} onChange={(event) => changeDraft({ fontFamily: event.target.value })}><option value="Georgia, serif">Editorial Serif</option><option value="Arial, sans-serif">Clear Sans</option><option value="'Trebuchet MS', sans-serif">Friendly Reader</option><option value="'Noto Serif', serif">Sanskrit Scholar</option><option value="'Noto Sans Devanagari', sans-serif">Devanagari Sans</option></select></label><div className="designer-row"><label>Size<input type="number" min="9" max="34" value={draft.fontSize} onChange={(event) => changeDraft({ fontSize: Number(event.target.value) })}/></label><label>Colour<input type="color" value={draft.textColor} onChange={(event) => changeDraft({ textColor: event.target.value })}/></label></div><label>Line height <span>{draft.lineHeight.toFixed(2)}</span><input type="range" min="1" max="2.2" step=".05" value={draft.lineHeight} onChange={(event) => changeDraft({ lineHeight: Number(event.target.value) })}/></label><label>Letter spacing <span>{draft.letterSpacing}px</span><input type="range" min="-1" max="5" step=".1" value={draft.letterSpacing} onChange={(event) => changeDraft({ letterSpacing: Number(event.target.value) })}/></label><label>Paragraph spacing <span>{draft.paragraphSpacing}px</span><input type="range" min="0" max="35" value={draft.paragraphSpacing} onChange={(event) => changeDraft({ paragraphSpacing: Number(event.target.value) })}/></label></section><section><h3>Selected text box</h3><p className="designer-help">Select a custom text box on the page, then move, resize, layer or lock it.</p><div className="object-nudge"><button onClick={() => moveObject(0,-5)}>↑</button><button onClick={() => moveObject(-5,0)}>←</button><button onClick={() => moveObject(5,0)}>→</button><button onClick={() => moveObject(0,5)}>↓</button></div><label>Width<input type="range" min="120" max="520" defaultValue="360" onChange={(event) => mutateObject("width", `${event.target.value}px`)}/></label><label>Padding<input type="range" min="0" max="40" defaultValue="12" onChange={(event) => mutateObject("padding", `${event.target.value}px`)}/></label><div className="designer-row"><button onClick={() => mutateObject("zIndex", "4")}>Bring front</button><button onClick={() => mutateObject("zIndex", "0")}>Send back</button></div><div className="designer-row"><button onClick={duplicateObject}>Duplicate</button><button onClick={deleteObject}>Delete</button></div><button onClick={() => { if (!selectedNode.current) return; selectedNode.current.dataset.designerLocked = selectedNode.current.dataset.designerLocked === "true" ? "false" : "true"; }}>Lock / unlock object</button></section></>}
-      {panel === "image" && <section><h3>Selected image</h3><p className="designer-help">Click an image on the page to edit it. Changes are stored inside the page edition.</p><label>Width<input type="range" min="80" max="520" defaultValue="420" onChange={(event) => mutateObject("width", `${event.target.value}px`)}/></label><label>Height<input type="range" min="80" max="520" defaultValue="300" onChange={(event) => mutateObject("height", `${event.target.value}px`)}/></label><label>Crop / fit<select defaultValue="contain" onChange={(event) => mutateObject("objectFit", event.target.value)}><option value="contain">Fit</option><option value="cover">Fill and crop</option><option value="fill">Stretch</option></select></label><label>Focal position<select defaultValue="center" onChange={(event) => mutateObject("objectPosition", event.target.value)}><option value="center">Centre</option><option value="top">Top</option><option value="bottom">Bottom</option><option value="left">Left</option><option value="right">Right</option></select></label><label>Opacity<input type="range" min="0.1" max="1" step=".05" defaultValue="1" onChange={(event) => mutateObject("opacity", event.target.value)}/></label><label>Rounded corners<input type="range" min="0" max="80" defaultValue="0" onChange={(event) => mutateObject("borderRadius", `${event.target.value}px`)}/></label><label>Border width<input type="range" min="0" max="16" defaultValue="0" onChange={(event) => mutateObject("borderWidth", `${event.target.value}px`)}/></label><label>Border colour<input type="color" defaultValue="#173f37" onChange={(event) => { mutateObject("borderColor", event.target.value); mutateObject("borderStyle", "solid"); }}/></label><label>Rotation<input type="range" min="-30" max="30" defaultValue="0" onChange={(event) => mutateObject("transform", `rotate(${event.target.value}deg)`)}/></label><label>Shadow<select defaultValue="none" onChange={(event) => mutateObject("boxShadow", event.target.value)}><option value="none">None</option><option value="0 6px 16px #0003">Soft</option><option value="0 12px 28px #0005">Strong</option></select></label><div className="designer-row"><button onClick={() => mutateObject("float", "left")}>Wrap right</button><button onClick={() => mutateObject("float", "right")}>Wrap left</button></div><div className="designer-row"><button onClick={() => mutateObject("transform", "scaleX(-1)")}>Flip horizontal</button><button onClick={() => mutateObject("transform", "scaleY(-1)")}>Flip vertical</button></div><div className="object-nudge"><button onClick={() => moveObject(0,-5)}>↑</button><button onClick={() => moveObject(-5,0)}>←</button><button onClick={() => moveObject(5,0)}>→</button><button onClick={() => moveObject(0,5)}>↓</button></div><label className="designer-upload">Replace image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={async (event) => { const file = event.target.files?.[0]; if (!file || selectedNode.current?.tagName !== "IMG") return; const image = await uploadAsset(file); (selectedNode.current as HTMLImageElement).src = image.url; }}/></label><label>Alternative text<input placeholder="Describe this image" onChange={(event) => { if (selectedNode.current?.tagName === "IMG") selectedNode.current.setAttribute("alt", event.target.value); }}/></label><label>Caption<input placeholder="Image caption" onChange={(event) => { const figure = selectedNode.current?.closest("figure"); const caption = figure?.querySelector("figcaption"); if (caption) caption.textContent = event.target.value; }}/></label><div className="designer-row"><button onClick={duplicateObject}>Duplicate</button><button onClick={deleteObject}>Remove</button></div><button onClick={() => { if (!selectedNode.current) return; selectedNode.current.dataset.designerLocked = selectedNode.current.dataset.designerLocked === "true" ? "false" : "true"; }}>Lock / unlock image</button></section>}
+      {panel === "image" && <section key={selectedObjectIdentity?.objectId ?? "image-inspector"}><h3>Selected image</h3><p className="designer-help">Click an image once, then resize it continuously. Changes are stored inside the page edition.</p>
+        <label>Width <span>{selectedImageSize.width}px</span><div className="designer-size-control"><input aria-label="Image width slider" type="range" min="80" max="520" value={selectedImageSize.width} onPointerDown={beginImageResize} onPointerUp={finishImageResize} onPointerCancel={finishImageResize} onKeyDown={beginImageResize} onBlur={finishImageResize} onChange={(event) => resizeSelectedImage("width", Number(event.target.value))}/><input aria-label="Image width in pixels" type="number" min="80" max="520" value={selectedImageSize.width} onFocus={beginImageResize} onBlur={finishImageResize} onChange={(event) => resizeSelectedImage("width", Number(event.target.value))}/></div></label>
+        <label>Height <span>{selectedImageSize.height}px</span><div className="designer-size-control"><input aria-label="Image height slider" type="range" min="80" max="520" value={selectedImageSize.height} onPointerDown={beginImageResize} onPointerUp={finishImageResize} onPointerCancel={finishImageResize} onKeyDown={beginImageResize} onBlur={finishImageResize} onChange={(event) => resizeSelectedImage("height", Number(event.target.value))}/><input aria-label="Image height in pixels" type="number" min="80" max="520" value={selectedImageSize.height} onFocus={beginImageResize} onBlur={finishImageResize} onChange={(event) => resizeSelectedImage("height", Number(event.target.value))}/></div></label>
+        <label>Crop / fit<select defaultValue="contain" onChange={(event) => mutateObject("objectFit", event.target.value)}><option value="contain">Fit</option><option value="cover">Fill and crop</option><option value="fill">Stretch</option></select></label><label>Focal position<select defaultValue="center" onChange={(event) => mutateObject("objectPosition", event.target.value)}><option value="center">Centre</option><option value="top">Top</option><option value="bottom">Bottom</option><option value="left">Left</option><option value="right">Right</option></select></label><label>Opacity<input type="range" min="0.1" max="1" step=".05" defaultValue="1" onChange={(event) => mutateObject("opacity", event.target.value)}/></label><label>Rounded corners<input type="range" min="0" max="80" defaultValue="0" onChange={(event) => mutateObject("borderRadius", `${event.target.value}px`)}/></label><label>Border width<input type="range" min="0" max="16" defaultValue="0" onChange={(event) => mutateObject("borderWidth", `${event.target.value}px`)}/></label><label>Border colour<input type="color" defaultValue="#173f37" onChange={(event) => { mutateObject("borderColor", event.target.value); mutateObject("borderStyle", "solid"); }}/></label><label>Rotation<input type="range" min="-30" max="30" defaultValue="0" onChange={(event) => mutateObject("transform", `rotate(${event.target.value}deg)`)}/></label><label>Shadow<select defaultValue="none" onChange={(event) => mutateObject("boxShadow", event.target.value)}><option value="none">None</option><option value="0 6px 16px #0003">Soft</option><option value="0 12px 28px #0005">Strong</option></select></label><div className="designer-row"><button onClick={() => mutateObject("float", "left")}>Wrap right</button><button onClick={() => mutateObject("float", "right")}>Wrap left</button></div><div className="designer-row"><button onClick={() => mutateObject("transform", "scaleX(-1)")}>Flip horizontal</button><button onClick={() => mutateObject("transform", "scaleY(-1)")}>Flip vertical</button></div><div className="object-nudge"><button onClick={() => moveObject(0,-5)}>↑</button><button onClick={() => moveObject(-5,0)}>←</button><button onClick={() => moveObject(5,0)}>→</button><button onClick={() => moveObject(0,5)}>↓</button></div>
+        <label className="designer-upload">Replace image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={async (event) => { const file = event.target.files?.[0]; const node = resolveSelectedObject(); const visual = node ? imageParts(node).visual : null; if (!file || !visual) return; const image = await uploadAsset(file); visual.src = image.url; captureObjectPageHtml(); }}/></label><label>Alternative text<input placeholder="Describe this image" onChange={(event) => { const node = resolveSelectedObject(); const visual = node ? imageParts(node).visual : null; if (visual) { visual.alt = event.target.value; captureObjectPageHtml(); } }}/></label><label>Caption<input placeholder="Image caption" onChange={(event) => { const node = resolveSelectedObject(); const figure = node?.closest("figure"); const caption = figure?.querySelector("figcaption"); if (caption) { caption.textContent = event.target.value; captureObjectPageHtml(); } }}/></label><div className="designer-row"><button onClick={duplicateObject}>Duplicate</button><button onClick={deleteObject}>Remove</button></div><button onClick={() => { const node = resolveSelectedObject(); if (!node) return; node.dataset.designerLocked = node.dataset.designerLocked === "true" ? "false" : "true"; captureObjectPageHtml(); }}>Lock / unlock image</button></section>}
       {panel === "layers" && <><section><h3>Layers</h3><label className="designer-check"><input type="checkbox" checked={draft.contentVisible} onChange={(event) => changeDraft({ contentVisible: event.target.checked })}/> Content and objects</label><label className="designer-check"><input type="checkbox" checked={draft.watermarkVisible} onChange={(event) => changeDraft({ watermarkVisible: event.target.checked })}/> Watermark</label><label className="designer-check"><input type="checkbox" checked={Boolean(draft.backgroundImageUrl)} onChange={(event) => !event.target.checked && changeDraft({ backgroundImageUrl: undefined, backgroundImageKey: undefined })}/> Background image</label></section><section><h3>Watermark</h3><label>Text<input value={draft.watermarkText} onChange={(event) => changeDraft({ watermarkText: event.target.value })}/></label><label className="designer-upload">Upload logo<input type="file" accept="image/png,image/jpeg,image/webp" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; const image = await uploadAsset(file); changeDraft({ watermarkImageKey: image.key, watermarkImageUrl: image.url }); }}/></label><label>Opacity<input type="range" min="0" max=".7" step=".01" value={draft.watermarkOpacity} onChange={(event) => changeDraft({ watermarkOpacity: Number(event.target.value) })}/></label><label>Rotation<input type="range" min="-90" max="90" value={draft.watermarkRotation} onChange={(event) => changeDraft({ watermarkRotation: Number(event.target.value) })}/></label><label>Horizontal position<input type="range" min="10" max="90" value={draft.watermarkX} onChange={(event) => changeDraft({ watermarkX: Number(event.target.value) })}/></label><label>Vertical position<input type="range" min="10" max="90" value={draft.watermarkY} onChange={(event) => changeDraft({ watermarkY: Number(event.target.value) })}/></label><label className="designer-check"><input type="checkbox" checked={draft.watermarkRepeat} onChange={(event) => changeDraft({ watermarkRepeat: event.target.checked })}/> Repeat watermark</label></section><section><h3>Page versions</h3><button onClick={() => void restorePrevious()} disabled={!saved?.history.length}>Restore previous</button><button onClick={() => void resetPage()}>Restore Studio page</button></section></>}
       {panel === "preflight" && <><section><h3>Whole-book preflight</h3>{bookIssues.length ? <ul className="preflight-issues book-preflight-issues">{bookIssues.map((item) => <li key={`${item.slotId}-${item.issue}`}><b>{item.label}</b><span>{item.issue}</span><button onClick={() => selectAndReveal(item.slotId)}>Go to page</button></li>)}</ul> : <div className="preflight-pass">✓ No accidental empty or overflowing pages detected</div>}<button onClick={runBookPreflight}>Check whole book</button><button onClick={() => void balanceLayout("book")} disabled={busy}>Balance whole book</button></section><section><h3>Selected page check</h3>{issues.length ? <ul className="preflight-issues">{issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : <p className="designer-help">Use this check for image resolution and print boundaries on the selected page.</p>}<button onClick={runPreflight}>Check selected page</button></section><section><h3>Apply design</h3><p className="designer-help">Copies visual settings only. Text and images stay unique.</p><button onClick={() => void applyStyle("page")}>Apply to this page</button>{selected.chapterId && <button onClick={() => void applyStyle("chapter")}>Apply to this chapter</button>}<button onClick={() => void applyStyle("book")}>Apply to whole book</button></section><section><h3>Reusable styles</h3><div className="style-presets"><button onClick={() => changeDraft({ fontFamily: "Georgia, serif", fontSize: 15, lineHeight: 1.55, backgroundColor: "#fffdf8", borderStyle: "double", borderColor: "#b4863e" })}>Scholar</button><button onClick={() => changeDraft({ fontFamily: "'Trebuchet MS', sans-serif", fontSize: 16, lineHeight: 1.65, backgroundColor: "#fff8e8", borderStyle: "solid", borderColor: "#d17b43", borderRadius: 18 })}>Storybook</button><button onClick={() => changeDraft({ fontFamily: "Arial, sans-serif", fontSize: 14, lineHeight: 1.5, backgroundColor: "#ffffff", borderStyle: "none" })}>Minimal</button></div>{(project.designerPresets ?? []).map((preset) => <button key={preset.id} onClick={() => changeDraft(preset.style)}>{preset.name}</button>)}<button onClick={() => void savePreset()}>Save current style</button></section></>}
     </aside></div>
