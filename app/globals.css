@@ -361,7 +361,7 @@
 .single-page-stage>div{filter:drop-shadow(0 22px 32px rgba(38,39,35,.25))}
 .continuous-book-stage{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;align-items:center;gap:28px;padding:34px 36px 110px;background:radial-gradient(circle at 50% 8%,#e2ded6 0,#cbc6bd 50%,#b8b3ab 100%);scroll-behavior:smooth}
 .continuous-sheet-frame{position:relative;flex:none;filter:drop-shadow(0 20px 30px rgba(38,39,35,.23))}
-.continuous-sheet-frame>div{position:absolute;left:0;top:0;width:794px;height:1123px;transform-origin:top left}
+.continuous-sheet-frame>.continuous-sheet-scale{position:absolute;left:0;top:0;width:794px;height:1123px;transform-origin:top left}
 .chapter-preview-heading{position:sticky;z-index:3;top:14px;display:flex;width:min(740px,calc(100% - 24px));min-height:62px;align-items:center;justify-content:space-between;gap:18px;padding:12px 17px;border:1px solid #ffffff8c;border-radius:6px;background:#173f37eb;color:#fff;box-shadow:0 10px 30px #173f3745;backdrop-filter:blur(9px)}
 .chapter-preview-heading>div{min-width:0}
 .chapter-preview-heading span{display:block;margin-bottom:3px;color:#d7ad58;font-size:7px;font-weight:900;letter-spacing:.15em}
@@ -546,7 +546,7 @@
 .designer-editable-content .designer-free-image.designer-object-selected>.free-image-dragbar{display:flex!important}
 .designer-editable-content .designer-free-image.designer-object-selected>.free-image-handle{display:block!important}
 .designer-editable-content .designer-free-image.designer-object-selected>.free-image-nudge{display:grid!important}
-.designer-editable-content .designer-free-image.designer-object-selected>img{padding-top:32px!important}
+.designer-editable-content .designer-free-image.designer-object-selected>img{width:100%!important;height:100%!important;max-height:none!important;padding-top:0!important}
 .designer-render-content .designer-object-selected{outline:0!important}
 .designer-render-content .designer-free-image{border-color:transparent!important;background:transparent!important;box-shadow:none!important;outline:0!important;overflow:hidden!important;cursor:default!important}
 .designer-render-content .designer-free-image>.free-image-dragbar,.designer-render-content .designer-free-image>.free-image-handle,.designer-render-content .designer-free-image>.free-image-nudge{display:none!important;pointer-events:none!important}

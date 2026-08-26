@@ -78,6 +78,16 @@ test("free images hide editing chrome outside selection and can be deleted", () 
   assert.match(css, /\.designer-free-image:not\(\.designer-object-selected\)>\.free-image-dragbar/);
   assert.match(css, /\.designer-render-content \.designer-free-image>\.free-image-dragbar/);
   assert.match(css, /\.designer-render-content \.designer-free-image>img/);
+  assert.match(css, /\.designer-editable-content \.designer-free-image\.designer-object-selected>img\{width:100%!important;height:100%!important;max-height:none!important;padding-top:0!important\}/);
+});
+
+test("designer and Preview preserve free-image geometry and keep actions outside the scaled page", () => {
+  assert.match(page, /clampFreeImageFrame/);
+  assert.match(page, /footerClearance = Math\.max\(58/);
+  assert.match(page, /A freely placed image overlaps the page-number or footer area/);
+  assert.match(page, /className="continuous-sheet-scale"/);
+  assert.match(css, /\.continuous-sheet-frame>\.continuous-sheet-scale\{/);
+  assert.doesNotMatch(css, /\.continuous-sheet-frame>div\{/);
 });
 
 test("a deselected free image can be selected and dragged again without a pointerdown rerender", () => {
