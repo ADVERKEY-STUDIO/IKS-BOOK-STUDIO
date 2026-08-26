@@ -3275,19 +3275,21 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     if (!root) return null;
     return root.querySelector<HTMLElement>(`[data-designer-object-id="${identity.objectId}"]`);
   };
-  const selectDesignerObject = (node: HTMLElement, slotId: string, kind: "text box" | "image") => {
+  const selectDesignerObject = (node: HTMLElement, slotId: string, kind: "text box" | "image", commitState = true) => {
     selectedNode.current?.classList.remove("designer-object-selected");
     const objectId = node.dataset.designerObjectId || crypto.randomUUID();
     const gainedIdentity = !node.dataset.designerObjectId;
     node.dataset.designerObjectId = objectId;
     const identity = { slotId, objectId, kind } satisfies DesignerObjectIdentity;
     selectedObjectIdentityRef.current = identity;
-    setSelectedObjectIdentity(identity);
     selectedNode.current = node;
     node.classList.add("designer-object-selected");
-    setSelectedObject(kind);
-    setPanel(kind === "image" ? "image" : "text");
-    if (kind === "image") setSelectedImageSize(readImageSize(node));
+    if (commitState) {
+      setSelectedObjectIdentity(identity);
+      setSelectedObject(kind);
+      setPanel(kind === "image" ? "image" : "text");
+      if (kind === "image") setSelectedImageSize(readImageSize(node));
+    }
     if (gainedIdentity) {
       const root = bookEditors.current.get(slotId);
       if (root) rememberLiveHtml(slotId, root.innerHTML);
@@ -3751,9 +3753,9 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     setMessage("Image size updated. Save the page or whole book to keep this change.");
   };
   const wireFreeImageControls = (container: HTMLElement, root: HTMLDivElement, slotId: string, selectImmediately = false) => {
-    const selectImage = () => {
-      setSelectedId(slotId);
-      selectDesignerObject(container, slotId, "image");
+    const selectImage = (commitState = true) => {
+      if (commitState) setSelectedId(slotId);
+      selectDesignerObject(container, slotId, "image", commitState);
     };
     if (wiredFreeImages.current.has(container)) {
       if (selectImmediately) selectImage();
@@ -3793,8 +3795,8 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
       activePointerId = null;
       container.style.cursor = "";
       if (dragBar) dragBar.style.cursor = "grab";
-      selectImage();
       rememberPosition();
+      selectImage();
       setMessage("Image position saved locally. Use Save page or Save whole book to keep it permanently.");
     };
     const onPointerDown = (event: PointerEvent) => {
@@ -3803,8 +3805,11 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
       const handle = target.closest(".free-image-handle") as HTMLElement | null;
       const isDragArea = Boolean(target.closest(".free-image-dragbar")) || target === container || Boolean(target.closest(".designer-free-image"));
       if (!handle && !isDragArea) return;
-      selectImage();
-      if (container.dataset.designerLocked === "true") return;
+      if (container.dataset.designerLocked === "true") { selectImage(); return; }
+      // Prime the DOM selection without setting React state. Updating React here
+      // replaces the innerHTML node before pointermove, so a reselected image
+      // appears selected but cannot move. Commit the state after pointerup.
+      selectImage(false);
       mode = handle ? ((handle.dataset.handle as "se" | "e" | "s") || "se") : "move";
       const rootRect = root.getBoundingClientRect();
       const rect = container.getBoundingClientRect();

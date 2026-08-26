@@ -80,6 +80,13 @@ test("free images hide editing chrome outside selection and can be deleted", () 
   assert.match(css, /\.designer-render-content \.designer-free-image>img/);
 });
 
+test("a deselected free image can be selected and dragged again without a pointerdown rerender", () => {
+  assert.match(page, /selectDesignerObject = \(node: HTMLElement, slotId: string, kind: "text box" \| "image", commitState = true\)/);
+  assert.match(page, /selectImage\(false\)/);
+  assert.match(page, /if \(commitState\) setSelectedId\(slotId\)/);
+  assert.match(page, /rememberPosition\(\);\s*selectImage\(\);/);
+});
+
 test("designer supports reusable styles, scoped application and local preflight", () => {
   assert.match(page, /applyStyle\("chapter"\)/);
   assert.match(page, /applyStyle\("book"\)/);
