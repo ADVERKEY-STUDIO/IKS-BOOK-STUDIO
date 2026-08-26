@@ -28,6 +28,13 @@ test("the ChatGPT ZIP workflow is tucked under Advanced tools", () => {
   assert.doesNotMatch(page, />✦ <span>ChatGPT Book<\/span>/);
 });
 
+test("Designer-first navigation keeps production tools under Advanced", () => {
+  assert.match(page, /Return to Designer/);
+  assert.match(page, /Preview & PDF/);
+  for (const label of ["Production workflow", "Chapters", "Review queue", "Illustrations"]) assert.match(page, new RegExp(label));
+  assert.doesNotMatch(page, /<button onClick=\{openPreview\}>Preview<\/button>/);
+});
+
 test("pause, restore, and the bounded feedback loop are durable", () => {
   assert.match(page, /pauseAfterCurrentRef\.current = true/);
   assert.match(page, /Before restoring previous version/);

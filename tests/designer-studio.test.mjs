@@ -9,8 +9,24 @@ test("Designer Studio is a separate persisted final-production layer", () => {
   assert.match(page, /designerPages\?: DesignerPageOverride\[\]/);
   assert.match(page, /designerPageOrder\?: string\[\]/);
   assert.match(page, /designerPages: \(cleanSaved\.designerPages \?\? \[\]\)\.map\(hydrateDesignerOverride\)/);
-  assert.match(page, />Designer<\/button>/);
+  assert.match(page, /designer-nav-button/);
   assert.match(page, /Edit the final book without changing generated chapters or Nemotron history/);
+});
+
+test("completed books use Designer as the embedded primary workspace", () => {
+  assert.match(page, /type EditorWorkspace = "designer" \| "workflow"/);
+  assert.match(page, /function isDesignerReady\(project: Project\)/);
+  assert.match(page, /setEditorWorkspace\(isDesignerReady\(next\) \? "designer" : "workflow"\)/);
+  assert.match(page, /editorWorkspace === "designer" && <DesignerStudio ref=\{designerStudioRef\} embedded/);
+  assert.match(css, /\.designer-embedded-shell\{/);
+});
+
+test("production workflow remains available without sitting behind Designer", () => {
+  assert.match(page, />Production workflow<\/button>/);
+  assert.match(page, /editorWorkspace === "workflow" && active && <SimpleWorkflowBar/);
+  assert.match(page, /editorWorkspace === "workflow" && <Editor/);
+  assert.match(page, /await designerStudioRef\.current\?\.saveWholeBook\(\)/);
+  assert.match(page, /!embedded && <button className="designer-close"/);
 });
 
 test("advanced typography, object, border and image controls are selection-aware", () => {
@@ -81,8 +97,8 @@ test("custom backgrounds, watermarks, and layers are available", () => {
 
 test("uploaded backgrounds are visible and immediately persisted", () => {
   assert.match(page, /const uploadBackground = async/);
-  assert.match(page, /await saveRevision\(\{ \.\.\.currentSnapshot\(\), \.\.\.background \}\)/);
-  assert.match(page, /Background applied to this page and saved/);
+  assert.match(page, /const replacement = makeOverride\(target, revision, existing\)/);
+  assert.match(page, /Background applied to \$\{target\.label\} and saved/);
   assert.ok(page.indexOf("function ownerHeaders()") < page.indexOf("export default function Home()"), "ownerHeaders must be module-scoped so Designer Studio can upload");
   assert.match(css, /\.designer-canvas-page \.designer-background-layer,.designer-rendered-sheet \.designer-background-layer\{z-index:0/);
   assert.match(css, /\.designer-canvas-page \.designer-editable-content,.designer-rendered-sheet \.designer-render-content\{position:relative;z-index:2/);
@@ -96,7 +112,15 @@ test("background upload asks for page or whole-book scope", () => {
   assert.match(page, /applyUploadedBackground\("page"\)/);
   assert.match(page, /applyUploadedBackground\("book"\)/);
   assert.match(page, /allPages\.forEach/);
+  assert.match(page, /targetSlotId: target\.slotId/);
+  assert.match(page, /Uploaded from <b>\{pendingBackground\.targetLabel\}<\/b>/);
+  assert.match(page, /ref=\{backgroundChoicePrimaryRef\}/);
+  assert.match(page, /event\.key !== "Escape"/);
+  assert.match(page, /event\.key !== "Tab"/);
+  assert.match(page, /ref=\{backgroundUploadInputRef\}/);
+  assert.match(css, /\.designer-background-choice-overlay\{position:absolute;z-index:100;inset:0;display:grid;place-items:center/);
   assert.match(css, /\.designer-background-choice/);
+  assert.ok(page.indexOf("designer-whole-book-canvas") < page.indexOf("designer-background-choice-overlay"), "background chooser must render outside the long book canvas");
 });
 
 test("Designer Studio exposes the complete book as one editable flowing workspace", () => {
@@ -142,9 +166,9 @@ test("Preview and PDF consume saved designer pages and custom ordering", () => {
   assert.match(page, /override\?\.active[\s\S]*designerFor\(sheet\)/);
 });
 
-test("Designer preview and PDF preserve the authored 650px A4 layout", () => {
+test("Designer preview and PDF preserve the shared 794×1123 A4 layout", () => {
   assert.match(page, /designer-render-canvas/);
-  assert.match(css, /\.designer-render-canvas\{[^}]*width:650px[^}]*height:919\.285714px[^}]*transform:scale\(1\.2215384615\)/);
+  assert.match(css, /\.designer-render-canvas\{[^}]*width:794px[^}]*height:1123px[^}]*transform:none/);
   assert.match(page, /previewWholeBook/);
   assert.match(page, /await saveWholeBook\(\);[\s\S]*onPreview\(\)/);
 });
@@ -153,7 +177,7 @@ test("Designer uses the final publication template and saves individual pages", 
   assert.match(page, /function designerBookClasses/);
   assert.match(page, /function designerPageClasses/);
   assert.match(page, /designer-canvas-page book-sheet \$\{bookClasses\} \$\{pageClasses\}/);
-  assert.match(page, /surfaceClasses = `\$\{designerBookClasses\(project\)\} \$\{designerPageClasses\(project, page\)\}`/);
+  assert.match(page, /surfaceClasses = `\$\{designerBookClasses\(project\)\} \$\{designerPageClasses\(project, page\)\}\$\{page\.backgroundImageUrl/);
   assert.match(page, /savePageById = async/);
   assert.match(page, /page-save-button/);
   assert.match(page, /Save page/);
