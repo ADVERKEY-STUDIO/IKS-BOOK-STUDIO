@@ -521,18 +521,18 @@
 .designer-canvas-page.preview-cover .designer-editable-content>b,.designer-render-canvas.preview-cover .designer-render-content>b{position:absolute;right:68px;bottom:68px;color:#d7ad58;font-size:43px}
 .designer-canvas-page.contents-page .designer-editable-content>span:first-child,.designer-render-canvas.contents-page .designer-render-content>span:first-child{color:#a34f32;font:800 8px/1.2 ui-sans-serif,system-ui;letter-spacing:.17em}
 .designer-canvas-page.contents-page .designer-editable-content>h2,.designer-render-canvas.contents-page .designer-render-content>h2{margin:12px 0 26px;color:#173f37;font:400 32px/1.08 Georgia,serif}
-.designer-canvas-page.contents-page ol,.designer-render-canvas.contents-page ol{margin:0;padding:0;list-style:none;border-top:1px solid #ded4c3}
-.designer-canvas-page.contents-page li,.designer-render-canvas.contents-page li{display:grid;grid-template-columns:37px minmax(0,1fr) 70px;gap:11px;align-items:center;min-height:44px;border-bottom:1px solid #e3d9c9}
+.designer-canvas-page.contents-page ol,.designer-render-canvas.contents-page ol{margin:0;padding:0;list-style:none;border-top:var(--designer-separator-width,1px) var(--designer-separator-style,solid) var(--designer-separator-color,#ded4c3)}
+.designer-canvas-page.contents-page li,.designer-render-canvas.contents-page li{display:grid;grid-template-columns:37px minmax(0,1fr) 70px;gap:11px;align-items:center;min-height:44px;border-bottom:var(--designer-separator-width,1px) var(--designer-separator-style,solid) var(--designer-separator-color,#e3d9c9)}
 .designer-canvas-page.contents-page li>b,.designer-render-canvas.contents-page li>b{color:#a34f32;font:700 11px/1 Georgia,serif}
 .designer-canvas-page.contents-page li>span,.designer-render-canvas.contents-page li>span{color:#243a34;font:500 11.5px/1.25 Georgia,serif}
 .designer-canvas-page.contents-page li>i,.designer-render-canvas.contents-page li>i{color:#8a8378;font:700 7px/1.2 ui-sans-serif,system-ui;text-align:right;text-transform:uppercase}
-.designer-canvas-page.chapter-preview .print-chapter-header,.designer-render-canvas.chapter-preview .print-chapter-header{padding-bottom:10px;border-bottom:2px solid #173f37;color:#9a4d32;font:800 7px/1.2 ui-sans-serif,system-ui;letter-spacing:.13em}
+.designer-canvas-page.chapter-preview .print-chapter-header,.designer-render-canvas.chapter-preview .print-chapter-header{padding-bottom:10px;border-bottom:var(--designer-separator-width,2px) var(--designer-separator-style,solid) var(--designer-separator-color,#173f37);color:#9a4d32;font:800 7px/1.2 ui-sans-serif,system-ui;letter-spacing:.13em}
 .designer-canvas-page.chapter-preview .designer-editable-content>h2,.designer-render-canvas.chapter-preview .designer-render-content>h2{margin:20px 0 15px;color:#173f37;font:400 31px/1.08 Georgia,serif}
 .designer-canvas-page.chapter-preview .preview-body,.designer-render-canvas.chapter-preview .preview-body{color:#2c3e38;font:400 10px/1.62 Georgia,serif}
 .designer-canvas-page.chapter-preview .preview-body p,.designer-render-canvas.chapter-preview .preview-body p{margin:0 0 .68em;line-height:1.56}
 .designer-canvas-page.chapter-preview .preview-body h2,.designer-render-canvas.chapter-preview .preview-body h2{margin:.72em 0 .24em;color:#173f37;font-family:Georgia,serif}
 .designer-canvas-page.chapter-preview .preview-body h3,.designer-render-canvas.chapter-preview .preview-body h3{margin:.62em 0 .2em;color:#173f37;font-family:Georgia,serif}
-.designer-canvas-page .sheet-number,.designer-render-canvas .sheet-number{display:flex;justify-content:space-between;margin-top:auto;padding-top:10px;border-top:1px solid #ddd4c5;color:#918b82;font-size:7px}
+.designer-canvas-page .sheet-number,.designer-render-canvas .sheet-number{display:flex;justify-content:space-between;margin-top:auto;padding-top:10px;border-top:var(--designer-separator-width,1px) var(--designer-separator-style,solid) var(--designer-separator-color,#ddd4c5);color:#918b82;font-size:7px}
 .designer-more-menu{position:relative}.designer-more-menu summary{list-style:none;border:1px solid #739087;padding:11px 14px;color:#fff;font-size:11px;cursor:pointer}.designer-more-menu summary::-webkit-details-marker{display:none}.designer-more-menu>div{position:absolute;z-index:30;right:0;top:calc(100% + 7px);width:170px;display:grid;padding:7px;border:1px solid #cfc5b6;background:#fff;box-shadow:0 15px 35px #071d1850}.designer-more-menu>div button{border:0;border-bottom:1px solid #e8e0d4;background:#fff;padding:10px;text-align:left;font-size:9px}.designer-more-menu>div button:last-child{border-bottom:0}
 .designer-flow-page-meta{grid-template-columns:auto minmax(0,1fr) auto auto}.page-save-button{min-width:68px;border:1px solid #b9c7c1;border-radius:3px;padding:6px 9px;background:#fff;color:#31534a;font-size:7px;font-weight:900}.page-save-button.dirty{border-color:#b78335;background:#f5e2af;color:#173f37}.page-save-button.saved:disabled{opacity:1;border-color:#cdd9d2;background:#eef5f0;color:#557068;cursor:default}
 .designer-render-canvas .designer-render-watermark{z-index:1}
@@ -595,3 +595,9 @@ html[data-theme="scholar"] .paper{padding-left:84px !important;padding-right:84p
 .theme-switcher{display:flex;align-items:center;gap:8px;margin-right:12px}
 .theme-switcher label{font-size:8px;font-weight:800;letter-spacing:.12em;color:var(--muted);text-transform:uppercase}
 .theme-switcher select{border:1px solid var(--line);background:var(--white);padding:7px 10px;font-size:11px;border-radius:6px}
+
+/* Selection-aware numeric text sizing in the whole-book Designer. */
+.designer-book-toolbar label.designer-selected-size{display:flex;place-items:unset;align-items:center;gap:6px;box-sizing:border-box;width:auto;min-width:150px;height:30px;flex:none;padding:0 6px;border:1px solid #d8cdbc;background:#fff;color:#536860;font-size:7px;font-weight:800;line-height:1;white-space:nowrap}
+.designer-book-toolbar label.designer-selected-size input{box-sizing:border-box;width:48px;height:24px;flex:none;border:1px solid #e2d8c9;background:#fff;padding:2px 3px;color:#173f37;font-size:10px;font-weight:800;line-height:1;text-align:center}
+.designer-flow-page .designer-editable-content{cursor:text;caret-color:#b5442f}
+.designer-flow-page .designer-editable-content:focus{box-shadow:inset 0 0 0 1px rgba(181,68,47,.18)}

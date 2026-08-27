@@ -220,3 +220,67 @@ test("Designer uses the final publication template and saves individual pages", 
   assert.match(css, /\.designer-canvas-page\.contents-page li/);
   assert.match(css, /\.page-save-button\.dirty/);
 });
+
+test("Designer keeps a 50-action whole-book history across pages and saves", () => {
+  assert.match(page, /type DesignerHistoryEntry/);
+  assert.match(page, /undoStack\.current = \[\.\.\.undoStack\.current[\s\S]*\.slice\(-50\)/);
+  assert.match(page, /restoreHistoryEntry/);
+  assert.match(page, /setSelectedId\(targetSlotId\)/);
+  assert.match(page, /projectBefore/);
+  assert.match(page, /projectAfter/);
+  assert.match(page, /setTimeout\(flushTypingHistory, 500\)/);
+  assert.match(page, /event\.metaKey \|\| event\.ctrlKey/);
+  assert.match(page, /event\.shiftKey \? redo\(\) : undo\(\)/);
+  assert.doesNotMatch(page, /setUndoStack\(\[\]\)/);
+});
+
+test("separator line overrides are optional and shared with Preview and PDF", () => {
+  assert.match(page, /separatorColor\?: string/);
+  assert.match(page, /separatorWidth\?: number/);
+  assert.match(page, /separatorStyle\?: "solid" \| "dashed" \| "dotted" \| "double"/);
+  assert.match(page, /Separator lines/);
+  assert.match(page, /Reset to template default/);
+  assert.match(page, /--designer-separator-color/);
+  assert.match(css, /--designer-separator-width,1px/);
+  assert.match(css, /--designer-separator-style,solid/);
+});
+
+test("selected text uses a selection-aware numeric pixel size", () => {
+  assert.match(page, /Selected text size \(px\)/);
+  assert.match(page, /aria-label="Selected text size in pixels"/);
+  assert.match(page, /min="8" max="96"/);
+  assert.match(page, /applySelectedTextSize/);
+  assert.match(page, /applyFontSizeToTextRange/);
+  assert.match(page, /document\.createTreeWalker\(root, NodeFilter\.SHOW_TEXT\)/);
+  assert.match(page, /span\.style\.fontSize = `\$\{size\}px`/);
+  assert.match(page, /applySelectedTextSize\(Number\(event\.currentTarget\.value\)\)/);
+  assert.match(page, /applyingTextSize\.current/);
+  assert.match(page, /setTimeout\(\(\) => \{ applyingTextSize\.current = false; setSelectedTextSize\(size\); \}, 0\)/);
+  assert.match(page, /normalizeLegacyFontSizes/);
+  assert.match(page, /selectionBookmark/);
+  assert.match(page, /Page default size \(px\)/);
+  assert.doesNotMatch(page, />Small<\/option>/);
+  assert.match(css, /\.designer-book-toolbar label\.designer-selected-size\{[^}]*width:auto[^}]*min-width:150px[^}]*height:30px/);
+  assert.match(css, /\.designer-book-toolbar label\.designer-selected-size input\{[^}]*width:48px[^}]*height:24px/);
+});
+
+test("normal text clicks preserve an editable caret and keyboard deletion", () => {
+  assert.match(page, /beginTextInteraction/);
+  assert.match(page, /event\.stopPropagation\(\)/);
+  assert.match(page, /caretRangeFromPoint/);
+  assert.match(page, /onMouseDown=\{\(event\) => beginTextInteraction\(event, page\.slotId\)\}/);
+  assert.match(page, /onMouseUp=\{\(\) => captureSelection\(\)\}/);
+  assert.match(page, /onKeyUp=\{\(\) => captureSelection\(\)\}/);
+  assert.doesNotMatch(page, /setPanel\("page"\);\s*\}\s*\};\s*const mutateObject/);
+  assert.match(css, /\.designer-flow-page \.designer-editable-content\{[^}]*cursor:text[^}]*caret-color:/);
+});
+
+test("contents Backspace preserves rows and outdents titles by eight pixels", () => {
+  assert.match(page, /handleContentsBackspace/);
+  assert.match(page, /descriptorFor\(slotId\)\?\.kind !== "contents"/);
+  assert.match(page, /closest\("li > span"\)/);
+  assert.match(page, /current - 8/);
+  assert.match(page, /designerIndent/);
+  assert.match(page, /event\.preventDefault\(\)/);
+  assert.match(page, /onKeyDown=\{\(event\) => handleContentsBackspace/);
+});
