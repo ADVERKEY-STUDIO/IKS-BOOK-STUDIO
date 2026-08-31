@@ -27,6 +27,27 @@ export type ExternalManuscriptResult = {
   words: number;
 };
 
+export type ExternalIllustrationSlot = {
+  id: string;
+  role: "cover" | "chapter";
+  chapterId?: number;
+  chapterTitle: string;
+  filename: string;
+  sceneBrief: string;
+  altText: string;
+  caption: string;
+  status: "pending" | "ready" | "missing" | "failed" | "skipped";
+  imageKey?: string;
+  imageUrl?: string;
+  sourcePath?: string;
+  error?: string;
+};
+
+export type ExternalIllustrationPromptProject = ExternalManuscriptSettings & {
+  chapters: Array<{ id: number; title: string; body: string; context?: string }>;
+  slots: ExternalIllustrationSlot[];
+};
+
 function cleanLine(value: string) {
   return value.replace(/\u00a0/g, " ").replace(/[ \t]+/g, " ").trim();
 }
@@ -136,7 +157,6 @@ export function parseExternalManuscript(value: string, audience: string): Extern
       if (!/^##+\s*IN THIS CHAPTER\b/im.test(privateSplit.reader)) issues.push("Missing “In This Chapter”.");
       if (!/^##+\s*(KEY TERMS|WORD HELPER|GLOSSARY)\b/im.test(privateSplit.reader)) issues.push("Missing key-term explanation.");
       if (!/^##+\s*(ACTIVITY|TRY IT|THINK ABOUT IT|REFLECT|CHECK YOUR UNDERSTANDING)\b/im.test(privateSplit.reader)) issues.push("Missing activity or comprehension check.");
-      if (!privateSplit.illustrationBrief) issues.push("Missing private illustration brief.");
     }
     return { kind, title: sectionTitle(label, kind), raw: privateSplit.reader, html: manuscriptMarkdownToHtml(privateSplit.reader), wordCount, illustrationBrief: privateSplit.illustrationBrief, issues };
   });
@@ -168,7 +188,7 @@ Read the entire uploaded source before writing. Identify its real Parts, introdu
 
 Write like the book’s author. Never tell the child that text came from an uploaded source, prompt, PDF or AI. Do not invent missing facts. If a passage is unreadable or uncertain, omit the uncertain claim rather than guessing.
 
-Choose the shortest complete structure that explains the source well. Keep genuine chapters in logical order, but combine tiny source subsections when that improves the child’s book. Every chapter must have its own purpose, examples and illustration concept.
+Choose the shortest complete structure that explains the source well. Keep genuine chapters in logical order, but combine tiny source subsections when that improves the child’s book. Every chapter must have its own purpose and examples. This first request is for manuscript text only; Book Studio will prepare a separate illustration request after the manuscript is approved.
 
 ## REQUIRED OUTPUT
 Return one complete Markdown manuscript. Do not return JSON. If the complete manuscript is too large for one response, create a downloadable ZIP containing 00-Introduction.md, numbered chapter files, Conclusion.md and Glossary.md. Do not shorten later chapters to fit a response limit.
@@ -193,9 +213,6 @@ Use this exact heading system:
 [Three to five useful questions or one meaningful activity]
 ## CHAPTER RECAP
 [A concise recap]
-## ILLUSTRATION BRIEF
-[PRIVATE — one unique narrative scene showing the chapter’s people, place, objects and central action. No map, Venn diagram or generic infographic. Historically and culturally respectful, age-safe, landscape 4:3, suitable for a printed A4 book.]
-
 [Repeat the complete chapter structure for every chapter.]
 
 # CONCLUSION
@@ -210,9 +227,62 @@ Use this exact heading system:
 - Introduce ideas before using difficult terminology.
 - Use accurate examples that clarify the source rather than replacing it.
 - Make vocabulary, sentence length and teaching depth appropriate for ${settings.audience}.
-- Give every chapter a distinct context and distinct illustration brief.
+- Do not generate, embed or describe images in this manuscript response. Do not include image links, SVG artwork, diagrams or illustration placeholders.
 - Do not include citations inside child-facing prose. If useful, add a final private heading “## SOURCE COVERAGE NOTES” inside each chapter; Book Studio will remove it from the printed book.
 - Check the complete manuscript for missing chapters, repetition, contradictions and abrupt endings before returning it.
 
 Begin by silently reading and planning from the complete source. Then return only the finished manuscript or downloadable manuscript ZIP.`;
+}
+
+function plainReaderText(value: string) {
+  return value.replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/\s+/g, " ").trim();
+}
+
+export function buildExternalIllustrationPrompt(project: ExternalIllustrationPromptProject) {
+  const chapterById = new Map(project.chapters.map((chapter) => [chapter.id, chapter]));
+  const requests = project.slots.map((slot) => {
+    if (slot.role === "cover") return `### ${slot.id} — FRONT COVER
+- Exact output filename: ${slot.filename}
+- Portrait composition: 2480 × 3508 px (A4 ratio), full bleed
+- Book title: ${project.title}
+- Direction: A richly rendered cover scene that introduces the book’s real subject, world and young reader without placing any words, title lettering or logos inside the image.`;
+    const chapter = chapterById.get(slot.chapterId || -1);
+    const context = plainReaderText(chapter?.body || chapter?.context || "").slice(0, 2600);
+    return `### ${slot.id} — ${slot.chapterTitle}
+- Exact output filename: ${slot.filename}
+- Landscape composition: 2400 × 1800 px (4:3)
+- Scene requirement: ${slot.sceneBrief}
+- Chapter context: ${context}
+- Caption meaning: ${slot.caption}
+- Alt-text intent: ${slot.altText}`;
+  }).join("\n\n");
+
+  return `# IKS BOOK STUDIO — SEPARATE ILLUSTRATION PACKAGE REQUEST
+
+The manuscript for “${project.title}” is complete and approved. Create the finished raster illustration package only. Do not rewrite or summarize the manuscript.
+
+## BOOK ART BIBLE
+- Reader: ${project.audience} (${project.readingLevel})
+- Language and cultural context: ${project.language}
+- Book world: ${project.aesthetic}
+- Required illustration direction: ${project.illustrationStyle}
+- Keep recurring people, clothing, architecture, materials, palette and rendering style consistent throughout the entire package.
+- Every scene must show a specific place, people, action, focal point, lighting and meaningful background details grounded in its chapter context.
+- Use culturally and historically respectful details. Do not invent sacred symbols, historical claims or costumes that the chapter does not support.
+
+## ABSOLUTE QUALITY RULES
+- Produce detailed, publication-quality JPG, PNG or WebP raster illustrations.
+- Do NOT produce SVG, clip art, stick figures, flat diagrams, infographics, maps, charts, UI panels, random circles or boxes, abstract placeholder people, noisy texture collages, or schematic educational graphics.
+- Do NOT place text, captions, labels, page numbers, watermarks, logos, borders or mock book layouts inside an image.
+- Do NOT return image links or hotlinked web assets. Return the actual image files.
+- Preserve faces and hands carefully. Keep children age-appropriate and scenes emotionally safe.
+- Make every chapter image visually distinct while keeping one coherent book style.
+
+## REQUIRED FILES
+Create exactly these requested images and keep every filename unchanged:
+
+${requests}
+
+## DELIVERY
+Return one downloadable ZIP named ${project.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "book"}-illustrations.zip with the requested files inside an images/ folder. Include no manuscript files and no extra images. Before returning the ZIP, verify that every requested filename exists, every file opens correctly, and every image follows the art bible.`;
 }
