@@ -1660,7 +1660,7 @@ export default function Home() {
     const cover = slots.find((slot) => slot.role === "cover" && slot.status === "ready");
     let designerPages = project.designerPages ?? [];
     if (cover?.imageUrl) {
-      const descriptor = designerBookBasePages({ ...project, chapters }).find((page) => page.slotId === "cover")!;
+      const descriptor = designerBasePages({ ...project, chapters }).find((page) => page.slotId === "cover")!;
       const existing = designerPages.find((page) => page.slotId === "cover");
       const base = existing ?? { ...defaultDesignerRevision(descriptor.html), slotId: "cover", label: "Front cover", kind: "cover" as const, history: [] };
       const replacement: DesignerPageOverride = { ...base, backgroundImageKey: cover.imageKey, backgroundImageUrl: cover.imageUrl, backgroundSize: "cover", backgroundPosition: "center", backgroundOpacity: 1, savedAt: new Date().toISOString() };
