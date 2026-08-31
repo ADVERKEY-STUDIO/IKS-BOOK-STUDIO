@@ -174,9 +174,6 @@ type DesignerPageRevision = {
   borderWidth: number;
   borderInset: number;
   borderRadius: number;
-  separatorColor?: string;
-  separatorWidth?: number;
-  separatorStyle?: "solid" | "dashed" | "dotted" | "double";
   backgroundSize: "cover" | "contain" | "auto" | "repeat";
   backgroundPosition: string;
   backgroundOpacity: number;
@@ -3102,7 +3099,7 @@ function hydrateDesignerOverride(page: DesignerPageOverride): DesignerPageOverri
   return { ...page, ...hydrateDesignerRevision(page, page.html), history: (page.history ?? []).map((revision) => hydrateDesignerRevision(revision, revision.html)) };
 }
 
-const designerStyleKeys: (keyof DesignerPageRevision)[] = ["backgroundColor", "backgroundImageUrl", "backgroundImageKey", "backgroundSize", "backgroundPosition", "backgroundOpacity", "watermarkText", "watermarkImageUrl", "watermarkImageKey", "watermarkOpacity", "watermarkRotation", "watermarkRepeat", "watermarkX", "watermarkY", "watermarkVisible", "fontFamily", "fontSize", "textColor", "lineHeight", "letterSpacing", "paragraphSpacing", "columns", "columnGap", "pagePadding", "borderStyle", "borderColor", "borderWidth", "borderInset", "borderRadius", "separatorColor", "separatorWidth", "separatorStyle"];
+const designerStyleKeys: (keyof DesignerPageRevision)[] = ["backgroundColor", "backgroundImageUrl", "backgroundImageKey", "backgroundSize", "backgroundPosition", "backgroundOpacity", "watermarkText", "watermarkImageUrl", "watermarkImageKey", "watermarkOpacity", "watermarkRotation", "watermarkRepeat", "watermarkX", "watermarkY", "watermarkVisible", "fontFamily", "fontSize", "textColor", "lineHeight", "letterSpacing", "paragraphSpacing", "columns", "columnGap", "pagePadding", "borderStyle", "borderColor", "borderWidth", "borderInset", "borderRadius"];
 
 function designerStyleFrom(revision: DesignerPageRevision) {
   return Object.fromEntries(designerStyleKeys.map((key) => [key, revision[key]])) as Partial<DesignerPageRevision>;
@@ -3152,32 +3149,6 @@ type DesignerImageSize = {
   height: number;
 };
 
-type DesignerSelectionBookmark = {
-  slotId: string;
-  anchorPath: number[];
-  anchorOffset: number;
-  focusPath: number[];
-  focusOffset: number;
-};
-
-type DesignerHistoryChange = {
-  slotId: string;
-  before: DesignerPageRevision;
-  after: DesignerPageRevision;
-};
-
-type DesignerHistoryEntry = {
-  label: string;
-  changes: DesignerHistoryChange[];
-  projectBefore?: { pages: DesignerPageOverride[]; order: string[] };
-  projectAfter?: { pages: DesignerPageOverride[]; order: string[] };
-  selectedBefore?: string;
-  selectedAfter?: string;
-  selectionBefore?: DesignerSelectionBookmark;
-  selectionAfter?: DesignerSelectionBookmark;
-  object?: DesignerObjectIdentity | null;
-};
-
 type DesignerStudioProps = {
   project: Project;
   embedded?: boolean;
@@ -3206,10 +3177,8 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
   const [selectedObject, setSelectedObject] = useState<"page" | "text box" | "image">("page");
   const [selectedObjectIdentity, setSelectedObjectIdentity] = useState<DesignerObjectIdentity | null>(null);
   const [selectedImageSize, setSelectedImageSize] = useState<DesignerImageSize>({ width: 420, height: 300 });
-  const [selectedTextSize, setSelectedTextSize] = useState(15);
-  const undoStack = useRef<DesignerHistoryEntry[]>([]);
-  const redoStack = useRef<DesignerHistoryEntry[]>([]);
-  const [, renderHistory] = useState(0);
+  const [undoStack, setUndoStack] = useState<DesignerPageRevision[]>([]);
+  const [redoStack, setRedoStack] = useState<DesignerPageRevision[]>([]);
   const [issues, setIssues] = useState<string[]>([]);
   const [bookIssues, setBookIssues] = useState<{ slotId: string; label: string; issue: string }[]>([]);
   const [pendingBackground, setPendingBackground] = useState<{
@@ -3232,11 +3201,7 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
   const selectedNode = useRef<HTMLElement | null>(null);
   const selectedObjectIdentityRef = useRef<DesignerObjectIdentity | null>(null);
   const imageResizeSession = useRef(false);
-  const imageResizeBefore = useRef<DesignerPageRevision | null>(null);
   const wiredFreeImages = useRef(new WeakSet<HTMLElement>());
-  const selectionBookmark = useRef<DesignerSelectionBookmark | null>(null);
-  const applyingTextSize = useRef(false);
-  const typingSession = useRef<{ slotId: string; before: DesignerPageRevision; selectionBefore?: DesignerSelectionBookmark; timer?: number } | null>(null);
 
   useEffect(() => {
     const nextSaved = savedPages.find((page) => page.slotId === selected?.slotId);
@@ -3245,7 +3210,7 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     const selectedRoot = bookEditors.current.get(selected?.slotId ?? "");
     const keepObjectSelection = Boolean(selectedNode.current && selectedRoot?.contains(selectedNode.current));
     setDraft(liveDraft ?? { ...next, html: liveBookHtml.current[selected?.slotId ?? ""] ?? next.html });
-    setIssues([]);
+    setUndoStack([]); setRedoStack([]); setIssues([]);
     if (!keepObjectSelection) {
       setSelectedObject("page");
       setSelectedObjectIdentity(null);
@@ -3357,271 +3322,26 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     const root = bookEditors.current.get(slotId);
     if (root) rememberLiveHtml(slotId, root.innerHTML);
   };
-  const nodePath = (root: Node, node: Node) => {
-    const path: number[] = [];
-    let current: Node | null = node;
-    while (current && current !== root) {
-      const parent: Node | null = current.parentNode;
-      if (!parent) return [];
-      path.unshift(Array.prototype.indexOf.call(parent.childNodes, current));
-      current = parent;
-    }
-    return current === root ? path : [];
-  };
-  const nodeAtPath = (root: Node, path: number[]) => path.reduce<Node | null>((current, index) => current?.childNodes[index] ?? null, root);
-  const captureSelection = (): DesignerSelectionBookmark | undefined => {
-    const selection = window.getSelection();
-    if (!selection?.anchorNode || !selection.focusNode) return undefined;
-    for (const [slotId, root] of bookEditors.current.entries()) {
-      if (!root.contains(selection.anchorNode) || !root.contains(selection.focusNode)) continue;
-      const bookmark = { slotId, anchorPath: nodePath(root, selection.anchorNode), anchorOffset: selection.anchorOffset, focusPath: nodePath(root, selection.focusNode), focusOffset: selection.focusOffset };
-      selectionBookmark.current = bookmark;
-      return bookmark;
-    }
-    return selectionBookmark.current ?? undefined;
-  };
-  const restoreSelection = (bookmark = selectionBookmark.current) => {
-    if (!bookmark) return false;
-    const root = bookEditors.current.get(bookmark.slotId);
-    const anchor = root && nodeAtPath(root, bookmark.anchorPath);
-    const focus = root && nodeAtPath(root, bookmark.focusPath);
-    if (!root || !anchor || !focus) return false;
-    const selection = window.getSelection();
-    if (!selection) return false;
-    const maxOffset = (node: Node, offset: number) => Math.min(offset, node.nodeType === Node.TEXT_NODE ? (node.textContent?.length ?? 0) : node.childNodes.length);
-    selection.removeAllRanges();
-    selection.setBaseAndExtent(anchor, maxOffset(anchor, bookmark.anchorOffset), focus, maxOffset(focus, bookmark.focusOffset));
-    root.focus();
-    selectionBookmark.current = bookmark;
-    return true;
-  };
-  const snapshotForSlot = (slotId: string): DesignerPageRevision => {
-    const descriptor = descriptorFor(slotId);
-    if (!descriptor) return defaultDesignerRevision();
-    const revision = revisionFor(descriptor);
-    return { ...revision, html: bookEditors.current.get(slotId)?.innerHTML ?? liveBookHtml.current[slotId] ?? revision.html };
-  };
-  const historyChanged = (before: DesignerPageRevision, after: DesignerPageRevision) => JSON.stringify(before) !== JSON.stringify(after);
-  const pushHistory = (entry: DesignerHistoryEntry) => {
-    const changes = entry.changes.filter((change) => historyChanged(change.before, change.after));
-    const projectChanged = JSON.stringify(entry.projectBefore) !== JSON.stringify(entry.projectAfter);
-    if (!changes.length && !projectChanged) return;
-    undoStack.current = [...undoStack.current, { ...entry, changes }].slice(-50);
-    redoStack.current = [];
-    renderHistory((value) => value + 1);
-  };
-  const restoreHistoryEntry = (entry: DesignerHistoryEntry, direction: "undo" | "redo") => {
-    const projectState = direction === "undo" ? entry.projectBefore : entry.projectAfter;
-    if (projectState) void onCommit({ ...project, designerPages: projectState.pages, designerPageOrder: projectState.order });
-    entry.changes.forEach((change) => {
-      const revision = direction === "undo" ? change.before : change.after;
-      liveBookDrafts.current[change.slotId] = revision;
-      liveBookHtml.current[change.slotId] = revision.html;
-      const root = bookEditors.current.get(change.slotId);
-      if (root) root.innerHTML = revision.html;
-    });
-    const target = entry.changes[0];
-    const targetSlotId = (direction === "undo" ? entry.selectedBefore : entry.selectedAfter) ?? target?.slotId ?? selectedId;
-    const revision = target ? (direction === "undo" ? target.before : target.after) : liveBookDrafts.current[targetSlotId];
-    setSelectedId(targetSlotId);
-    if (revision) setDraft(revision);
-    setDirtyPages((current) => Array.from(new Set([...current, ...entry.changes.map((change) => change.slotId)])));
-    const bookmark = direction === "undo" ? entry.selectionBefore : entry.selectionAfter;
-    window.requestAnimationFrame(() => {
-      document.getElementById(`designer-flow-${targetSlotId}`)?.scrollIntoView({ block: "center" });
-      if (bookmark) restoreSelection(bookmark);
-      if (entry.object) {
-        const node = findDesignerObject(entry.object);
-        if (node) selectDesignerObject(node, entry.object.slotId, entry.object.kind);
-      }
-    });
-  };
-  const flushTypingHistory = () => {
-    const session = typingSession.current;
-    if (!session) return;
-    if (session.timer) window.clearTimeout(session.timer);
-    typingSession.current = null;
-    pushHistory({ label: "Typing", changes: [{ slotId: session.slotId, before: session.before, after: snapshotForSlot(session.slotId) }], selectionBefore: session.selectionBefore, selectionAfter: captureSelection() });
-  };
   const changeDraft = (patch: Partial<DesignerPageRevision>, remember = true) => {
-    flushTypingHistory();
-    const before = snapshotForSlot(selectedId);
-    const next = { ...before, ...patch };
-    liveBookDrafts.current[selectedId] = next;
-    setDraft(next);
-    if (remember) pushHistory({ label: "Page setting", changes: [{ slotId: selectedId, before, after: next }], selectionBefore: captureSelection(), object: selectedObjectIdentityRef.current });
+    if (remember) setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]);
+    setRedoStack([]);
+    setDraft((current) => {
+      const next = { ...current, ...patch };
+      liveBookDrafts.current[selectedId] = next;
+      return next;
+    });
     setDirtyPages((current) => current.includes(selectedId) ? current : [...current, selectedId]);
   };
   const undo = () => {
-    flushTypingHistory();
-    const entry = undoStack.current.pop(); if (!entry) return;
-    redoStack.current.push(entry); restoreHistoryEntry(entry, "undo"); renderHistory((value) => value + 1);
-    setMessage(`Undid ${entry.label}.`);
+    const previous = undoStack.at(-1); if (!previous) return;
+    setRedoStack((stack) => [...stack, { ...draft, html: editor.current?.innerHTML ?? draft.html }]);
+    setUndoStack((stack) => stack.slice(0, -1)); liveBookDrafts.current[selectedId] = previous; setDraft(previous);
   };
   const redo = () => {
-    flushTypingHistory();
-    const entry = redoStack.current.pop(); if (!entry) return;
-    undoStack.current.push(entry); restoreHistoryEntry(entry, "redo"); renderHistory((value) => value + 1);
-    setMessage(`Redid ${entry.label}.`);
+    const next = redoStack.at(-1); if (!next) return;
+    setUndoStack((stack) => [...stack, draft]); setRedoStack((stack) => stack.slice(0, -1)); liveBookDrafts.current[selectedId] = next; setDraft(next);
   };
-  const command = (name: string, value?: string) => {
-    flushTypingHistory();
-    const bookmark = selectionBookmark.current ?? captureSelection();
-    const slotId = bookmark?.slotId ?? selectedId;
-    const before = snapshotForSlot(slotId);
-    restoreSelection(bookmark);
-    document.execCommand("styleWithCSS", false, "true");
-    document.execCommand(name, false, value);
-    const root = bookEditors.current.get(slotId);
-    if (root) rememberLiveHtml(slotId, root.innerHTML);
-    const after = snapshotForSlot(slotId);
-    const selectionAfter = captureSelection();
-    pushHistory({ label: "Text formatting", changes: [{ slotId, before, after }], selectionBefore: bookmark ?? undefined, selectionAfter });
-    setMessage("Text formatting changed. Save the whole book when ready.");
-  };
-  const normalizeLegacyFontSizes = (root: HTMLElement) => {
-    const legacyPixels: Record<string, number> = { "1": 10, "2": 13, "3": 16, "4": 18, "5": 24, "6": 32, "7": 48 };
-    root.querySelectorAll<HTMLFontElement>("font[size]").forEach((font) => {
-      const span = document.createElement("span");
-      span.style.fontSize = `${legacyPixels[font.getAttribute("size") ?? "3"] ?? 16}px`;
-      span.innerHTML = font.innerHTML;
-      font.replaceWith(span);
-    });
-    root.querySelectorAll<HTMLElement>("span[style*='font-size']").forEach((span) => {
-      const parent = span.parentElement;
-      if (parent?.tagName === "SPAN" && parent.style.fontSize === span.style.fontSize) span.replaceWith(...Array.from(span.childNodes));
-    });
-  };
-  const applyFontSizeToTextRange = (root: HTMLElement, range: Range, size: number) => {
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    const selectedTextNodes: Array<{ node: Text; start: number; end: number }> = [];
-    let current = walker.nextNode();
-    while (current) {
-      const node = current as Text;
-      if (node.data.length && range.intersectsNode(node)) {
-        const start = node === range.startContainer ? range.startOffset : 0;
-        const end = node === range.endContainer ? range.endOffset : node.data.length;
-        if (end > start) selectedTextNodes.push({ node, start, end });
-      }
-      current = walker.nextNode();
-    }
-    const sizedSpans: HTMLSpanElement[] = [];
-    selectedTextNodes.reverse().forEach(({ node, start, end }) => {
-      if (!node.isConnected) return;
-      if (end < node.data.length) node.splitText(end);
-      const selectedNode = start > 0 ? node.splitText(start) : node;
-      const span = document.createElement("span");
-      span.style.fontSize = `${size}px`;
-      selectedNode.replaceWith(span);
-      span.append(selectedNode);
-      sizedSpans.unshift(span);
-    });
-    const first = sizedSpans[0]?.firstChild;
-    const last = sizedSpans.at(-1)?.lastChild;
-    if (first && last) {
-      const nextRange = document.createRange();
-      nextRange.setStart(first, 0);
-      nextRange.setEnd(last, last.textContent?.length ?? 0);
-      const selection = window.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(nextRange);
-    }
-    return sizedSpans.length > 0;
-  };
-  const applySelectedTextSize = (rawSize: number) => {
-    const size = Math.max(8, Math.min(96, Math.round(rawSize)));
-    const bookmark = selectionBookmark.current ?? captureSelection();
-    const slotId = bookmark?.slotId ?? selectedId;
-    const root = bookEditors.current.get(slotId);
-    if (!root) return;
-    applyingTextSize.current = true;
-    if (!restoreSelection(bookmark)) { applyingTextSize.current = false; return; }
-    flushTypingHistory();
-    const before = snapshotForSlot(slotId);
-    const selection = window.getSelection();
-    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-    if (!selection || !range) { applyingTextSize.current = false; return; }
-    if (range.collapsed) {
-      const span = document.createElement("span");
-      span.style.fontSize = `${size}px`;
-      span.append(document.createTextNode("\u200b"));
-      range.insertNode(span);
-      range.setStart(span.firstChild!, 1);
-      range.collapse(true);
-      selection.removeAllRanges(); selection.addRange(range);
-    } else {
-      if (!applyFontSizeToTextRange(root, range, size)) { applyingTextSize.current = false; return; }
-    }
-    normalizeLegacyFontSizes(root);
-    rememberLiveHtml(slotId, root.innerHTML);
-    const selectionAfter = captureSelection();
-    pushHistory({ label: "Text size", changes: [{ slotId, before, after: snapshotForSlot(slotId) }], selectionBefore: bookmark ?? undefined, selectionAfter });
-    setMessage(`Selected text size changed to ${size}px.`);
-    window.setTimeout(() => { applyingTextSize.current = false; setSelectedTextSize(size); }, 0);
-  };
-  const beginTyping = (slotId: string) => {
-    if (typingSession.current?.slotId === slotId) return;
-    flushTypingHistory();
-    typingSession.current = { slotId, before: snapshotForSlot(slotId), selectionBefore: captureSelection() };
-  };
-  const recordTyping = (slotId: string, html: string) => {
-    rememberLiveHtml(slotId, html);
-    if (!typingSession.current) beginTyping(slotId);
-    const session = typingSession.current;
-    if (!session) return;
-    if (session.timer) window.clearTimeout(session.timer);
-    session.timer = window.setTimeout(flushTypingHistory, 500);
-  };
-  const handleContentsBackspace = (event: React.KeyboardEvent<HTMLDivElement>, slotId: string) => {
-    if (event.key !== "Backspace" || descriptorFor(slotId)?.kind !== "contents") return;
-    const selection = window.getSelection();
-    if (!selection?.isCollapsed || !selection.anchorNode) return;
-    const title = (selection.anchorNode.nodeType === Node.ELEMENT_NODE ? selection.anchorNode as Element : selection.anchorNode.parentElement)?.closest("li > span") as HTMLElement | null;
-    if (!title) return;
-    const beforeCaret = document.createRange();
-    beforeCaret.selectNodeContents(title);
-    beforeCaret.setEnd(selection.anchorNode, selection.anchorOffset);
-    if (beforeCaret.toString().length > 0) return;
-    event.preventDefault();
-    const before = snapshotForSlot(slotId);
-    const first = title.firstChild;
-    if (first?.nodeType === Node.TEXT_NODE && /^[\s\u00a0]/.test(first.textContent ?? "")) first.textContent = (first.textContent ?? "").replace(/^[\s\u00a0]/, "");
-    else {
-      const current = Number(title.dataset.designerIndent ?? (parseFloat(title.style.marginInlineStart) || 0));
-      const next = Math.max(-64, current - 8);
-      title.dataset.designerIndent = String(next);
-      title.style.marginInlineStart = `${next}px`;
-    }
-    const range = document.createRange();
-    range.setStart(title.firstChild ?? title, 0); range.collapse(true);
-    selection.removeAllRanges(); selection.addRange(range);
-    const root = bookEditors.current.get(slotId);
-    if (root) rememberLiveHtml(slotId, root.innerHTML);
-    pushHistory({ label: "Outdent contents title", changes: [{ slotId, before, after: snapshotForSlot(slotId) }], selectionAfter: captureSelection() });
-  };
-  useEffect(() => {
-    const handleSelectionChange = () => {
-      if (applyingTextSize.current) return;
-      if ((document.activeElement as HTMLElement | null)?.closest(".designer-book-toolbar")) return;
-      const selection = window.getSelection();
-      if (!selection?.focusNode || !Array.from(bookEditors.current.values()).some((root) => root.contains(selection.focusNode))) return;
-      const bookmark = captureSelection();
-      const node = selection?.focusNode?.nodeType === Node.ELEMENT_NODE ? selection.focusNode as Element : selection?.focusNode?.parentElement;
-      if (bookmark && node) {
-        const size = parseFloat(window.getComputedStyle(node).fontSize);
-        if (Number.isFinite(size)) setSelectedTextSize(Math.round(size));
-      }
-    };
-    const handleShortcut = (event: KeyboardEvent) => {
-      const modifier = event.metaKey || event.ctrlKey;
-      if (!modifier) return;
-      if (event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); }
-      else if (event.ctrlKey && event.key.toLowerCase() === "y") { event.preventDefault(); redo(); }
-    };
-    document.addEventListener("selectionchange", handleSelectionChange);
-    document.addEventListener("keydown", handleShortcut);
-    return () => { document.removeEventListener("selectionchange", handleSelectionChange); document.removeEventListener("keydown", handleShortcut); };
-  });
+  const command = (name: string, value?: string) => { setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]); setRedoStack([]); editor.current?.focus(); document.execCommand(name, false, value); if (editor.current) rememberLiveHtml(selectedId, editor.current.innerHTML); setMessage("Text formatting changed. Save the whole book when ready."); };
   const uploadAsset = async (file: File) => {
     const form = new FormData(); form.set("file", file); form.set("projectId", project.id);
     const response = await fetch("/api/image", { method: "POST", headers: ownerHeaders(), body: form });
@@ -3641,7 +3361,7 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
       const revision = { ...revisionToSave, html, savedAt: new Date().toISOString() };
       const replacement = makeOverride(selected, revision, saved);
       const next = { ...project, designerPages: [...savedPages.filter((page) => page.slotId !== selected.slotId), replacement], designerPageOrder: order };
-      await onCommit(next); liveBookDrafts.current[selected.slotId] = replacement; setDraft(replacement); setDirtyPages((current) => current.filter((slotId) => slotId !== selected.slotId)); setMessage(`${selected.label} saved. Preview and PDF now use this exact page.`);
+      await onCommit(next); liveBookDrafts.current[selected.slotId] = replacement; setDraft(replacement); setDirtyPages((current) => current.filter((slotId) => slotId !== selected.slotId)); setUndoStack([]); setRedoStack([]); setMessage(`${selected.label} saved. Preview and PDF now use this exact page.`);
     } finally { setBusy(false); }
   };
   const savePageById = async (slotId: string) => {
@@ -3657,7 +3377,7 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
       await onCommit(next);
       liveBookDrafts.current[slotId] = replacement;
       liveBookHtml.current[slotId] = replacement.html;
-      if (slotId === selectedId) setDraft(replacement);
+      if (slotId === selectedId) { setDraft(replacement); setUndoStack([]); setRedoStack([]); }
       setDirtyPages((currentDirty) => currentDirty.filter((id) => id !== slotId));
       setMessage(`${descriptor.label} saved. Preview and PDF now use this exact page.`);
     } finally { setBusy(false); }
@@ -3676,6 +3396,7 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
       const next = { ...project, designerPages: [...replacements.values()], designerPageOrder: order };
       await onCommit(next);
       setDirtyPages([]);
+      setUndoStack([]); setRedoStack([]);
       setMessage(`Whole book saved. Preview and PDF now use all ${orderedPages.length} pages.`);
       return next;
     } finally { setBusy(false); }
@@ -3780,7 +3501,6 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
   const balanceLayout = async (scope: "chapter" | "book") => {
     const targetChapterIds = scope === "book" ? project.chapters.map((chapter) => chapter.id) : selected.chapterId ? [selected.chapterId] : [];
     if (!targetChapterIds.length) { setMessage("Choose a chapter page before balancing this chapter."); return; }
-    const historyBefore = { pages: savedPages, order };
     setBusy(true);
     try {
       const replacements = new Map(savedPages.map((page) => [page.slotId, page]));
@@ -3827,7 +3547,6 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
       }
       const next = { ...project, designerPages: [...replacements.values()], designerPageOrder: nextOrder };
       await onCommit(next);
-      pushHistory({ label: scope === "book" ? "Balance whole book" : "Balance chapter", changes: [], projectBefore: historyBefore, projectAfter: { pages: next.designerPages, order: nextOrder }, selectedBefore: selectedId, selectedAfter: selectedId });
       setDirtyPages([]);
       setMessage(`${balanced} chapter${balanced === 1 ? "" : "s"} balanced locally.${locked ? ` ${locked} locked chapter${locked === 1 ? " was" : "s were"} preserved.` : ""} Empty space was reduced without using AI tokens.`);
     } catch (error) {
@@ -3887,10 +3606,9 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
         const replacement = makeOverride(target, revision, existing);
         const next = { ...project, designerPages: [...savedPages.filter((page) => page.slotId !== target.slotId), replacement], designerPageOrder: order };
         await onCommit(next);
-        pushHistory({ label: "Apply page background", changes: [{ slotId: target.slotId, before: current, after: replacement }], selectedBefore: selectedId, selectedAfter: selectedId });
         liveBookDrafts.current[target.slotId] = replacement;
         liveBookHtml.current[target.slotId] = replacement.html;
-        if (target.slotId === selectedId) setDraft(replacement);
+        if (target.slotId === selectedId) { setDraft(replacement); setUndoStack([]); setRedoStack([]); }
         setDirtyPages((currentDirty) => currentDirty.filter((slotId) => slotId !== target.slotId));
         dismissBackgroundChoice(`Background applied to ${target.label} and saved.`);
       } else {
@@ -3902,10 +3620,10 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
         });
         const next = { ...project, designerPages: [...replacements.values()], designerPageOrder: order };
         await onCommit(next);
-        pushHistory({ label: "Apply whole-book background", changes: [], projectBefore: { pages: savedPages, order }, projectAfter: { pages: next.designerPages, order }, selectedBefore: selectedId, selectedAfter: selectedId });
         replacements.forEach((replacement, slotId) => { liveBookDrafts.current[slotId] = replacement; });
         const selectedReplacement = replacements.get(selectedId);
         if (selectedReplacement) setDraft(selectedReplacement);
+        setUndoStack([]); setRedoStack([]);
         dismissBackgroundChoice(`Background applied to all ${allPages.length} pages and saved.`);
       }
     } catch (error) {
@@ -3917,24 +3635,19 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
   const addBlankPage = async () => {
     const slotId = `custom-${Date.now().toString(36)}`; const revision = { ...defaultDesignerRevision(""), intentionalBlank: true };
     const page: DesignerPageOverride = { ...revision, slotId, label: "New blank page", kind: "custom", history: [] };
-    const nextPages = [...savedPages, page]; const nextOrder = [...order, slotId];
-    await onCommit({ ...project, designerPages: nextPages, designerPageOrder: nextOrder });
-    pushHistory({ label: "Add blank page", changes: [], projectBefore: { pages: savedPages, order }, projectAfter: { pages: nextPages, order: nextOrder }, selectedBefore: selectedId, selectedAfter: slotId }); setSelectedId(slotId);
+    await onCommit({ ...project, designerPages: [...savedPages, page], designerPageOrder: [...order, slotId] }); setSelectedId(slotId);
   };
   const duplicatePage = async () => {
     if (!selected) return; const slotId = `custom-${Date.now().toString(36)}`;
     const revision = { ...draft, html: editor.current?.innerHTML ?? draft.html, savedAt: new Date().toISOString() };
     const page: DesignerPageOverride = { ...revision, slotId, label: `${selected.label} copy`, kind: "custom", history: [] };
     const nextOrder = [...order]; nextOrder.splice(order.indexOf(selected.slotId) + 1, 0, slotId);
-    const nextPages = [...savedPages, page];
-    await onCommit({ ...project, designerPages: nextPages, designerPageOrder: nextOrder });
-    pushHistory({ label: "Duplicate page", changes: [], projectBefore: { pages: savedPages, order }, projectAfter: { pages: nextPages, order: nextOrder }, selectedBefore: selectedId, selectedAfter: slotId }); setSelectedId(slotId);
+    await onCommit({ ...project, designerPages: [...savedPages, page], designerPageOrder: nextOrder }); setSelectedId(slotId);
   };
   const movePage = async (direction: -1 | 1) => {
     const index = order.indexOf(selectedId); const nextIndex = index + direction; if (index < 0 || nextIndex < 0 || nextIndex >= order.length) return;
     const nextOrder = [...order]; [nextOrder[index], nextOrder[nextIndex]] = [nextOrder[nextIndex], nextOrder[index]];
     await onCommit({ ...project, designerPageOrder: nextOrder });
-    pushHistory({ label: "Move page", changes: [], projectBefore: { pages: savedPages, order }, projectAfter: { pages: savedPages, order: nextOrder }, selectedBefore: selectedId, selectedAfter: selectedId });
   };
   const movePageTo = async (targetIndex: number) => {
     const currentIndex = order.indexOf(selectedId);
@@ -3943,7 +3656,6 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     const [moved] = nextOrder.splice(currentIndex, 1);
     nextOrder.splice(targetIndex, 0, moved);
     await onCommit({ ...project, designerPageOrder: nextOrder });
-    pushHistory({ label: "Move page", changes: [], projectBefore: { pages: savedPages, order }, projectAfter: { pages: savedPages, order: nextOrder }, selectedBefore: selectedId, selectedAfter: selectedId });
   };
   const deletePage = async () => {
     if (!selected || busy) return;
@@ -3955,13 +3667,10 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
         const next = { ...project, designerPages: savedPages.filter((page) => page.slotId !== selectedId), designerPageOrder: order.filter((slotId) => slotId !== selectedId) };
         await onCommit(next);
         const fallback = order.find((slotId) => slotId !== selectedId) ?? "cover";
-        pushHistory({ label: "Delete page", changes: [], projectBefore: { pages: savedPages, order }, projectAfter: { pages: next.designerPages ?? [], order: next.designerPageOrder ?? [] }, selectedBefore: selectedId, selectedAfter: fallback });
         setSelectedId(fallback);
         setMessage(`${selected.label} deleted.`);
       } else {
-        const before = currentSnapshot(); const after = { ...before, deleted: true };
-        await saveRevision(after);
-        pushHistory({ label: "Delete page", changes: [{ slotId: selectedId, before, after }], selectedBefore: selectedId, selectedAfter: selectedId });
+        await saveRevision({ ...currentSnapshot(), deleted: true });
         setMessage(`${selected.label} deleted — removed from final book.`);
       }
     } finally { setBusy(false); }
@@ -3985,26 +3694,6 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     const preset: DesignerStylePreset = { id: `preset-${Date.now().toString(36)}`, name: `Custom style ${(project.designerPresets?.length ?? 0) + 1}`, style: designerStyleFrom(draft) };
     await onCommit({ ...project, designerPresets: [...(project.designerPresets ?? []), preset] }); setMessage(`${preset.name} saved for reuse.`);
   };
-  const beginTextInteraction = (event: ReactMouseEvent<HTMLDivElement>, slotId: string) => {
-    event.stopPropagation();
-    if (slotId === selectedId) return;
-    event.preventDefault();
-    const point = { x: event.clientX, y: event.clientY };
-    setSelectedId(slotId);
-    window.requestAnimationFrame(() => {
-      const root = bookEditors.current.get(slotId);
-      if (!root) return;
-      root.focus();
-      const documentWithCaret = document as Document & { caretRangeFromPoint?: (x: number, y: number) => Range | null; caretPositionFromPoint?: (x: number, y: number) => CaretPosition | null };
-      let range = documentWithCaret.caretRangeFromPoint?.(point.x, point.y) ?? null;
-      const position = !range ? documentWithCaret.caretPositionFromPoint?.(point.x, point.y) : null;
-      if (position) { range = document.createRange(); range.setStart(position.offsetNode, position.offset); range.collapse(true); }
-      if (!range || !root.contains(range.startContainer)) { range = document.createRange(); range.selectNodeContents(root); range.collapse(false); }
-      const selection = window.getSelection();
-      selection?.removeAllRanges(); selection?.addRange(range);
-      captureSelection();
-    });
-  };
   const selectCanvasObject = (event: ReactMouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
     const freeImage = target.closest(".designer-free-image") as HTMLElement | null;
@@ -4014,39 +3703,34 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
       const kind = freeImage || node.tagName === "IMG" ? "image" : "text box";
       selectDesignerObject(node, location?.slotId ?? selectedId, kind);
     } else {
-      const hadObjectSelection = Boolean(selectedNode.current || selectedObjectIdentityRef.current);
       selectedNode.current?.classList.remove("designer-object-selected");
       selectedNode.current = null;
       selectedObjectIdentityRef.current = null;
-      if (hadObjectSelection) {
-        setSelectedObjectIdentity(null);
-        setSelectedObject("page");
-      }
-      captureSelection();
+      setSelectedObjectIdentity(null);
+      setSelectedObject("page");
+      setPanel("page");
     }
   };
   const mutateObject = (property: string, value: string) => {
     const node = resolveSelectedObject();
     if (!node || node.dataset.designerLocked === "true") return;
-    const slotId = selectedObjectIdentityRef.current?.slotId ?? selectedId;
-    const before = snapshotForSlot(slotId);
+    setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]);
+    setRedoStack([]);
     const { frame, visual } = imageParts(node);
     const visualProperties = new Set(["objectFit", "objectPosition", "opacity", "borderRadius", "borderWidth", "borderColor", "borderStyle", "boxShadow", "transform"]);
     const target = selectedObject === "image" && visual && visualProperties.has(property) ? visual : frame;
     (target.style as unknown as Record<string, string>)[property] = value;
     captureObjectPageHtml();
-    pushHistory({ label: `${selectedObject} styling`, changes: [{ slotId, before, after: snapshotForSlot(slotId) }], object: selectedObjectIdentityRef.current });
     setMessage(`${selectedObject} updated.`);
   };
   const captureSelectedPageHtml = () => captureObjectPageHtml(selectedId);
-  const moveObject = (x: number, y: number) => { const node = resolveSelectedObject(); if (!node || node.dataset.designerLocked === "true") return; const slotId = selectedObjectIdentityRef.current?.slotId ?? selectedId; const before = snapshotForSlot(slotId); const { frame } = imageParts(node); if (!frame.style.position) frame.style.position = frame.classList.contains("designer-free-image") ? "absolute" : "relative"; frame.style.left = `${(parseFloat(frame.style.left) || 0) + x}px`; frame.style.top = `${(parseFloat(frame.style.top) || 0) + y}px`; captureObjectPageHtml(); pushHistory({ label: "Move object", changes: [{ slotId, before, after: snapshotForSlot(slotId) }], object: selectedObjectIdentityRef.current }); };
-  const duplicateObject = () => { const node = resolveSelectedObject(); if (!node) return; const slotId = selectedObjectIdentityRef.current?.slotId ?? selectedId; const before = snapshotForSlot(slotId); const clone = node.cloneNode(true) as HTMLElement; clone.classList.remove("designer-object-selected"); clone.dataset.designerObjectId = crypto.randomUUID(); node.after(clone); captureObjectPageHtml(); pushHistory({ label: "Duplicate object", changes: [{ slotId, before, after: snapshotForSlot(slotId) }] }); };
+  const moveObject = (x: number, y: number) => { const node = resolveSelectedObject(); if (!node || node.dataset.designerLocked === "true") return; const { frame } = imageParts(node); if (!frame.style.position) frame.style.position = frame.classList.contains("designer-free-image") ? "absolute" : "relative"; frame.style.left = `${(parseFloat(frame.style.left) || 0) + x}px`; frame.style.top = `${(parseFloat(frame.style.top) || 0) + y}px`; captureObjectPageHtml(); };
+  const duplicateObject = () => { const node = resolveSelectedObject(); if (!node) return; const clone = node.cloneNode(true) as HTMLElement; clone.classList.remove("designer-object-selected"); clone.dataset.designerObjectId = crypto.randomUUID(); node.after(clone); captureObjectPageHtml(); };
   const deleteObject = () => {
     const node = resolveSelectedObject();
     if (!node) return;
     const deletedImage = node.classList.contains("designer-free-image") || node.tagName === "IMG";
     const slotId = selectedObjectIdentityRef.current?.slotId ?? selectedId;
-    const before = snapshotForSlot(slotId);
     node.remove();
     selectedNode.current = null;
     selectedObjectIdentityRef.current = null;
@@ -4054,15 +3738,15 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     setSelectedObject("page");
     setPanel("page");
     captureObjectPageHtml(slotId);
-    pushHistory({ label: deletedImage ? "Delete image" : "Delete object", changes: [{ slotId, before, after: snapshotForSlot(slotId) }] });
     setMessage(deletedImage ? "Image deleted. Save the page or whole book to keep this change." : "Object deleted.");
   };
-  const addTextBox = () => { const before = snapshotForSlot(selectedId); editor.current?.insertAdjacentHTML("beforeend", '<div class="designer-free-text" style="position:relative;padding:12px;border:1px solid #d7cbb8;min-height:48px">Edit this text box</div>'); captureSelectedPageHtml(); pushHistory({ label: "Add text box", changes: [{ slotId: selectedId, before, after: snapshotForSlot(selectedId) }] }); setMessage("Text box added. Select it to move, resize or style it."); };
+  const addTextBox = () => { editor.current?.insertAdjacentHTML("beforeend", '<div class="designer-free-text" style="position:relative;padding:12px;border:1px solid #d7cbb8;min-height:48px">Edit this text box</div>'); captureSelectedPageHtml(); setMessage("Text box added. Select it to move, resize or style it."); };
   const imageInputRef = useRef<HTMLInputElement>(null);
   const beginImageResize = () => {
     if (imageResizeSession.current) return;
     imageResizeSession.current = true;
-    imageResizeBefore.current = snapshotForSlot(selectedObjectIdentityRef.current?.slotId ?? selectedId);
+    setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]);
+    setRedoStack([]);
   };
   const resizeSelectedImage = (dimension: keyof DesignerImageSize, rawValue: number) => {
     const node = resolveSelectedObject();
@@ -4079,12 +3763,9 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
   const finishImageResize = () => {
     if (!imageResizeSession.current) return;
     imageResizeSession.current = false;
-    const slotId = selectedObjectIdentityRef.current?.slotId ?? selectedId;
     const node = resolveSelectedObject();
     if (node) setSelectedImageSize(readImageSize(node));
     captureObjectPageHtml();
-    if (imageResizeBefore.current) pushHistory({ label: "Resize image", changes: [{ slotId, before: imageResizeBefore.current, after: snapshotForSlot(slotId) }], object: selectedObjectIdentityRef.current });
-    imageResizeBefore.current = null;
     setMessage("Image size updated. Save the page or whole book to keep this change.");
   };
   const wireFreeImageControls = (container: HTMLElement, root: HTMLDivElement, slotId: string, selectImmediately = false) => {
@@ -4274,9 +3955,6 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     columnGap: `${revision.columnGap}px`,
     padding: `${revision.pagePadding}px`,
     "--designer-paragraph-space": `${revision.paragraphSpacing}px`,
-    ...(revision.separatorColor ? { "--designer-separator-color": revision.separatorColor } : {}),
-    ...(revision.separatorWidth !== undefined ? { "--designer-separator-width": `${revision.separatorWidth}px` } : {}),
-    ...(revision.separatorStyle ? { "--designer-separator-style": revision.separatorStyle } : {}),
   }) as CSSProperties;
   const backgroundStyle = { backgroundImage: draft.backgroundImageUrl ? `url(${draft.backgroundImageUrl})` : undefined, backgroundSize: draft.backgroundSize === "repeat" ? "auto" : draft.backgroundSize, backgroundRepeat: draft.backgroundSize === "repeat" ? "repeat" : "no-repeat", backgroundPosition: draft.backgroundPosition, opacity: draft.backgroundOpacity };
   const contentStyle = { fontFamily: draft.fontFamily, fontSize: `${draft.fontSize}px`, color: draft.textColor, lineHeight: draft.lineHeight, letterSpacing: `${draft.letterSpacing}px`, columnCount: draft.columns, columnGap: `${draft.columnGap}px`, padding: `${draft.pagePadding}px`, "--designer-paragraph-space": `${draft.paragraphSpacing}px` } as CSSProperties;
@@ -4287,13 +3965,13 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     <header><div><p className="eyebrow">FINAL PRODUCTION</p><h2>Whole-book Designer</h2><span>The pages below are the same pages used by Preview and PDF.</span></div><div><button className="secondary" onClick={() => void previewWholeBook()} disabled={busy}>Preview</button><button className="primary" onClick={() => void saveRevision()} disabled={busy || !dirtyPages.includes(selectedId)}>{busy ? "Saving…" : dirtyPages.includes(selectedId) ? "Save page" : "Page saved"}</button><details className="designer-more-menu"><summary>More</summary><div><button onClick={runBookPreflight}>Check whole book</button><button onClick={() => void balanceLayout("book")} disabled={busy}>Balance layout</button><button onClick={() => void saveWholeBook()} disabled={busy}>Save whole book</button><button onClick={() => void addBlankPage()}>Add blank page</button><button onClick={() => void duplicatePage()}>Duplicate page</button></div></details>{!embedded && <button className="designer-close" onClick={onClose} aria-label="Close Designer Studio">×</button>}</div></header>
     <div className="designer-status"><span>◆</span><b>{message}</b><i>{dirtyPages.length ? `${dirtyPages.length} unsaved page${dirtyPages.length === 1 ? "" : "s"}` : `${orderedPages.filter((page) => !revisionFor(page).deleted).length} pages`} · {selected.label}</i></div>
     <div className="designer-workspace designer-book-workspace"><aside className="designer-pages designer-book-nav"><p className="designer-nav-label">BOOK SECTIONS</p>{orderedPages.filter((page) => page.kind === "cover" || page.kind === "contents").map((page) => <button key={page.slotId} className={page.slotId === selectedId ? "active" : ""} onClick={() => selectAndReveal(page.slotId)}><span>{page.kind === "cover" ? "C" : "T"}</span><div><b>{page.label}</b><small>Book matter</small></div></button>)}{project.chapters.map((chapter) => { const pages = orderedPages.filter((page) => page.chapterId === chapter.id && !revisionFor(page).deleted); const hasIssue = pages.some((page) => ["empty", "overflow"].includes(designerPageFill(liveBookHtml.current[page.slotId] ?? revisionFor(page).html, project.audience, page.pageIndex === 0).tone)); return <button key={chapter.id} className={selected.chapterId === chapter.id ? "active" : ""} onClick={() => jumpToChapter(chapter.id)}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small>{pages.length} page{pages.length === 1 ? "" : "s"}{hasIssue ? " · check spacing" : " · balanced"}</small></div></button>; })}{orderedPages.filter((page) => page.kind === "back").map((page) => <button key={page.slotId} className={page.slotId === selectedId ? "active" : ""} onClick={() => selectAndReveal(page.slotId)}><span>B</span><div><b>{page.label}</b><small>Book matter</small></div></button>)}</aside>
-    <main className="designer-stage"><nav className="designer-toolbar designer-book-toolbar"><button onClick={undo} disabled={!undoStack.current.length} title="Undo last book action (Cmd/Ctrl+Z)" style={{background: undoStack.current.length ? "#fff7ed" : "#f5f5f5", border: undoStack.current.length ? "2px solid #b4532a" : "1px solid #ddd", color: undoStack.current.length ? "#b4532a" : "#999", padding:"8px 14px", fontSize:"13px", fontWeight:"800", borderRadius:"6px", display:"flex", alignItems:"center", gap:"6px", cursor: undoStack.current.length ? "pointer" : "not-allowed", opacity: undoStack.current.length ? 1 : 0.6}}>↶ Undo</button><button onClick={redo} disabled={!redoStack.current.length} title="Redo last book action (Cmd/Ctrl+Shift+Z)" style={{background: redoStack.current.length ? "#fff7ed" : "#f5f5f5", border: redoStack.current.length ? "2px solid #1a3d2e" : "1px solid #ddd", color: redoStack.current.length ? "#1a3d2e" : "#999", padding:"8px 14px", fontSize:"13px", fontWeight:"800", borderRadius:"6px", display:"flex", alignItems:"center", gap:"6px", cursor: redoStack.current.length ? "pointer" : "not-allowed", opacity: redoStack.current.length ? 1 : 0.6}}>Redo ↷</button><select aria-label="Selected text font" defaultValue="Georgia" onChange={(event) => command("fontName", event.target.value)}><option>Georgia</option><option>Arial</option><option>Verdana</option><option>Trebuchet MS</option><option>Times New Roman</option><option>Noto Serif</option><option>Noto Sans Devanagari</option></select><label className="designer-selected-size">Selected text size (px)<input aria-label="Selected text size in pixels" type="number" min="8" max="96" value={selectedTextSize} onMouseDown={() => captureSelection()} onChange={(event) => { const v = Number(event.target.value) || 8; setSelectedTextSize(v); if (!applyingTextSize.current) applySelectedTextSize(v); }} onBlur={(event) => { if (!applyingTextSize.current) applySelectedTextSize(Number(event.currentTarget.value)); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); applySelectedTextSize(Number(event.currentTarget.value)); } }}/></label><button onClick={() => command("bold")}><b>B</b></button><button onClick={() => command("italic")}><i>I</i></button><button onClick={() => command("underline")}><u>U</u></button><button onClick={() => command("insertUnorderedList")}>• List</button><button onClick={() => command("justifyLeft")}>Left</button><button onClick={() => command("justifyCenter")}>Centre</button><button onClick={() => command("justifyRight")}>Right</button><label title="Text colour"><input type="color" defaultValue="#243b34" onChange={(event) => command("foreColor", event.target.value)}/></label><label title="Highlight"><input type="color" defaultValue="#f6e6ad" onChange={(event) => command("hiliteColor", event.target.value)}/></label><button onClick={addTextBox}>＋ Text box</button><input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp" style={{display:"none"}} onChange={(e)=>{const f=e.target.files?.[0]; if(f) void addFreeImage(f)}} /><button onClick={()=>imageInputRef.current?.click()} disabled={busy} title="Add image anywhere, drag to move, handles to resize">＋ Image</button><button className="balance-chapter-button" onClick={() => void balanceLayout("chapter")} disabled={!selected.chapterId || busy}>Balance this chapter</button></nav>
-      <div className="designer-canvas-wrap designer-whole-book-canvas" aria-label="Editable whole book">{orderedPages.filter((page) => !revisionFor(page).deleted).map((page, index) => { const revision = revisionFor(page); const fill = page.kind === "chapter" ? designerPageFill(liveBookHtml.current[page.slotId] ?? revision.html, project.audience, page.pageIndex === 0) : { ratio: 100, label: "Designed page", tone: "balanced" }; const pageBackground = { backgroundImage: revision.backgroundImageUrl ? `url(${revision.backgroundImageUrl})` : undefined, backgroundSize: revision.backgroundSize === "repeat" ? "auto" : revision.backgroundSize, backgroundRepeat: revision.backgroundSize === "repeat" ? "repeat" : "no-repeat", backgroundPosition: revision.backgroundPosition, opacity: revision.backgroundOpacity }; const pageBorder = revision.borderStyle === "none" ? undefined : { inset: `${revision.borderInset}px`, border: `${revision.borderWidth}px ${revision.borderStyle} ${revision.borderColor}`, borderRadius: `${revision.borderRadius}px` }; const pageClasses = designerPageClasses(project, page); const isDirty = dirtyPages.includes(page.slotId); return <section className={`designer-flow-page${page.slotId === selectedId ? " selected" : ""}`} id={`designer-flow-${page.slotId}`} key={page.slotId}><div className="designer-flow-page-meta"><span>PAGE {index + 1}</span><b>{page.label}</b><button className={`page-fill-badge ${fill.tone}`} onClick={() => { setSelectedId(page.slotId); setPanel("preflight"); }}>{fill.label} · {fill.ratio}%</button><button className={`page-save-button ${isDirty ? "dirty" : "saved"}`} disabled={busy || !isDirty} onClick={() => void savePageById(page.slotId)}>{busy && page.slotId === selectedId ? "Saving…" : isDirty ? "Save page" : "Saved"}</button></div><article className={`designer-canvas-page book-sheet ${bookClasses} ${pageClasses}${revision.backgroundImageUrl ? " has-background" : ""}${revision.intentionalBlank ? " blank" : ""}`} style={{ backgroundColor: revision.backgroundColor }} onMouseDown={() => setSelectedId(page.slotId)}><div className="designer-background-layer" style={pageBackground}/><div className="designer-border-layer" style={pageBorder}/><div className={`designer-watermark-layer${revision.watermarkRepeat ? " repeat" : ""}`} style={{ opacity: revision.watermarkOpacity, left: `${revision.watermarkX}%`, top: `${revision.watermarkY}%`, transform: `translate(-50%,-50%) rotate(${revision.watermarkRotation}deg)`, display: revision.watermarkVisible ? "grid" : "none" }}>{Array.from({ length: revision.watermarkRepeat ? 6 : 1 }, (_, watermarkIndex) => <span key={watermarkIndex}>{revision.watermarkImageUrl && <img src={revision.watermarkImageUrl} alt="Custom watermark"/>}{revision.watermarkText}</span>)}</div>{!revision.intentionalBlank && revision.contentVisible && <div ref={(node) => { if (node) { bookEditors.current.set(page.slotId, node); if (page.slotId === selectedId) editor.current = node; } else bookEditors.current.delete(page.slotId); }} className="designer-editable-content" style={pageStyleFor(revision)} contentEditable suppressContentEditableWarning onMouseDown={(event) => beginTextInteraction(event, page.slotId)} onMouseUp={() => captureSelection()} onFocus={() => { setSelectedId(page.slotId); captureSelection(); }} onBeforeInput={() => beginTyping(page.slotId)} onInput={(event) => recordTyping(page.slotId, event.currentTarget.innerHTML)} onKeyDown={(event) => handleContentsBackspace(event, page.slotId)} onKeyUp={() => captureSelection()} onCompositionEnd={(event) => recordTyping(page.slotId, event.currentTarget.innerHTML)} onClick={selectCanvasObject} dangerouslySetInnerHTML={{ __html: liveBookHtml.current[page.slotId] ?? revision.html }}/>}</article><div style={{margin:"6px auto 0",fontSize:"11px",letterSpacing:"0.04em",color:"#1a2e1a",background:"#ffffff",padding:"5px 12px",borderRadius:"999px",border:"1px solid #b4532a",boxShadow:"0 2px 8px rgba(0,0,0,0.08)",fontWeight:"800",width:"fit-content"}}>Book page {index+1} of {order.length} — exactly as in Preview</div>{revision.intentionalBlank && <div className="intentional-blank-label">INTENTIONAL BLANK PAGE</div>}</section>; })}</div>
+    <main className="designer-stage"><nav className="designer-toolbar designer-book-toolbar"><button onClick={undo} disabled={!undoStack.length} title="Undo selected page" style={{background: undoStack.length ? "#fff7ed" : "#f5f5f5", border: undoStack.length ? "2px solid #b4532a" : "1px solid #ddd", color: undoStack.length ? "#b4532a" : "#999", padding:"8px 14px", fontSize:"13px", fontWeight:"800", borderRadius:"6px", display:"flex", alignItems:"center", gap:"6px", cursor: undoStack.length ? "pointer" : "not-allowed", opacity: undoStack.length ? 1 : 0.6}}>↶ Undo</button><button onClick={redo} disabled={!redoStack.length} title="Redo selected page" style={{background: redoStack.length ? "#fff7ed" : "#f5f5f5", border: redoStack.length ? "2px solid #1a3d2e" : "1px solid #ddd", color: redoStack.length ? "#1a3d2e" : "#999", padding:"8px 14px", fontSize:"13px", fontWeight:"800", borderRadius:"6px", display:"flex", alignItems:"center", gap:"6px", cursor: redoStack.length ? "pointer" : "not-allowed", opacity: redoStack.length ? 1 : 0.6}}>Redo ↷</button><select aria-label="Selected text font" defaultValue="Georgia" onChange={(event) => command("fontName", event.target.value)}><option>Georgia</option><option>Arial</option><option>Verdana</option><option>Trebuchet MS</option><option>Times New Roman</option><option>Noto Serif</option><option>Noto Sans Devanagari</option></select><select aria-label="Selected text size" defaultValue="3" onChange={(event) => command("fontSize", event.target.value)}><option value="1">Small</option><option value="3">Body</option><option value="5">Subheading</option><option value="7">Title</option></select><button onClick={() => command("bold")}><b>B</b></button><button onClick={() => command("italic")}><i>I</i></button><button onClick={() => command("underline")}><u>U</u></button><button onClick={() => command("insertUnorderedList")}>• List</button><button onClick={() => command("justifyLeft")}>Left</button><button onClick={() => command("justifyCenter")}>Centre</button><button onClick={() => command("justifyRight")}>Right</button><label title="Text colour"><input type="color" defaultValue="#243b34" onChange={(event) => command("foreColor", event.target.value)}/></label><label title="Highlight"><input type="color" defaultValue="#f6e6ad" onChange={(event) => command("hiliteColor", event.target.value)}/></label><button onClick={addTextBox}>＋ Text box</button><input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp" style={{display:"none"}} onChange={(e)=>{const f=e.target.files?.[0]; if(f) void addFreeImage(f)}} /><button onClick={()=>imageInputRef.current?.click()} disabled={busy} title="Add image anywhere, drag to move, handles to resize">＋ Image</button><button className="balance-chapter-button" onClick={() => void balanceLayout("chapter")} disabled={!selected.chapterId || busy}>Balance this chapter</button></nav>
+      <div className="designer-canvas-wrap designer-whole-book-canvas" aria-label="Editable whole book">{orderedPages.filter((page) => !revisionFor(page).deleted).map((page, index) => { const revision = revisionFor(page); const fill = page.kind === "chapter" ? designerPageFill(liveBookHtml.current[page.slotId] ?? revision.html, project.audience, page.pageIndex === 0) : { ratio: 100, label: "Designed page", tone: "balanced" }; const pageBackground = { backgroundImage: revision.backgroundImageUrl ? `url(${revision.backgroundImageUrl})` : undefined, backgroundSize: revision.backgroundSize === "repeat" ? "auto" : revision.backgroundSize, backgroundRepeat: revision.backgroundSize === "repeat" ? "repeat" : "no-repeat", backgroundPosition: revision.backgroundPosition, opacity: revision.backgroundOpacity }; const pageBorder = revision.borderStyle === "none" ? undefined : { inset: `${revision.borderInset}px`, border: `${revision.borderWidth}px ${revision.borderStyle} ${revision.borderColor}`, borderRadius: `${revision.borderRadius}px` }; const pageClasses = designerPageClasses(project, page); const isDirty = dirtyPages.includes(page.slotId); return <section className={`designer-flow-page${page.slotId === selectedId ? " selected" : ""}`} id={`designer-flow-${page.slotId}`} key={page.slotId}><div className="designer-flow-page-meta"><span>PAGE {index + 1}</span><b>{page.label}</b><button className={`page-fill-badge ${fill.tone}`} onClick={() => { setSelectedId(page.slotId); setPanel("preflight"); }}>{fill.label} · {fill.ratio}%</button><button className={`page-save-button ${isDirty ? "dirty" : "saved"}`} disabled={busy || !isDirty} onClick={() => void savePageById(page.slotId)}>{busy && page.slotId === selectedId ? "Saving…" : isDirty ? "Save page" : "Saved"}</button></div><article className={`designer-canvas-page book-sheet ${bookClasses} ${pageClasses}${revision.backgroundImageUrl ? " has-background" : ""}${revision.intentionalBlank ? " blank" : ""}`} style={{ backgroundColor: revision.backgroundColor }} onMouseDown={() => setSelectedId(page.slotId)}><div className="designer-background-layer" style={pageBackground}/><div className="designer-border-layer" style={pageBorder}/><div className={`designer-watermark-layer${revision.watermarkRepeat ? " repeat" : ""}`} style={{ opacity: revision.watermarkOpacity, left: `${revision.watermarkX}%`, top: `${revision.watermarkY}%`, transform: `translate(-50%,-50%) rotate(${revision.watermarkRotation}deg)`, display: revision.watermarkVisible ? "grid" : "none" }}>{Array.from({ length: revision.watermarkRepeat ? 6 : 1 }, (_, watermarkIndex) => <span key={watermarkIndex}>{revision.watermarkImageUrl && <img src={revision.watermarkImageUrl} alt="Custom watermark"/>}{revision.watermarkText}</span>)}</div>{!revision.intentionalBlank && revision.contentVisible && <div ref={(node) => { if (node) { bookEditors.current.set(page.slotId, node); if (page.slotId === selectedId) editor.current = node; } else bookEditors.current.delete(page.slotId); }} className="designer-editable-content" style={pageStyleFor(revision)} contentEditable suppressContentEditableWarning onFocus={() => setSelectedId(page.slotId)} onInput={(event) => rememberLiveHtml(page.slotId, event.currentTarget.innerHTML)} onClick={selectCanvasObject} dangerouslySetInnerHTML={{ __html: liveBookHtml.current[page.slotId] ?? revision.html }}/>}</article><div style={{margin:"6px auto 0",fontSize:"11px",letterSpacing:"0.04em",color:"#1a2e1a",background:"#ffffff",padding:"5px 12px",borderRadius:"999px",border:"1px solid #b4532a",boxShadow:"0 2px 8px rgba(0,0,0,0.08)",fontWeight:"800",width:"fit-content"}}>Book page {index+1} of {order.length} — exactly as in Preview</div>{revision.intentionalBlank && <div className="intentional-blank-label">INTENTIONAL BLANK PAGE</div>}</section>; })}</div>
     </main>
     <aside className="designer-controls designer-inspector"><nav>{(["page","text","image","layers","preflight"] as const).map((name) => <button key={name} className={panel === name ? "active" : ""} onClick={() => setPanel(name)}>{name}</button>)}</nav>
       {panel === "image" && selectedObject === "image" && <button className="designer-delete-image" onClick={deleteObject}>Delete selected image</button>}
-      {panel === "page" && <><section><h3>Page structure</h3><label className="designer-check"><input type="checkbox" checked={draft.intentionalBlank} onChange={(event) => changeDraft({ intentionalBlank: event.target.checked })}/> Intentional blank</label><label className="designer-check"><input type="checkbox" checked={draft.layoutLocked} onChange={(event) => changeDraft({ layoutLocked: event.target.checked })}/> Lock this page during reflow</label><label className="designer-check"><input type="checkbox" checked={draft.deleted} onChange={(event) => changeDraft({ deleted: event.target.checked })}/> Remove from final book</label><div className="designer-row"><button onClick={() => void movePage(-1)}>Move up</button><button onClick={() => void movePage(1)}>Move down</button></div><div className="designer-row" style={{marginTop:"8px"}}><label style={{display:"flex",alignItems:"center",gap:"6px",fontSize:"9px",fontWeight:"800"}}>Move to #<input key={selectedId} id="move-page-input" type="number" min="1" max={order.length} defaultValue={order.indexOf(selectedId)+1} style={{width:"60px",border:"1px solid #d6ccbd",padding:"6px",textAlign:"center"}} /></label><button onClick={() => { const el=document.getElementById("move-page-input") as HTMLInputElement | null; const v=Number(el?.value); if(v>=1 && v<=order.length) void movePageTo(v-1); }} disabled={busy} style={{padding:"7px 10px",fontSize:"9px",fontWeight:"800"}}>Go</button></div><div style={{fontSize:"8px",color:"var(--muted)",marginTop:"4px"}}>Page {order.indexOf(selectedId)+1} of {order.length} — built-in number system</div><button onClick={() => void deletePage()} disabled={busy} style={{marginTop:"8px",background:"#a9322e",color:"white",borderColor:"#a9322e",width:"100%",padding:"9px",fontWeight:"800"}}>Delete page</button>{selected.chapterId && <button className="primary" onClick={() => void balanceLayout("chapter")} disabled={busy || draft.layoutLocked}>Balance this chapter</button>}</section><section><h3>Page layout</h3><label>Margins <span>{draft.pagePadding}px</span><input type="range" min="28" max="100" value={draft.pagePadding} onChange={(event) => changeDraft({ pagePadding: Number(event.target.value) })}/></label><label>Columns<select value={draft.columns} onChange={(event) => changeDraft({ columns: Number(event.target.value) })}><option value="1">One</option><option value="2">Two</option></select></label><label>Column gap <span>{draft.columnGap}px</span><input type="range" min="12" max="60" value={draft.columnGap} onChange={(event) => changeDraft({ columnGap: Number(event.target.value) })}/></label></section><section><h3>Page border</h3><label>Style<select value={draft.borderStyle} onChange={(event) => changeDraft({ borderStyle: event.target.value as DesignerPageRevision["borderStyle"] })}><option value="none">None</option><option value="solid">Single</option><option value="double">Double</option><option value="dashed">Decorative dashed</option></select></label><div className="designer-row"><label>Colour<input type="color" value={draft.borderColor} onChange={(event) => changeDraft({ borderColor: event.target.value })}/></label><label>Width<input type="number" min="1" max="12" value={draft.borderWidth} onChange={(event) => changeDraft({ borderWidth: Number(event.target.value) })}/></label></div><label>Inset <span>{draft.borderInset}px</span><input type="range" min="0" max="50" value={draft.borderInset} onChange={(event) => changeDraft({ borderInset: Number(event.target.value) })}/></label><label>Corner radius <span>{draft.borderRadius}px</span><input type="range" min="0" max="60" value={draft.borderRadius} onChange={(event) => changeDraft({ borderRadius: Number(event.target.value) })}/></label></section><section><h3>Separator lines</h3><p className="designer-help">Controls contents dividers, chapter header rules, and footer rules on this page.</p><div className="designer-row"><label>Colour<input aria-label="Separator line colour" type="color" value={draft.separatorColor ?? "#173f37"} onChange={(event) => changeDraft({ separatorColor: event.target.value })}/></label><label>Thickness<input aria-label="Separator line thickness" type="number" min="0" max="8" value={draft.separatorWidth ?? 1} onChange={(event) => changeDraft({ separatorWidth: Math.max(0, Math.min(8, Number(event.target.value))) })}/></label></div><label>Style<select aria-label="Separator line style" value={draft.separatorStyle ?? "solid"} onChange={(event) => changeDraft({ separatorStyle: event.target.value as DesignerPageRevision["separatorStyle"] })}><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option><option value="double">Double</option></select></label><button onClick={() => changeDraft({ separatorColor: undefined, separatorWidth: undefined, separatorStyle: undefined })}>Reset to template default</button></section><section><h3>Background</h3><label>Colour<input type="color" value={draft.backgroundColor} onChange={(event) => changeDraft({ backgroundColor: event.target.value })}/></label><label className="designer-upload">{busy ? "Uploading background…" : "Upload background"}<input ref={backgroundUploadInputRef} type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={(event) => void uploadBackground(event)}/></label><p className="designer-help">After upload, choose whether to use the background on this page only or throughout the whole book.</p><label>Fit<select value={draft.backgroundSize} onChange={(event) => changeDraft({ backgroundSize: event.target.value as DesignerPageRevision["backgroundSize"] })}><option value="cover">Cover</option><option value="contain">Contain</option><option value="auto">Original size</option><option value="repeat">Tile</option></select></label><label>Opacity <span>{Math.round(draft.backgroundOpacity * 100)}%</span><input type="range" min="0" max="1" step=".05" value={draft.backgroundOpacity} onChange={(event) => changeDraft({ backgroundOpacity: Number(event.target.value) })}/></label>{draft.backgroundImageUrl && <button onClick={() => changeDraft({ backgroundImageKey: undefined, backgroundImageUrl: undefined })}>Remove background</button>}</section></>}
-      {panel === "text" && <><section><h3>Typography</h3><label>Page font<select value={draft.fontFamily} onChange={(event) => changeDraft({ fontFamily: event.target.value })}><option value="Georgia, serif">Editorial Serif</option><option value="Arial, sans-serif">Clear Sans</option><option value="'Trebuchet MS', sans-serif">Friendly Reader</option><option value="'Noto Serif', serif">Sanskrit Scholar</option><option value="'Noto Sans Devanagari', sans-serif">Devanagari Sans</option></select></label><div className="designer-row"><label>Page default size (px)<input aria-label="Page default size in pixels" type="number" min="8" max="96" value={draft.fontSize} onChange={(event) => changeDraft({ fontSize: Number(event.target.value) })}/></label><label>Colour<input type="color" value={draft.textColor} onChange={(event) => changeDraft({ textColor: event.target.value })}/></label></div><label>Line height <span>{draft.lineHeight.toFixed(2)}</span><input type="range" min="1" max="2.2" step=".05" value={draft.lineHeight} onChange={(event) => changeDraft({ lineHeight: Number(event.target.value) })}/></label><label>Letter spacing <span>{draft.letterSpacing}px</span><input type="range" min="-1" max="5" step=".1" value={draft.letterSpacing} onChange={(event) => changeDraft({ letterSpacing: Number(event.target.value) })}/></label><label>Paragraph spacing <span>{draft.paragraphSpacing}px</span><input type="range" min="0" max="35" value={draft.paragraphSpacing} onChange={(event) => changeDraft({ paragraphSpacing: Number(event.target.value) })}/></label></section><section><h3>Selected text box</h3><p className="designer-help">Select a custom text box on the page, then move, resize, layer or lock it.</p><div className="object-nudge"><button onClick={() => moveObject(0,-5)}>↑</button><button onClick={() => moveObject(-5,0)}>←</button><button onClick={() => moveObject(5,0)}>→</button><button onClick={() => moveObject(0,5)}>↓</button></div><label>Width<input type="range" min="120" max="520" defaultValue="360" onChange={(event) => mutateObject("width", `${event.target.value}px`)}/></label><label>Padding<input type="range" min="0" max="40" defaultValue="12" onChange={(event) => mutateObject("padding", `${event.target.value}px`)}/></label><div className="designer-row"><button onClick={() => mutateObject("zIndex", "4")}>Bring front</button><button onClick={() => mutateObject("zIndex", "0")}>Send back</button></div><div className="designer-row"><button onClick={duplicateObject}>Duplicate</button><button onClick={deleteObject}>Delete</button></div><button onClick={() => { if (!selectedNode.current) return; selectedNode.current.dataset.designerLocked = selectedNode.current.dataset.designerLocked === "true" ? "false" : "true"; }}>Lock / unlock object</button></section></>}
+      {panel === "page" && <><section><h3>Page structure</h3><label className="designer-check"><input type="checkbox" checked={draft.intentionalBlank} onChange={(event) => changeDraft({ intentionalBlank: event.target.checked })}/> Intentional blank</label><label className="designer-check"><input type="checkbox" checked={draft.layoutLocked} onChange={(event) => changeDraft({ layoutLocked: event.target.checked })}/> Lock this page during reflow</label><label className="designer-check"><input type="checkbox" checked={draft.deleted} onChange={(event) => changeDraft({ deleted: event.target.checked })}/> Remove from final book</label><div className="designer-row"><button onClick={() => void movePage(-1)}>Move up</button><button onClick={() => void movePage(1)}>Move down</button></div><div className="designer-row" style={{marginTop:"8px"}}><label style={{display:"flex",alignItems:"center",gap:"6px",fontSize:"9px",fontWeight:"800"}}>Move to #<input key={selectedId} id="move-page-input" type="number" min="1" max={order.length} defaultValue={order.indexOf(selectedId)+1} style={{width:"60px",border:"1px solid #d6ccbd",padding:"6px",textAlign:"center"}} /></label><button onClick={() => { const el=document.getElementById("move-page-input") as HTMLInputElement | null; const v=Number(el?.value); if(v>=1 && v<=order.length) void movePageTo(v-1); }} disabled={busy} style={{padding:"7px 10px",fontSize:"9px",fontWeight:"800"}}>Go</button></div><div style={{fontSize:"8px",color:"var(--muted)",marginTop:"4px"}}>Page {order.indexOf(selectedId)+1} of {order.length} — built-in number system</div><button onClick={() => void deletePage()} disabled={busy} style={{marginTop:"8px",background:"#a9322e",color:"white",borderColor:"#a9322e",width:"100%",padding:"9px",fontWeight:"800"}}>Delete page</button>{selected.chapterId && <button className="primary" onClick={() => void balanceLayout("chapter")} disabled={busy || draft.layoutLocked}>Balance this chapter</button>}</section><section><h3>Page layout</h3><label>Margins <span>{draft.pagePadding}px</span><input type="range" min="28" max="100" value={draft.pagePadding} onChange={(event) => changeDraft({ pagePadding: Number(event.target.value) })}/></label><label>Columns<select value={draft.columns} onChange={(event) => changeDraft({ columns: Number(event.target.value) })}><option value="1">One</option><option value="2">Two</option></select></label><label>Column gap <span>{draft.columnGap}px</span><input type="range" min="12" max="60" value={draft.columnGap} onChange={(event) => changeDraft({ columnGap: Number(event.target.value) })}/></label></section><section><h3>Page border</h3><label>Style<select value={draft.borderStyle} onChange={(event) => changeDraft({ borderStyle: event.target.value as DesignerPageRevision["borderStyle"] })}><option value="none">None</option><option value="solid">Single</option><option value="double">Double</option><option value="dashed">Decorative dashed</option></select></label><div className="designer-row"><label>Colour<input type="color" value={draft.borderColor} onChange={(event) => changeDraft({ borderColor: event.target.value })}/></label><label>Width<input type="number" min="1" max="12" value={draft.borderWidth} onChange={(event) => changeDraft({ borderWidth: Number(event.target.value) })}/></label></div><label>Inset <span>{draft.borderInset}px</span><input type="range" min="0" max="50" value={draft.borderInset} onChange={(event) => changeDraft({ borderInset: Number(event.target.value) })}/></label><label>Corner radius <span>{draft.borderRadius}px</span><input type="range" min="0" max="60" value={draft.borderRadius} onChange={(event) => changeDraft({ borderRadius: Number(event.target.value) })}/></label></section><section><h3>Background</h3><label>Colour<input type="color" value={draft.backgroundColor} onChange={(event) => changeDraft({ backgroundColor: event.target.value })}/></label><label className="designer-upload">{busy ? "Uploading background…" : "Upload background"}<input ref={backgroundUploadInputRef} type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={(event) => void uploadBackground(event)}/></label><p className="designer-help">After upload, choose whether to use the background on this page only or throughout the whole book.</p><label>Fit<select value={draft.backgroundSize} onChange={(event) => changeDraft({ backgroundSize: event.target.value as DesignerPageRevision["backgroundSize"] })}><option value="cover">Cover</option><option value="contain">Contain</option><option value="auto">Original size</option><option value="repeat">Tile</option></select></label><label>Opacity <span>{Math.round(draft.backgroundOpacity * 100)}%</span><input type="range" min="0" max="1" step=".05" value={draft.backgroundOpacity} onChange={(event) => changeDraft({ backgroundOpacity: Number(event.target.value) })}/></label>{draft.backgroundImageUrl && <button onClick={() => changeDraft({ backgroundImageKey: undefined, backgroundImageUrl: undefined })}>Remove background</button>}</section></>}
+      {panel === "text" && <><section><h3>Typography</h3><label>Page font<select value={draft.fontFamily} onChange={(event) => changeDraft({ fontFamily: event.target.value })}><option value="Georgia, serif">Editorial Serif</option><option value="Arial, sans-serif">Clear Sans</option><option value="'Trebuchet MS', sans-serif">Friendly Reader</option><option value="'Noto Serif', serif">Sanskrit Scholar</option><option value="'Noto Sans Devanagari', sans-serif">Devanagari Sans</option></select></label><div className="designer-row"><label>Size<input type="number" min="9" max="34" value={draft.fontSize} onChange={(event) => changeDraft({ fontSize: Number(event.target.value) })}/></label><label>Colour<input type="color" value={draft.textColor} onChange={(event) => changeDraft({ textColor: event.target.value })}/></label></div><label>Line height <span>{draft.lineHeight.toFixed(2)}</span><input type="range" min="1" max="2.2" step=".05" value={draft.lineHeight} onChange={(event) => changeDraft({ lineHeight: Number(event.target.value) })}/></label><label>Letter spacing <span>{draft.letterSpacing}px</span><input type="range" min="-1" max="5" step=".1" value={draft.letterSpacing} onChange={(event) => changeDraft({ letterSpacing: Number(event.target.value) })}/></label><label>Paragraph spacing <span>{draft.paragraphSpacing}px</span><input type="range" min="0" max="35" value={draft.paragraphSpacing} onChange={(event) => changeDraft({ paragraphSpacing: Number(event.target.value) })}/></label></section><section><h3>Selected text box</h3><p className="designer-help">Select a custom text box on the page, then move, resize, layer or lock it.</p><div className="object-nudge"><button onClick={() => moveObject(0,-5)}>↑</button><button onClick={() => moveObject(-5,0)}>←</button><button onClick={() => moveObject(5,0)}>→</button><button onClick={() => moveObject(0,5)}>↓</button></div><label>Width<input type="range" min="120" max="520" defaultValue="360" onChange={(event) => mutateObject("width", `${event.target.value}px`)}/></label><label>Padding<input type="range" min="0" max="40" defaultValue="12" onChange={(event) => mutateObject("padding", `${event.target.value}px`)}/></label><div className="designer-row"><button onClick={() => mutateObject("zIndex", "4")}>Bring front</button><button onClick={() => mutateObject("zIndex", "0")}>Send back</button></div><div className="designer-row"><button onClick={duplicateObject}>Duplicate</button><button onClick={deleteObject}>Delete</button></div><button onClick={() => { if (!selectedNode.current) return; selectedNode.current.dataset.designerLocked = selectedNode.current.dataset.designerLocked === "true" ? "false" : "true"; }}>Lock / unlock object</button></section></>}
       {panel === "image" && <section key={selectedObjectIdentity?.objectId ?? "image-inspector"}><h3>Selected image</h3><p className="designer-help">Click an image once, then resize it continuously. Changes are stored inside the page edition.</p>
         <label>Width <span>{selectedImageSize.width}px</span><div className="designer-size-control"><input aria-label="Image width slider" type="range" min="80" max="520" value={selectedImageSize.width} onPointerDown={beginImageResize} onPointerUp={finishImageResize} onPointerCancel={finishImageResize} onKeyDown={beginImageResize} onBlur={finishImageResize} onChange={(event) => resizeSelectedImage("width", Number(event.target.value))}/><input aria-label="Image width in pixels" type="number" min="80" max="520" value={selectedImageSize.width} onFocus={beginImageResize} onBlur={finishImageResize} onChange={(event) => resizeSelectedImage("width", Number(event.target.value))}/></div></label>
         <label>Height <span>{selectedImageSize.height}px</span><div className="designer-size-control"><input aria-label="Image height slider" type="range" min="80" max="520" value={selectedImageSize.height} onPointerDown={beginImageResize} onPointerUp={finishImageResize} onPointerCancel={finishImageResize} onKeyDown={beginImageResize} onBlur={finishImageResize} onChange={(event) => resizeSelectedImage("height", Number(event.target.value))}/><input aria-label="Image height in pixels" type="number" min="80" max="520" value={selectedImageSize.height} onFocus={beginImageResize} onBlur={finishImageResize} onChange={(event) => resizeSelectedImage("height", Number(event.target.value))}/></div></label>
@@ -4464,7 +4142,7 @@ function CanvaPreview({ project, exportBusy, pdfProgress, onClose, onDownload, o
     const page = hydrateDesignerOverride(currentBase && isLegacyDesignerScaffold(rawPage) ? { ...rawPage, html: currentBase.html } : rawPage);
     const surfaceClasses = `${designerBookClasses(project)} ${designerPageClasses(project, page)}${page.backgroundImageUrl ? " has-background" : ""}`;
     const backgroundStyle: CSSProperties = { backgroundImage: page.backgroundImageUrl ? `url(${page.backgroundImageUrl})` : undefined, backgroundSize: page.backgroundSize === "repeat" ? "auto" : page.backgroundSize, backgroundRepeat: page.backgroundSize === "repeat" ? "repeat" : "no-repeat", backgroundPosition: page.backgroundPosition, opacity: page.backgroundOpacity };
-    const contentStyle = { fontFamily: page.fontFamily, fontSize: `${page.fontSize}px`, color: page.textColor, lineHeight: page.lineHeight, letterSpacing: `${page.letterSpacing}px`, columnCount: page.columns, columnGap: `${page.columnGap}px`, padding: `${page.pagePadding}px`, "--designer-paragraph-space": `${page.paragraphSpacing}px`, ...(page.separatorColor ? { "--designer-separator-color": page.separatorColor } : {}), ...(page.separatorWidth !== undefined ? { "--designer-separator-width": `${page.separatorWidth}px` } : {}), ...(page.separatorStyle ? { "--designer-separator-style": page.separatorStyle } : {}) } as CSSProperties;
+    const contentStyle = { fontFamily: page.fontFamily, fontSize: `${page.fontSize}px`, color: page.textColor, lineHeight: page.lineHeight, letterSpacing: `${page.letterSpacing}px`, columnCount: page.columns, columnGap: `${page.columnGap}px`, padding: `${page.pagePadding}px`, "--designer-paragraph-space": `${page.paragraphSpacing}px` } as CSSProperties;
     const borderStyle: CSSProperties | undefined = page.borderStyle === "none" ? undefined : { inset: `${page.borderInset}px`, border: `${page.borderWidth}px ${page.borderStyle} ${page.borderColor}`, borderRadius: `${page.borderRadius}px` };
     return <article data-page-slot={page.slotId} className={`book-sheet designer-rendered-sheet ${surfaceClasses}`} key={key} style={{ backgroundColor: page.backgroundColor }}><div className={`designer-render-canvas ${surfaceClasses}`} style={{ backgroundColor: page.backgroundColor }}><div className="designer-background-layer" style={backgroundStyle}/><div className="designer-border-layer" style={borderStyle}/><div className={`designer-render-watermark${page.watermarkRepeat ? " repeat" : ""}`} style={{ opacity: page.watermarkOpacity, left: `${page.watermarkX}%`, top: `${page.watermarkY}%`, transform: `translate(-50%,-50%) rotate(${page.watermarkRotation}deg)`, display: page.watermarkVisible ? "grid" : "none" }}>{Array.from({ length: page.watermarkRepeat ? 6 : 1 }, (_, index) => <span key={index}>{page.watermarkImageUrl && <img src={page.watermarkImageUrl} alt=""/>}{page.watermarkText}</span>)}</div>{!page.intentionalBlank && page.contentVisible && <div className="designer-render-content" style={contentStyle} dangerouslySetInnerHTML={{ __html: page.html }}/>}</div></article>;
   };
