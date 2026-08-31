@@ -591,6 +591,25 @@ html[data-theme="scholar"] .hero h1{font-family:Georgia,serif !important;font-si
 html[data-theme="scholar"] .primary, html[data-theme="scholar"] .hero-cta{background:var(--ink) !important}
 html[data-theme="scholar"] .paper{padding-left:84px !important;padding-right:84px !important}
 
+/* Back cover ISBN strip — white strip + white sticker box for every book */
+.backmatter{position:relative !important; padding-bottom:34mm !important;}
+.back-main{padding-bottom:6mm;}
+.back-isbn-strip{position:absolute !important; left:0 !important; right:0 !important; bottom:0 !important; height:28mm !important; background:#ffffff !important; border-top:1.5px solid #E5DDD0 !important; display:flex !important; align-items:center !important; justify-content:space-between !important; gap:4mm !important; padding:0 8mm 0 8mm !important; z-index:2 !important; -webkit-print-color-adjust:exact; print-color-adjust:exact;}
+.back-isbn-meta{display:flex !important; flex-direction:column !important; gap:2px !important;}
+.back-isbn-meta b{font:800 8px/1 ui-sans-serif,system-ui !important; letter-spacing:.12em !important; color:#173f37 !important;}
+.back-isbn-meta span{font:500 7px/1 ui-sans-serif,system-ui !important; color:#6B5E4F !important;}
+.back-isbn-box{width:42mm !important; height:18mm !important; background:#ffffff !important; border:1.5px solid #111111 !important; border-radius:4px !important; display:grid !important; place-items:center !important; box-shadow:0 1px 4px rgba(0,0,0,.08) !important;}
+.back-isbn-box span{font:700 6px/1 ui-sans-serif,system-ui !important; letter-spacing:.14em !important; color:#A99E8F !important; text-transform:uppercase !important; text-align:center !important;}
+.back-mrp{min-width:30mm !important; height:18mm !important; display:grid !important; place-items:center !important; padding:0 6mm !important; background:#FFFEF8 !important; border:1.5px dashed #C9A86A !important; border-radius:4px !important; font:800 9px/1 ui-sans-serif,system-ui !important; color:#173f37 !important; letter-spacing:.04em !important; text-align:center !important; cursor:text !important; -webkit-print-color-adjust:exact; print-color-adjust:exact;}
+.back-mrp:focus{outline:2px solid #C9A86A !important; background:#fff !important;}
+.designer-canvas-page.backmatter .back-isbn-strip{pointer-events:none !important;}
+.designer-canvas-page.backmatter .back-mrp{pointer-events:auto !important;}
+.designer-canvas-page.backmatter .designer-editable-content{padding-bottom:34mm !important;}
+@media print{
+  .backmatter{padding-bottom:34mm !important;}
+  .back-isbn-strip{position:absolute !important; -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important;}
+}
+
 /* Theme switcher UI */
 .theme-switcher{display:flex;align-items:center;gap:8px;margin-right:12px}
 .theme-switcher label{font-size:8px;font-weight:800;letter-spacing:.12em;color:var(--muted);text-transform:uppercase}
