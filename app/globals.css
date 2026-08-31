@@ -605,6 +605,28 @@ html[data-theme="scholar"] .paper{padding-left:84px !important;padding-right:84p
 .designer-canvas-page.backmatter .back-isbn-strip{pointer-events:none !important;}
 .designer-canvas-page.backmatter .back-mrp{pointer-events:auto !important;}
 .designer-canvas-page.backmatter .designer-editable-content{padding-bottom:34mm !important;}
+
+/* Book alignment (whole book) — Google Docs style */
+.book-align-left .designer-editable-content, .book-align-left .preview-body, .book-align-left .book-copy, .book-align-left .designer-render-content,
+html[data-book-alignment="left"] .preview-body, html[data-book-alignment="left"] .book-copy, html[data-book-alignment="left"] .designer-render-content { text-align: left !important; }
+.book-align-left .designer-editable-content p, .book-align-left .preview-body p, .book-align-left .book-copy p,
+html[data-book-alignment="left"] .preview-body p, html[data-book-alignment="left"] .book-copy p { text-align: left !important; }
+.book-align-center .designer-editable-content, .book-align-center .preview-body, .book-align-center .book-copy, .book-align-center .designer-render-content,
+html[data-book-alignment="center"] .preview-body, html[data-book-alignment="center"] .book-copy, html[data-book-alignment="center"] .designer-render-content { text-align: center !important; }
+.book-align-center .designer-editable-content p, .book-align-center .preview-body p, .book-align-center .book-copy p,
+html[data-book-alignment="center"] .preview-body p, html[data-book-alignment="center"] .book-copy p { text-align: center !important; }
+.book-align-right .designer-editable-content, .book-align-right .preview-body, .book-align-right .book-copy, .book-align-right .designer-render-content,
+html[data-book-alignment="right"] .preview-body, html[data-book-alignment="right"] .book-copy, html[data-book-alignment="right"] .designer-render-content { text-align: right !important; }
+.book-align-right .designer-editable-content p, .book-align-right .preview-body p, .book-align-right .book-copy p,
+html[data-book-alignment="right"] .preview-body p, html[data-book-alignment="right"] .book-copy p { text-align: right !important; }
+.book-align-justify .designer-editable-content, .book-align-justify .preview-body, .book-align-justify .book-copy, .book-align-justify .designer-render-content,
+html[data-book-alignment="justify"] .preview-body, html[data-book-alignment="justify"] .book-copy, html[data-book-alignment="justify"] .designer-render-content { text-align: justify !important; text-justify: inter-word; hyphens: auto; }
+.book-align-justify .designer-editable-content p, .book-align-justify .preview-body p, .book-align-justify .book-copy p,
+html[data-book-alignment="justify"] .preview-body p, html[data-book-alignment="justify"] .book-copy p { text-align: justify !important; text-justify: inter-word; hyphens: auto; }
+.designer-alignment-row{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}
+.designer-alignment-row button{border:1px solid #d2c7b7;background:#fff;padding:8px 4px;font-size:8px;font-weight:800;display:grid;place-items:center;gap:3px}
+.designer-alignment-row button.active{background:#173f37;color:#fff;border-color:#173f37}
+.designer-alignment-row button span{font-size:10px;line-height:1}
 @media print{
   .backmatter{padding-bottom:34mm !important;}
   .back-isbn-strip{position:absolute !important; -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important;}

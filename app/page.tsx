@@ -8,7 +8,7 @@ import type { ChapterOneGate, PedagogyQuality } from "../lib/pedagogy";
 import { BOOK_PACKAGE_FORMAT, expectedChapterId, expectedContextKey, expectedPageId, type BookPackage, type BookPackageValidation, validateBookPackage } from "../lib/book-package";
 import { bookPersonaClass, bookPersonaDefinitions, bookPersonaPatch, inferBookPersona, materializePersona, personaById, type BookPersona } from "../lib/book-persona";
 import { outlineForMode, pdfChunkRanges, SAFE_OCR_CHUNK_BYTES, SAFE_OCR_CHUNK_PAGES, type OutlineMode, type SourceIntelligence, type SourceOutlineItem } from "../lib/source-intelligence";
-import { buildExternalAiPrompt, parseExternalManuscript, type ExternalManuscriptResult } from "../lib/external-manuscript";
+import { buildExternalAiPrompt, buildExternalIllustrationPrompt, parseExternalManuscript, type ExternalIllustrationSlot, type ExternalManuscriptResult } from "../lib/external-manuscript";
 
 type View = "dashboard" | "wizard" | "external" | "analysis" | "brief" | "editor";
 type EditorWorkspace = "designer" | "workflow";
@@ -225,6 +225,7 @@ type Project = {
   learningFeatures: string[];
   chapters: Chapter[];
   editorialPreferences: string[];
+  bookAlignment?: "left" | "center" | "right" | "justify";
   briefApproved: boolean;
   adaptationPlanConfirmed: boolean;
   adaptationPlanVersion?: number;
@@ -239,7 +240,21 @@ type Project = {
     totalWords: number;
     issues: string[];
   };
+  externalIllustrations?: {
+    promptCreatedAt?: string;
+    importedAt?: string;
+    issues: string[];
+    slots: ExternalIllustrationSlot[];
+  };
   updatedAt: string;
+};
+
+type ExternalIllustrationCandidate = {
+  slotId: string;
+  file?: File;
+  sourcePath?: string;
+  decision: "accept" | "skip";
+  error?: string;
 };
 
 const curatedChapterIllustrations: Record<string, { url: string; caption: string; alt: string }> = {
@@ -332,7 +347,11 @@ function contextualIllustration(
   };
 }
 
-function attachChapterVisuals(project: Pick<Project, "aesthetic" | "illustrationStyle" | "sourceTerms" | "bookPersona">, chapters: Chapter[]) {
+function attachChapterVisuals(project: Pick<Project, "aesthetic" | "illustrationStyle" | "sourceTerms" | "bookPersona" | "creationMode">, chapters: Chapter[]) {
+  if (project.creationMode === "external") return chapters.map((chapter) => {
+    if (chapter.imageKey || chapter.visualType === "uploaded" || chapter.visualType === "external-uploaded") return chapter;
+    return { ...chapter, imageKey: undefined, imageUrl: undefined, visualType: chapter.visualType === "illustration-skipped" ? "illustration-skipped" : "illustration-pending" };
+  });
   const usedImages = new Set<string>();
   return chapters.map((chapter, index) => {
     const existingIdentity = visualIdentity(chapter.imageKey, chapter.imageUrl);
@@ -506,6 +525,7 @@ const emptyProject: Project = {
     { id: 1, title: "Opening chapter", pages: 10, status: "planned", generationStatus: "Waiting", locked: false, sourceRefs: [], body: `<p class="chapter-kicker">CHAPTER ONE</p><h1>Opening chapter</h1><p class="chapter-deck">Your generated chapter will appear here after the book brief is approved.</p>` },
   ],
   editorialPreferences: [],
+  bookAlignment: "left",
   briefApproved: false,
   adaptationPlanConfirmed: false,
   adaptationPlanVersion: ADAPTATION_PLAN_VERSION,
@@ -974,6 +994,12 @@ function normalizeProject(saved: Project): Project {
     designerPresets: cleanSaved.designerPresets ?? [],
     creationMode: cleanSaved.creationMode ?? "automatic",
     externalManuscript: cleanSaved.externalManuscript,
+    externalIllustrations: cleanSaved.externalIllustrations ? {
+      ...cleanSaved.externalIllustrations,
+      issues: cleanSaved.externalIllustrations.issues ?? [],
+      slots: cleanSaved.externalIllustrations.slots ?? [],
+    } : undefined,
+    bookAlignment: (cleanSaved.bookAlignment as Project["bookAlignment"]) ?? "left",
   };
   const normalizedChapters = (cleanSaved.chapters ?? []).map((chapter, index) => {
     const title = chapter.title || `Chapter ${index + 1}`;
@@ -1039,6 +1065,7 @@ function normalizeProject(saved: Project): Project {
     designerPages: (cleanSaved.designerPages ?? []).map(hydrateDesignerOverride),
     designerPageOrder: cleanSaved.designerPageOrder ?? [],
     designerPresets: cleanSaved.designerPresets ?? [],
+    externalIllustrations: childFirstSaved.externalIllustrations,
   };
 }
 
@@ -1533,15 +1560,44 @@ export default function Home() {
         sourceWordCount: section.wordCount,
         wordCount: section.wordCount,
         pageReason: `Imported from the approved external-AI manuscript; ${section.wordCount} reader-facing words.`,
-        imageCaption: section.illustrationBrief,
-        imageAlt: section.illustrationBrief ? `Planned illustration for ${visibleTitle}` : undefined,
-        visualType: section.illustrationBrief ? "Narrative scene" : undefined,
+        imageCaption: section.kind === "chapter" ? `A chapter scene for ${visibleTitle}` : undefined,
+        imageAlt: section.kind === "chapter" ? `Illustration pending for ${visibleTitle}` : undefined,
+        visualType: section.kind === "chapter" ? "illustration-pending" : undefined,
         importValidated: section.issues.length === 0,
         manualApproved: true,
         manualApprovedAt: new Date().toISOString(),
         generationRuns: [],
       };
     });
+    const illustrationSlots: ExternalIllustrationSlot[] = [
+      {
+        id: "COVER",
+        role: "cover",
+        chapterTitle: "Front cover",
+        filename: "images/cover.jpg",
+        sceneBrief: `A richly rendered portrait cover that introduces ${result.title || project.title} through a specific setting, human-scale action and culturally grounded details. No text inside the image.`,
+        altText: `Front-cover illustration for ${result.title || project.title}`,
+        caption: "Front cover",
+        status: "pending",
+      },
+      ...result.sections.flatMap((section, sectionIndex) => {
+        if (section.kind !== "chapter") return [];
+        const chapterOrdinal = result.sections.slice(0, sectionIndex + 1).filter((item) => item.kind === "chapter").length;
+        const slotId = `CH-${String(chapterOrdinal).padStart(2, "0")}-IMG-01`;
+        const chapterId = sectionIndex + 1;
+        return [{
+          id: slotId,
+          role: "chapter" as const,
+          chapterId,
+          chapterTitle: section.title,
+          filename: `images/${slotId}.jpg`,
+          sceneBrief: section.illustrationBrief || `A specific narrative moment from “${section.title}” showing its real people, place, objects and central action—not a diagram or symbolic collage.`,
+          altText: `Narrative illustration for ${section.title}`,
+          caption: section.illustrationBrief || `A scene from ${section.title}`,
+          status: "pending" as const,
+        }];
+      }),
+    ];
     const persona = inferBookPersona({ title: result.title || project.title, sourcePreview: result.sections.map((section) => `${section.title} ${section.raw.slice(0, 220)}`).join(" "), sourceHeadings: result.sections.map((section) => section.title), bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
     const nextBase: Project = {
       ...project,
@@ -1554,6 +1610,7 @@ export default function Home() {
       sourceIntelligence: undefined,
       creationMode: "external",
       externalManuscript: { fileName, importedAt: new Date().toISOString(), totalWords: result.words, issues: [...result.issues, ...result.sections.flatMap((section) => section.issues.map((issue) => `${section.title}: ${issue}`))] },
+      externalIllustrations: { issues: [], slots: illustrationSlots },
       briefApproved: true,
       adaptationPlanConfirmed: true,
       adaptationPlanVersion: ADAPTATION_PLAN_VERSION,
@@ -1561,13 +1618,59 @@ export default function Home() {
       chapters: importedChapters,
       updatedAt: "Just now",
     };
-    const next = { ...nextBase, chapters: attachChapterVisuals(nextBase, importedChapters) };
+    const next = nextBase;
     setProject(next);
     setActiveChapter(next.chapters[0]?.id ?? 1);
     await persistProject(next);
-    setEditorWorkspace("designer");
-    setView("editor");
-    notify(`${next.chapters.length} ordered manuscript sections imported. No Nemotron request was used.`);
+    notify(`${next.chapters.length} ordered manuscript sections imported. The separate illustration prompt is now ready.`);
+  }
+
+  async function importExternalIllustrations(candidates: ExternalIllustrationCandidate[], importIssues: string[]) {
+    const currentSlots = project.externalIllustrations?.slots ?? [];
+    const uploaded = new Map<string, { key: string; url: string; sourcePath: string }>();
+    const uploadErrors: string[] = [];
+    for (const candidate of candidates.filter((item) => item.decision === "accept" && item.file)) {
+      try {
+        const form = new FormData();
+        form.set("file", candidate.file!);
+        form.set("projectId", project.id);
+        const response = await fetch("/api/image", { method: "POST", headers: ownerHeaders(), body: form });
+        const data = await response.json() as { image?: { key: string; url: string }; error?: string };
+        if (!response.ok || !data.image) throw new Error(data.error || "Image upload failed");
+        uploaded.set(candidate.slotId, { ...data.image, sourcePath: candidate.sourcePath || candidate.file!.name });
+      } catch (error) {
+        uploadErrors.push(`${candidate.slotId}: ${error instanceof Error ? error.message : "Image upload failed"}`);
+      }
+    }
+    const decisions = new Map(candidates.map((item) => [item.slotId, item]));
+    const slots = currentSlots.map((slot) => {
+      const decision = decisions.get(slot.id);
+      const image = uploaded.get(slot.id);
+      if (image) return { ...slot, status: "ready" as const, imageKey: image.key, imageUrl: image.url, sourcePath: image.sourcePath, error: undefined };
+      if (decision?.decision === "skip") return { ...slot, status: "skipped" as const, error: undefined };
+      if (decision?.error || uploadErrors.some((issue) => issue.startsWith(`${slot.id}:`))) return { ...slot, status: "failed" as const, error: decision?.error || uploadErrors.find((issue) => issue.startsWith(`${slot.id}:`)) };
+      return { ...slot, status: "missing" as const, error: "The expected image was not present in the ZIP." };
+    });
+    const chapters = project.chapters.map((chapter) => {
+      const slot = slots.find((item) => item.role === "chapter" && item.chapterId === chapter.id);
+      if (!slot) return chapter;
+      if (slot.status === "ready") return { ...chapter, imageKey: slot.imageKey, imageUrl: slot.imageUrl, imageCaption: slot.caption, imageAlt: slot.altText, visualType: "external-uploaded" };
+      return { ...chapter, imageKey: undefined, imageUrl: undefined, imageCaption: slot.caption, imageAlt: slot.altText, visualType: slot.status === "skipped" ? "illustration-skipped" : "illustration-pending" };
+    });
+    const cover = slots.find((slot) => slot.role === "cover" && slot.status === "ready");
+    let designerPages = project.designerPages ?? [];
+    if (cover?.imageUrl) {
+      const descriptor = designerBookBasePages({ ...project, chapters }).find((page) => page.slotId === "cover")!;
+      const existing = designerPages.find((page) => page.slotId === "cover");
+      const base = existing ?? { ...defaultDesignerRevision(descriptor.html), slotId: "cover", label: "Front cover", kind: "cover" as const, history: [] };
+      const replacement: DesignerPageOverride = { ...base, backgroundImageKey: cover.imageKey, backgroundImageUrl: cover.imageUrl, backgroundSize: "cover", backgroundPosition: "center", backgroundOpacity: 1, savedAt: new Date().toISOString() };
+      designerPages = [...designerPages.filter((page) => page.slotId !== "cover"), replacement];
+    }
+    const issues = [...importIssues, ...uploadErrors, ...slots.filter((slot) => slot.status === "missing" || slot.status === "failed").map((slot) => `${slot.id}: ${slot.error || "Illustration unresolved"}`)];
+    const next: Project = { ...project, chapters, designerPages, externalIllustrations: { ...project.externalIllustrations!, importedAt: new Date().toISOString(), issues, slots }, updatedAt: "Just now" };
+    setProject(next);
+    await persistProject(next);
+    notify(`${slots.filter((slot) => slot.status === "ready").length} illustrations imported. ${issues.length ? `${issues.length} item${issues.length === 1 ? " needs" : "s need"} review.` : "Every requested image is ready."}`);
   }
 
   async function saveProject() {
@@ -2364,7 +2467,7 @@ OUTPUT REQUIREMENTS
         <div className="current-project"><i /> <span><strong>{project.title}</strong><small>{project.source}</small></span></div>
         <div className="top-actions">
           {view === "editor" && <><button className={editorWorkspace === "designer" ? "designer-nav-button active" : "designer-nav-button"} onClick={() => setEditorWorkspace("designer")}>{editorWorkspace === "workflow" ? "Return to Designer" : "Designer"}</button><button className="pdf-button" onClick={openWorkspacePreview}>Preview & PDF</button></>}
-          {(view === "editor" || view === "brief") && <details className="advanced-tools"><summary>Advanced</summary><div>{view === "editor" && <><button onClick={() => void openProductionWorkflow("top")}>Production workflow</button><button onClick={() => void openProductionWorkflow("chapters")}>Chapters</button><button onClick={() => setShowReviewQueue(true)}>Review queue · {project.chapters.filter((chapter) => !isPublishApproved(chapter)).length || "complete"}</button><button onClick={() => void openProductionWorkflow("illustrations")}>Illustrations</button><button onClick={() => setView("brief")}>Book plan</button></>}<label className="advanced-upload">{sourceBusy ? "Reading source…" : "Replace source book"}<input type="file" accept=".pdf,.docx,.txt,.md" disabled={sourceBusy || draftBusy} onChange={(event) => event.target.files?.[0] && refreshSource(event.target.files[0])}/></label><button onClick={openVersions}>Version history</button><button onClick={() => setShowOperations(true)}>Request history</button><button onClick={saveProject}>Save project now</button><button onClick={exportDoc} disabled={exportBusy}>{exportBusy ? "Preparing DOCX…" : "Download DOCX"}</button><button className="package-import-button" onClick={() => setShowPackageImport(true)}>ChatGPT ZIP workflow</button><small>Generation, review, source, versions and export tools</small></div></details>}
+          {(view === "editor" || view === "brief") && <details className="advanced-tools"><summary>Advanced</summary><div>{view === "editor" && <><button onClick={() => void openProductionWorkflow("top")}>Production workflow</button><button onClick={() => void openProductionWorkflow("chapters")}>Chapters</button><button onClick={() => setShowReviewQueue(true)}>Review queue · {project.chapters.filter((chapter) => !isPublishApproved(chapter)).length || "complete"}</button><button onClick={() => void openProductionWorkflow("illustrations")}>Illustrations</button>{project.creationMode === "external" && <button onClick={() => setView("external")}>External illustration package</button>}<button onClick={() => setView("brief")}>Book plan</button></>}<label className="advanced-upload">{sourceBusy ? "Reading source…" : "Replace source book"}<input type="file" accept=".pdf,.docx,.txt,.md" disabled={sourceBusy || draftBusy} onChange={(event) => event.target.files?.[0] && refreshSource(event.target.files[0])}/></label><button onClick={openVersions}>Version history</button><button onClick={() => setShowOperations(true)}>Request history</button><button onClick={saveProject}>Save project now</button><button onClick={exportDoc} disabled={exportBusy}>{exportBusy ? "Preparing DOCX…" : "Download DOCX"}</button><button className="package-import-button" onClick={() => setShowPackageImport(true)}>ChatGPT ZIP workflow</button><small>Generation, review, source, versions and export tools</small></div></details>}
         </div>
       </header>
 
@@ -2390,7 +2493,7 @@ OUTPUT REQUIREMENTS
       />}
 
       {view === "wizard" && <Wizard step={wizardStep} project={project} sourceBusy={sourceBusy} sourceProgress={sourceProgress} onPatch={patchProject} onFile={handleFile} onBack={() => wizardStep === 0 ? setView("dashboard") : setWizardStep((step) => step - 1)} onNext={() => wizardStep < 3 ? setWizardStep((step) => step + 1) : setView(project.creationMode === "external" ? "external" : "analysis")} />}
-      {view === "external" && <ExternalAiManuscript project={project} onBack={() => { setView("wizard"); setWizardStep(3); }} onAccept={acceptExternalManuscript} onNotify={notify} />}
+      {view === "external" && <ExternalAiManuscript project={project} onBack={() => { if (project.externalManuscript) setView("editor"); else { setView("wizard"); setWizardStep(3); } }} onAccept={acceptExternalManuscript} onImportIllustrations={importExternalIllustrations} onOpenDesigner={() => { setEditorWorkspace("designer"); setView("editor"); }} onNotify={notify} />}
       {view === "analysis" && <Analysis project={project} sourceBusy={sourceBusy} onPatch={patchProject} onBack={() => { setView("wizard"); setWizardStep(3); }} onUseExternal={() => { patchProject({ creationMode: "external" }); setView("external"); }} onContinue={confirmAdaptationPlan} onRunOcr={runSourceOcr} onUpdateOutline={updateSourceOutline} onAcceptOutline={acceptSourceOutline} />}
       {view === "brief" && <BookBrief project={project} allocated={allocatedPages} draftBusy={draftBusy} onBack={() => setView("analysis")} onUpdateChapter={updateChapter} onPrepare={prepareDraft} onContinue={() => { patchProject({ briefApproved: true }); setActiveChapter(project.chapters[0]?.id ?? 1); setEditorWorkspace("workflow"); setView("editor"); }} />}
       {view === "editor" && editorWorkspace === "workflow" && <Editor project={project} active={active} activeId={activeChapter} allocated={allocatedPages} draftBusy={draftBusy} onSelect={setActiveChapter} onSaveBody={saveChapterBody} editorRef={editorRef} onAi={aiAction} onRemember={rememberPreference} onAddChapter={addChapter} onUploadImage={uploadChapterImage} onPatchProject={patchProject} onUpdateChapter={updateChapter} />}
@@ -2600,8 +2703,105 @@ function Wizard({ step, project, sourceBusy, sourceProgress, onPatch, onFile, on
   </div>;
 }
 
-function ExternalAiManuscript({ project, onBack, onAccept, onNotify }: { project: Project; onBack: () => void; onAccept: (result: ExternalManuscriptResult, fileName: string) => Promise<void>; onNotify: (message: string) => void }) {
+function LocalImagePreview({ file, alt }: { file: File; alt: string }) {
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    const next = URL.createObjectURL(file);
+    setUrl(next);
+    return () => URL.revokeObjectURL(next);
+  }, [file]);
+  return url ? <img src={url} alt={alt}/> : <span>Preparing preview…</span>;
+}
+
+function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, onImport, onOpenDesigner, onNotify }: {
+  project: Project;
+  onBack: () => void;
+  onReplaceManuscript: () => void;
+  onImport: (candidates: ExternalIllustrationCandidate[], issues: string[]) => Promise<void>;
+  onOpenDesigner: () => void;
+  onNotify: (message: string) => void;
+}) {
+  const slots = project.externalIllustrations?.slots ?? [];
+  const prompt = useMemo(() => buildExternalIllustrationPrompt({
+    title: project.title,
+    sourceName: project.source,
+    audience: project.audience,
+    readingLevel: project.readingLevel,
+    language: project.language,
+    bookType: project.bookType,
+    aesthetic: project.aesthetic,
+    illustrationStyle: project.illustrationStyle,
+    learningFeatures: project.learningFeatures,
+    chapters: project.chapters.map((chapter) => ({ id: chapter.id, title: chapter.title, body: chapter.body, context: chapter.context })),
+    slots,
+  }), [project, slots]);
+  const [candidates, setCandidates] = useState<ExternalIllustrationCandidate[]>([]);
+  const [issues, setIssues] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const downloadPrompt = () => {
+    const href = URL.createObjectURL(new Blob([prompt], { type: "text/markdown;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.download = `${project.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "book"}-illustration-prompt.md`;
+    anchor.click();
+    URL.revokeObjectURL(href);
+    onNotify("Separate illustration prompt downloaded");
+  };
+  const copyPrompt = async () => {
+    await navigator.clipboard.writeText(prompt);
+    onNotify("Separate illustration prompt copied");
+  };
+  const readZip = async (file: File) => {
+    setBusy(true);
+    try {
+      if (!/\.zip$/i.test(file.name)) throw new Error("Choose the illustration ZIP returned by your external AI");
+      if (file.size > 25 * 1024 * 1024) throw new Error("The compressed illustration ZIP must be 25 MB or smaller");
+      const archive = unzipSync(new Uint8Array(await file.arrayBuffer()));
+      const entries = Object.entries(archive).filter(([name]) => !name.startsWith("__MACOSX/") && !name.endsWith("/"));
+      if (entries.length > 100) throw new Error("The ZIP contains too many files (maximum 100)");
+      const unpackedBytes = entries.reduce((sum, [, bytes]) => sum + bytes.byteLength, 0);
+      if (unpackedBytes > 100 * 1024 * 1024) throw new Error("The unpacked ZIP is larger than the safe 100 MB limit");
+      const normalized = new Map(entries.map(([name, bytes]) => [name.replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase(), { name, bytes }]));
+      const used = new Set<string>();
+      const next = slots.map((slot): ExternalIllustrationCandidate => {
+        const stem = slot.filename.replace(/\.(?:jpe?g|png|webp)$/i, "").toLowerCase();
+        const match = [...normalized.entries()].find(([name]) => name.replace(/\.(?:jpe?g|png|webp)$/i, "") === stem && /\.(?:jpe?g|png|webp)$/i.test(name));
+        if (!match) return { slotId: slot.id, decision: "accept", error: `Missing ${slot.filename}` };
+        const [, entry] = match;
+        used.add(entry.name);
+        if (entry.bytes.byteLength > 10 * 1024 * 1024) return { slotId: slot.id, decision: "accept", sourcePath: entry.name, error: "Image is larger than 10 MB" };
+        const extension = entry.name.toLowerCase().split(".").pop();
+        const type = extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : "image/jpeg";
+        const buffer = entry.bytes.buffer.slice(entry.bytes.byteOffset, entry.bytes.byteOffset + entry.bytes.byteLength) as ArrayBuffer;
+        return { slotId: slot.id, decision: "accept", sourcePath: entry.name, file: new File([buffer], entry.name.split("/").pop() || `${slot.id}.jpg`, { type }) };
+      });
+      const extras = entries.filter(([name]) => /\.(?:jpe?g|png|webp|svg)$/i.test(name) && !used.has(name)).map(([name]) => `Unused file ignored: ${name}`);
+      const unsafe = entries.filter(([name]) => /\.svg$/i.test(name)).map(([name]) => `SVG rejected: ${name}`);
+      setCandidates(next);
+      setIssues([...unsafe, ...extras]);
+      onNotify(`${next.filter((item) => item.file).length} of ${slots.length} requested images matched`);
+    } catch (error) {
+      setCandidates([]);
+      setIssues([error instanceof Error ? error.message : "The illustration ZIP could not be read"]);
+      onNotify(error instanceof Error ? error.message : "The illustration ZIP could not be read");
+    } finally { setBusy(false); }
+  };
+  const updateCandidate = (slotId: string, patch: Partial<ExternalIllustrationCandidate>) => setCandidates((current) => current.map((item) => item.slotId === slotId ? { ...item, ...patch } : item));
+  const readyCount = slots.filter((slot) => slot.status === "ready").length;
+  return <main className="external-manuscript-page external-illustration-page">
+    <button className="text-button" onClick={onBack}>← Back to Designer</button>
+    <header className="external-manuscript-hero"><div><p className="eyebrow">STAGE TWO · ILLUSTRATION PACKAGE</p><h1>The manuscript is safe. Create its pictures separately.</h1><p>The second prompt uses the approved chapters and strict art direction. It requests real raster illustrations—not Book Studio’s old diagram-like SVG scenes.</p></div><span>{readyCount}/{slots.length} images ready</span></header>
+    <section className="external-steps illustration-steps" aria-label="Two-stage external workflow"><div className="complete"><b>1</b><span>Manuscript prompt<small>Complete</small></span></div><div className="complete"><b>2</b><span>Manuscript import<small>{project.externalManuscript?.fileName}</small></span></div><div className="active"><b>3</b><span>Image prompt<small>Separate request</small></span></div><div><b>4</b><span>Generate externally<small>Actual raster files</small></span></div><div className={candidates.length ? "active" : ""}><b>5</b><span>Review ZIP<small>{candidates.length ? `${candidates.filter((item) => item.file).length} matched` : "Waiting"}</small></span></div><div className={readyCount ? "complete" : ""}><b>6</b><span>Design & export<small>{readyCount ? "Available" : "Pending"}</small></span></div></section>
+    <div className="external-manuscript-grid"><section className="external-action-card prompt-card"><p className="eyebrow">IMAGE PROMPT</p><h2>One prompt for the complete art package</h2><p>Give this prompt to ChatGPT or another image-capable service after the manuscript is approved. It requests one coherent cover and one detailed scene per real chapter.</p><button className="primary" onClick={downloadPrompt}>Download image prompt</button><button className="secondary" onClick={() => void copyPrompt()}>Copy image prompt</button><details><summary>Quality protections</summary><ul><li>No SVG, diagrams, infographics or abstract placeholder people</li><li>Exact filename for every chapter destination</li><li>Consistent characters, materials, palette and cultural details</li><li>Portrait A4 cover and print-quality 4:3 chapter scenes</li></ul></details></section><section className="external-action-card import-card"><p className="eyebrow">ILLUSTRATION ZIP</p><h2>Upload and review before placement</h2><label className="external-manuscript-upload"><input type="file" accept="application/zip,.zip" disabled={busy} onChange={(event) => event.target.files?.[0] && void readZip(event.target.files[0])}/><b>{busy ? "Checking every image…" : "Upload illustration ZIP"}</b><span>JPG, PNG or WebP · exact requested filenames · 25 MB ZIP maximum</span></label><p className="illustration-safety-note">Nothing is inserted automatically until you review this list. Missing files remain visible as “Illustration pending.”</p></section></div>
+    {issues.length > 0 && <div className="manuscript-global-issues">{issues.map((issue) => <span key={issue}>! {issue}</span>)}</div>}
+    {(candidates.length > 0 || project.externalIllustrations?.importedAt) && <section className="illustration-review"><header><div><p className="eyebrow">IMAGE REVIEW</p><h2>Confirm every destination</h2><p>Accept, replace or skip each image. A skipped or missing image never becomes generic generated artwork.</p></div></header><div className="illustration-review-grid">{slots.map((slot) => { const candidate = candidates.find((item) => item.slotId === slot.id); return <article key={slot.id} className={`${slot.status} ${candidate?.error ? "has-error" : ""}`}><div className="illustration-thumb">{candidate?.file ? <LocalImagePreview file={candidate.file} alt={slot.altText}/> : slot.imageUrl ? <img src={slot.imageUrl} alt={slot.altText}/> : <span>Illustration pending</span>}</div><div className="illustration-review-copy"><span>{slot.id} · {slot.role === "cover" ? "Front cover" : `Chapter ${slot.chapterId}`}</span><b>{slot.chapterTitle}</b><small>{candidate?.sourcePath || slot.sourcePath || slot.filename}</small><p>{slot.sceneBrief}</p>{candidate?.error && <em>{candidate.error}</em>}<div><label>Replace<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) updateCandidate(slot.id, { file, sourcePath: file.name, error: undefined, decision: "accept" }); }}/></label>{candidate && <button className={candidate.decision === "skip" ? "selected" : ""} onClick={() => updateCandidate(slot.id, { decision: candidate.decision === "skip" ? "accept" : "skip" })}>{candidate.decision === "skip" ? "Skipped" : "Skip"}</button>}</div></div></article>; })}</div><footer><button className="secondary" onClick={onReplaceManuscript}>Replace manuscript</button><button className="secondary" onClick={onOpenDesigner}>Continue without remaining images</button>{candidates.length > 0 && <button className="primary" disabled={busy} onClick={() => { setBusy(true); void onImport(candidates, issues).finally(() => setBusy(false)); }}>{busy ? "Uploading to the project…" : "Accept reviewed images"}</button>}</footer></section>}
+    {!candidates.length && !project.externalIllustrations?.importedAt && <div className="illustration-stage-footer"><button className="secondary" onClick={onReplaceManuscript}>Replace manuscript</button><button className="primary" onClick={onOpenDesigner}>Continue to Designer without images</button></div>}
+  </main>;
+}
+
+function ExternalAiManuscript({ project, onBack, onAccept, onImportIllustrations, onOpenDesigner, onNotify }: { project: Project; onBack: () => void; onAccept: (result: ExternalManuscriptResult, fileName: string) => Promise<void>; onImportIllustrations: (candidates: ExternalIllustrationCandidate[], issues: string[]) => Promise<void>; onOpenDesigner: () => void; onNotify: (message: string) => void }) {
   const prompt = useMemo(() => buildExternalAiPrompt({ title: project.title, sourceName: project.source, audience: project.audience, readingLevel: project.readingLevel, language: project.language, bookType: project.bookType, aesthetic: project.aesthetic, illustrationStyle: project.illustrationStyle, learningFeatures: project.learningFeatures }), [project]);
+  const [showManuscriptStage, setShowManuscriptStage] = useState(!project.externalManuscript);
   const [manuscriptText, setManuscriptText] = useState("");
   const [fileName, setFileName] = useState("Pasted manuscript.md");
   const [result, setResult] = useState<ExternalManuscriptResult | null>(null);
@@ -2663,13 +2863,14 @@ function ExternalAiManuscript({ project, onBack, onAccept, onNotify }: { project
   });
   const chapterCount = result?.sections.filter((section) => section.kind === "chapter").length || 0;
   const sectionIssueCount = result?.sections.reduce((sum, section) => sum + section.issues.length, 0) || 0;
+  if (project.externalManuscript && !showManuscriptStage) return <ExternalIllustrationWorkflow project={project} onBack={onBack} onReplaceManuscript={() => setShowManuscriptStage(true)} onImport={onImportIllustrations} onOpenDesigner={onOpenDesigner} onNotify={onNotify}/>;
   return <main className="external-manuscript-page">
     <button className="text-button" onClick={onBack}>← Change book settings</button>
     <header className="external-manuscript-hero"><div><p className="eyebrow">EXTERNAL AI MANUSCRIPT · RECOMMENDED</p><h1>Let your chosen AI read the source. Bring back the finished book.</h1><p>No website OCR, no OpenRouter quota and no fragile JSON. The manuscript is checked and organised locally before it enters your design studio.</p></div><span>0 website AI requests</span></header>
     <section className="external-steps" aria-label="External manuscript workflow"><div className="complete"><b>1</b><span>Book settings<small>Complete</small></span></div><div className="active"><b>2</b><span>Download prompt<small>Ready</small></span></div><div><b>3</b><span>Create in your AI<small>Upload source + prompt</small></span></div><div className={result ? "complete" : ""}><b>4</b><span>Import manuscript<small>{result ? "Complete" : "Waiting"}</small></span></div><div className={result ? "active" : ""}><b>5</b><span>Review order<small>{result ? `${result.sections.length} sections` : "Waiting"}</small></span></div><div><b>6</b><span>Design & export<small>Next</small></span></div></section>
-    <div className="external-manuscript-grid"><section className="external-action-card prompt-card"><p className="eyebrow">STEP 1 · TAKE THIS TO YOUR AI</p><h2>Download the complete author prompt</h2><p>Upload this prompt and <b>{project.source}</b> together in ChatGPT, Claude or DeepSeek. Ask it to return the finished Markdown manuscript or a chapter ZIP.</p><div className="external-provider-row"><span>ChatGPT</span><span>Claude</span><span>DeepSeek</span></div><button className="primary" onClick={downloadPrompt}>Download AI prompt</button><button className="secondary" onClick={() => void copyPrompt()}>Copy prompt</button><details><summary>See what the prompt guarantees</summary><ul><li>Reads the complete source before writing</li><li>Preserves real chapter order and important IKS concepts</li><li>Writes for {project.audience}</li><li>Creates introduction, chapters, conclusion and glossary</li><li>Adds one private, contextual illustration brief per chapter</li><li>Returns Markdown—not JSON</li></ul></details></section>
+    <div className="external-manuscript-grid"><section className="external-action-card prompt-card"><p className="eyebrow">STEP 1 · TAKE THIS TO YOUR AI</p><h2>Download the manuscript-only prompt</h2><p>Upload this prompt and <b>{project.source}</b> together in ChatGPT, Claude or DeepSeek. It returns only the finished writing. Book Studio prepares the separate image prompt after you approve the chapters.</p><div className="external-provider-row"><span>ChatGPT</span><span>Claude</span><span>DeepSeek</span></div><button className="primary" onClick={downloadPrompt}>Download manuscript prompt</button><button className="secondary" onClick={() => void copyPrompt()}>Copy manuscript prompt</button><details><summary>See what the prompt guarantees</summary><ul><li>Reads the complete source before writing</li><li>Preserves real chapter order and important IKS concepts</li><li>Writes for {project.audience}</li><li>Creates introduction, chapters, conclusion and glossary</li><li>Does not embed generic or placeholder artwork</li><li>Returns Markdown—not JSON</li></ul></details></section>
       <section className="external-action-card import-card"><p className="eyebrow">STEP 2 · BRING BACK THE RESULT</p><h2>Upload or paste the finished manuscript</h2><label className="external-manuscript-upload"><input type="file" accept=".md,.markdown,.txt,.docx,.zip" disabled={busy} onChange={(event) => event.target.files?.[0] && void readManuscriptFile(event.target.files[0])}/><b>{busy ? "Reading manuscript…" : "Upload manuscript"}</b><span>Markdown, TXT, DOCX or a ZIP of numbered chapter files</span></label><span className="or-divider">OR PASTE IT</span><textarea value={manuscriptText} onChange={(event) => { setManuscriptText(event.target.value); setResult(null); }} placeholder="# BOOK TITLE\n\n# INTRODUCTION\n...\n\n# CHAPTER 01: ..."/><button className="secondary" disabled={busy || manuscriptText.trim().length < 200} onClick={inspectPaste}>Inspect pasted manuscript</button></section></div>
-    {result && <section className="manuscript-review"><header><div><p className="eyebrow">IMPORT REVIEW</p><h2>{result.title}</h2><p>{result.words.toLocaleString()} reader-facing words · {chapterCount} main chapters · {result.sections.length} total sections</p></div><div className={result.issues.length || sectionIssueCount ? "review-warning" : "review-ready"}><b>{result.issues.length + sectionIssueCount ? `${result.issues.length + sectionIssueCount} review note${result.issues.length + sectionIssueCount === 1 ? "" : "s"}` : "Structure ready"}</b><span>{result.issues.length + sectionIssueCount ? "You can still import and edit every section." : "Introduction, chapters and ending are in order."}</span></div></header>{result.issues.length > 0 && <div className="manuscript-global-issues">{result.issues.map((issue) => <span key={issue}>! {issue}</span>)}</div>}<div className="manuscript-section-list">{result.sections.map((section, index) => <article key={`${section.kind}-${index}`}><span>{section.kind === "chapter" ? `CH ${String(result.sections.slice(0, index + 1).filter((item) => item.kind === "chapter").length).padStart(2, "0")}` : section.kind.toUpperCase()}</span><div><b>{section.title}</b><small>{section.wordCount.toLocaleString()} words{section.illustrationBrief ? " · illustration brief ready" : ""}</small>{section.issues.map((issue) => <em key={issue}>{issue}</em>)}</div><div><button aria-label={`Move ${section.title} up`} disabled={index === 0} onClick={() => moveSection(index, -1)}>↑</button><button aria-label={`Move ${section.title} down`} disabled={index === result.sections.length - 1} onClick={() => moveSection(index, 1)}>↓</button></div></article>)}</div><footer><div><b>Source-fidelity reminder</b><span>Book Studio checks structure, length and teaching sections locally. Before publication, spot-check important claims against the source.</span></div><button className="primary" disabled={!chapterCount || busy} onClick={() => { setBusy(true); void onAccept(result, fileName).finally(() => setBusy(false)); }}>{busy ? "Importing…" : "Accept manuscript & open studio"}</button></footer></section>}
+    {result && <section className="manuscript-review"><header><div><p className="eyebrow">IMPORT REVIEW</p><h2>{result.title}</h2><p>{result.words.toLocaleString()} reader-facing words · {chapterCount} main chapters · {result.sections.length} total sections</p></div><div className={result.issues.length || sectionIssueCount ? "review-warning" : "review-ready"}><b>{result.issues.length + sectionIssueCount ? `${result.issues.length + sectionIssueCount} review note${result.issues.length + sectionIssueCount === 1 ? "" : "s"}` : "Structure ready"}</b><span>{result.issues.length + sectionIssueCount ? "You can still import and edit every section." : "Introduction, chapters and ending are in order."}</span></div></header>{result.issues.length > 0 && <div className="manuscript-global-issues">{result.issues.map((issue) => <span key={issue}>! {issue}</span>)}</div>}<div className="manuscript-section-list">{result.sections.map((section, index) => <article key={`${section.kind}-${index}`}><span>{section.kind === "chapter" ? `CH ${String(result.sections.slice(0, index + 1).filter((item) => item.kind === "chapter").length).padStart(2, "0")}` : section.kind.toUpperCase()}</span><div><b>{section.title}</b><small>{section.wordCount.toLocaleString()} words</small>{section.issues.map((issue) => <em key={issue}>{issue}</em>)}</div><div><button aria-label={`Move ${section.title} up`} disabled={index === 0} onClick={() => moveSection(index, -1)}>↑</button><button aria-label={`Move ${section.title} down`} disabled={index === result.sections.length - 1} onClick={() => moveSection(index, 1)}>↓</button></div></article>)}</div><footer><div><b>Source-fidelity reminder</b><span>Book Studio checks structure, length and teaching sections locally. Before publication, spot-check important claims against the source.</span></div><button className="primary" disabled={!chapterCount || busy} onClick={() => { setBusy(true); void onAccept(result, fileName).then(() => setShowManuscriptStage(false)).finally(() => setBusy(false)); }}>{busy ? "Importing…" : "Accept manuscript & create image prompt"}</button></footer></section>}
   </main>;
 }
 
@@ -3013,7 +3214,7 @@ function Preview({ project, exportBusy, pdfProgress, onClose, onDownload }: { pr
     const image = Boolean(sheet.imageUrl) && !sheet.body;
     const combined = Boolean(sheet.imageUrl) && Boolean(sheet.body);
     const waitingForContent = chapterWordCount(sheet.chapter) < 45 && !sheet.chapter.importValidated;
-    return <article className={`${base} preview-page chapter-preview ${ageClass}${image ? " chapter-visual-sheet" : ""}${combined ? " chapter-text-visual-sheet" : ""}`} key={key}><header className="print-chapter-header"><span>CHAPTER {sheet.chapter.id}</span><span>PAGE {sheet.pageIndex + 1} OF {sheet.pageCount}</span></header>{sheet.pageIndex === 0 && <h2>{sheet.chapter.title}</h2>}{sheet.pageIndex > 0 && !image && <p className="continued-title">{sheet.chapter.title} · continued</p>}{sheet.body && <div className="preview-body" dangerouslySetInnerHTML={{ __html: sheet.body }}/>} {waitingForContent && sheet.pageIndex === 0 && <div className="unfinished-page-note"><b>Chapter in progress</b><span>Generated content will appear here automatically. You can still preview and download the complete book layout now.</span></div>}{sheet.imageUrl && <figure className="chapter-image"><img src={sheet.imageUrl} alt={sheet.imageAlt || sheet.imageCaption || sheet.chapter.title}/><figcaption>{sheet.imageCaption || sheet.chapter.title}</figcaption></figure>}<footer className="sheet-number"><span>{project.title}</span><span>{sheet.pageIndex + 1}</span></footer></article>;
+    return <article className={`${base} preview-page chapter-preview ${ageClass}${image ? " chapter-visual-sheet" : ""}${combined ? " chapter-text-visual-sheet" : ""}`} key={key}><header className="print-chapter-header"><span>CHAPTER {sheet.chapter.id}</span><span>PAGE {sheet.pageIndex + 1} OF {sheet.pageCount}</span></header>{sheet.pageIndex === 0 && <h2>{sheet.chapter.title}</h2>}{sheet.pageIndex > 0 && !image && <p className="continued-title">{sheet.chapter.title} · continued</p>}{sheet.body && <div className="preview-body" dangerouslySetInnerHTML={{ __html: sheet.body }}/>} {waitingForContent && sheet.pageIndex === 0 && <div className="unfinished-page-note"><b>Chapter in progress</b><span>Generated content will appear here automatically. You can still preview and download the complete book layout now.</span></div>}{sheet.imageUrl && <figure className="chapter-image"><img src={sheet.imageUrl} alt={sheet.imageAlt || sheet.imageCaption || sheet.chapter.title}/><figcaption>{sheet.imageCaption || sheet.chapter.title}</figcaption></figure>}{!sheet.imageUrl && sheet.chapter.visualType === "illustration-pending" && sheet.pageIndex === sheet.pageCount - 1 && <div className="illustration-pending-panel"><b>Illustration pending</b><span>{sheet.chapter.imageCaption || `Add the reviewed illustration for ${sheet.chapter.title}.`}</span></div>}<footer className="sheet-number"><span>{project.title}</span><span>{sheet.pageIndex + 1}</span></footer></article>;
   };
   const current = sheets[Math.min(pageIndex, Math.max(0, sheets.length - 1))];
   const currentChapter = current?.kind === "chapter" ? current.chapter.id : current?.kind === "contents" ? -1 : 0;
@@ -3056,7 +3257,7 @@ function designerBasePages(project: Project): DesignerBasePage[] {
       kind: "chapter",
       chapterId: chapter.id,
       pageIndex,
-      html: `<header class="print-chapter-header"><span>CHAPTER ${chapter.id}</span><span>PAGE ${pageIndex + 1} OF ${textPages.length}</span></header>${pageIndex === 0 ? `<h2>${escapeHtml(chapter.title)}</h2>` : `<p class="continued-title">${escapeHtml(chapter.title)} · continued</p>`}<div class="preview-body">${body}</div>${chapter.imageUrl && pageIndex === textPages.length - 1 ? `<figure class="chapter-image"><img src="${escapeHtml(chapter.imageUrl)}" alt="${escapeHtml(chapter.imageAlt || chapter.title)}"><figcaption>${escapeHtml(chapter.imageCaption || chapter.title)}</figcaption></figure>` : ""}<footer class="sheet-number"><span>${escapeHtml(project.title)}</span><span>${pageIndex + 1}</span></footer>`,
+      html: `<header class="print-chapter-header"><span>CHAPTER ${chapter.id}</span><span>PAGE ${pageIndex + 1} OF ${textPages.length}</span></header>${pageIndex === 0 ? `<h2>${escapeHtml(chapter.title)}</h2>` : `<p class="continued-title">${escapeHtml(chapter.title)} · continued</p>`}<div class="preview-body">${body}</div>${chapter.imageUrl && pageIndex === textPages.length - 1 ? `<figure class="chapter-image"><img src="${escapeHtml(chapter.imageUrl)}" alt="${escapeHtml(chapter.imageAlt || chapter.title)}"><figcaption>${escapeHtml(chapter.imageCaption || chapter.title)}</figcaption></figure>` : ""}${!chapter.imageUrl && chapter.visualType === "illustration-pending" && pageIndex === textPages.length - 1 ? `<div class="illustration-pending-panel" contenteditable="false"><b>Illustration pending</b><span>${escapeHtml(chapter.imageCaption || `Add the reviewed illustration for ${chapter.title}.`)}</span></div>` : ""}<footer class="sheet-number"><span>${escapeHtml(project.title)}</span><span>${pageIndex + 1}</span></footer>`,
     }));
     if (chapter.imageUrl && !textPages.some((body) => body.includes(chapter.imageUrl!))) pages.push({
       slotId: `chapter-${chapter.id}-page-${textPages.length + 1}`,
@@ -3260,6 +3461,10 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [pendingBackground, busy]);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-book-alignment", project.bookAlignment || "left");
+  }, [project.bookAlignment]);
 
   const persistableDesignerHtml = (html: string) => html.replace(/\s*designer-object-selected\b/g, "");
   const currentSnapshot = () => ({ ...draft, html: editor.current?.innerHTML ?? draft.html });
@@ -4248,11 +4453,11 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     <div className="designer-status"><span>◆</span><b>{message}</b><i>{dirtyPages.length ? `${dirtyPages.length} unsaved page${dirtyPages.length === 1 ? "" : "s"}` : `${orderedPages.filter((page) => !revisionFor(page).deleted).length} pages`} · {selected.label}</i></div>
     <div className="designer-workspace designer-book-workspace"><aside className="designer-pages designer-book-nav"><p className="designer-nav-label">BOOK SECTIONS</p>{orderedPages.filter((page) => page.kind === "cover" || page.kind === "contents").map((page) => <button key={page.slotId} className={page.slotId === selectedId ? "active" : ""} onClick={() => selectAndReveal(page.slotId)}><span>{page.kind === "cover" ? "C" : "T"}</span><div><b>{page.label}</b><small>Book matter</small></div></button>)}{project.chapters.map((chapter) => { const pages = orderedPages.filter((page) => page.chapterId === chapter.id && !revisionFor(page).deleted); const hasIssue = pages.some((page) => ["empty", "overflow"].includes(designerPageFill(liveBookHtml.current[page.slotId] ?? revisionFor(page).html, project.audience, page.pageIndex === 0).tone)); return <button key={chapter.id} className={selected.chapterId === chapter.id ? "active" : ""} onClick={() => jumpToChapter(chapter.id)}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small>{pages.length} page{pages.length === 1 ? "" : "s"}{hasIssue ? " · check spacing" : " · balanced"}</small></div></button>; })}{orderedPages.filter((page) => page.kind === "back").map((page) => <button key={page.slotId} className={page.slotId === selectedId ? "active" : ""} onClick={() => selectAndReveal(page.slotId)}><span>B</span><div><b>{page.label}</b><small>Book matter</small></div></button>)}</aside>
     <main className="designer-stage"><nav className="designer-toolbar designer-book-toolbar"><button onClick={undo} disabled={!undoStack.length} title="Undo selected page (Cmd+Z)" aria-label="Undo" style={{background: undoStack.length ? "#ffffff" : "#f5f1e8", border: undoStack.length ? "1.5px solid #111111" : "1px solid #ddd4c4", color: undoStack.length ? "#111111" : "#a99e8f", padding:"7px 12px", fontSize:"12px", fontWeight:"800", letterSpacing:".02em", borderRadius:"8px", display:"inline-flex", alignItems:"center", gap:"7px", cursor: undoStack.length ? "pointer" : "not-allowed", opacity: undoStack.length ? 1 : 0.58, boxShadow: undoStack.length ? "0 1px 6px rgba(0,0,0,.11)" : "none", transition:"all 150ms ease"}}><svg width="28" height="18" viewBox="0 0 28 18" fill="none" aria-hidden="true" style={{flexShrink:0, display:"block"}}><path d="M7.2 5.2L2.6 9.1L7.2 13" stroke="currentColor" strokeWidth="3.1" strokeLinecap="round" strokeLinejoin="round"/><path d="M2.6 9.1H16.4C19.9 9.1 23.2 9.1 23.2 13.1C23.2 17.1 19.4 17.1 15.9 17.1H11.2" stroke="currentColor" strokeWidth="3.1" strokeLinecap="round" strokeLinejoin="round"/></svg> Undo</button><button onClick={redo} disabled={!redoStack.length} title="Redo selected page (Shift+Cmd+Z)" aria-label="Redo" style={{background: redoStack.length ? "#ffffff" : "#f5f1e8", border: redoStack.length ? "1.5px solid #111111" : "1px solid #ddd4c4", color: redoStack.length ? "#111111" : "#a99e8f", padding:"7px 12px", fontSize:"12px", fontWeight:"800", letterSpacing:".02em", borderRadius:"8px", display:"inline-flex", alignItems:"center", gap:"7px", cursor: redoStack.length ? "pointer" : "not-allowed", opacity: redoStack.length ? 1 : 0.58, boxShadow: redoStack.length ? "0 1px 6px rgba(0,0,0,.11)" : "none", transition:"all 150ms ease"}}><svg width="28" height="18" viewBox="0 0 28 18" fill="none" aria-hidden="true" style={{flexShrink:0, display:"block"}}><path d="M20.8 5.2L25.4 9.1L20.8 13" stroke="currentColor" strokeWidth="3.1" strokeLinecap="round" strokeLinejoin="round"/><path d="M25.4 9.1H11.6C8.1 9.1 4.8 9.1 4.8 13.1C4.8 17.1 8.6 17.1 12.1 17.1H16.8" stroke="currentColor" strokeWidth="3.1" strokeLinecap="round" strokeLinejoin="round"/></svg> Redo</button><select aria-label="Selected text font" defaultValue="Georgia" onChange={(event) => command("fontName", event.target.value)}><option>Georgia</option><option>Arial</option><option>Verdana</option><option>Trebuchet MS</option><option>Times New Roman</option><option>Noto Serif</option><option>Noto Sans Devanagari</option></select><select aria-label="Selected text size" defaultValue="3" onChange={(event) => command("fontSize", event.target.value)}><option value="1">Small</option><option value="3">Body</option><option value="5">Subheading</option><option value="7">Title</option></select><button onClick={() => command("bold")}><b>B</b></button><button onClick={() => command("italic")}><i>I</i></button><button onClick={() => command("underline")}><u>U</u></button><button onClick={() => command("insertUnorderedList")}>• List</button><button onClick={() => command("justifyLeft")}>Left</button><button onClick={() => command("justifyCenter")}>Centre</button><button onClick={() => command("justifyRight")}>Right</button><label title="Text colour"><input type="color" defaultValue="#243b34" onChange={(event) => command("foreColor", event.target.value)}/></label><label title="Highlight"><input type="color" defaultValue="#f6e6ad" onChange={(event) => command("hiliteColor", event.target.value)}/></label><button onClick={addTextBox}>＋ Text box</button><input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp" style={{display:"none"}} onChange={(e)=>{const f=e.target.files?.[0]; if(f) void addFreeImage(f)}} /><button onClick={()=>imageInputRef.current?.click()} disabled={busy} title="Add image anywhere, drag to move, handles to resize">＋ Image</button><button className="balance-chapter-button" onClick={() => void balanceLayout("chapter")} disabled={!selected.chapterId || busy}>Balance this chapter</button></nav>
-      <div ref={designerCanvasRef} className="designer-canvas-wrap designer-whole-book-canvas" aria-label="Editable whole book">{orderedPages.filter((page) => !revisionFor(page).deleted).map((page, index) => { const revision = revisionFor(page); const fill = page.kind === "chapter" ? designerPageFill(liveBookHtml.current[page.slotId] ?? revision.html, project.audience, page.pageIndex === 0) : { ratio: 100, label: "Designed page", tone: "balanced" }; const pageBackground = { backgroundImage: revision.backgroundImageUrl ? `url(${revision.backgroundImageUrl})` : undefined, backgroundSize: revision.backgroundSize === "repeat" ? "auto" : revision.backgroundSize, backgroundRepeat: revision.backgroundSize === "repeat" ? "repeat" : "no-repeat", backgroundPosition: revision.backgroundPosition, opacity: revision.backgroundOpacity }; const pageBorder = revision.borderStyle === "none" ? undefined : { inset: `${revision.borderInset}px`, border: `${revision.borderWidth}px ${revision.borderStyle} ${revision.borderColor}`, borderRadius: `${revision.borderRadius}px` }; const pageClasses = designerPageClasses(project, page); const isDirty = dirtyPages.includes(page.slotId); return <section className={`designer-flow-page${page.slotId === selectedId ? " selected" : ""}`} id={`designer-flow-${page.slotId}`} key={page.slotId}><div className="designer-flow-page-meta"><span>PAGE {index + 1}</span><b>{page.label}</b><button className={`page-fill-badge ${fill.tone}`} onClick={() => { setSelectedId(page.slotId); setPanel("preflight"); }}>{fill.label} · {fill.ratio}%</button><button className={`page-save-button ${isDirty ? "dirty" : "saved"}`} disabled={busy || !isDirty} onClick={() => void savePageById(page.slotId)}>{busy && page.slotId === selectedId ? "Saving…" : isDirty ? "Save page" : "Saved"}</button></div><article className={`designer-canvas-page book-sheet ${bookClasses} ${pageClasses}${revision.backgroundImageUrl ? " has-background" : ""}${revision.intentionalBlank ? " blank" : ""}`} style={{ backgroundColor: revision.backgroundColor }} onMouseDown={() => { if (page.slotId !== selectedId) setSelectedId(page.slotId); }}><div className="designer-background-layer" style={pageBackground}/><div className="designer-border-layer" style={pageBorder}/><div className={`designer-watermark-layer${revision.watermarkRepeat ? " repeat" : ""}`} style={{ opacity: revision.watermarkOpacity, left: `${revision.watermarkX}%`, top: `${revision.watermarkY}%`, transform: `translate(-50%,-50%) rotate(${revision.watermarkRotation}deg)`, display: revision.watermarkVisible ? "grid" : "none" }}>{Array.from({ length: revision.watermarkRepeat ? 6 : 1 }, (_, watermarkIndex) => <span key={watermarkIndex}>{revision.watermarkImageUrl && <img src={revision.watermarkImageUrl} alt="Custom watermark"/>}{revision.watermarkText}</span>)}</div>{!revision.intentionalBlank && revision.contentVisible && <div ref={(node) => connectBookEditor(page.slotId, revision.html, node)} className="designer-editable-content" style={pageStyleFor(revision)} contentEditable suppressContentEditableWarning onMouseDown={(event) => beginTextInteraction(event, page.slotId)} onMouseUp={() => { if (!pendingCaretPoint.current) captureSelection(); }} onFocus={() => { if (page.slotId !== selectedId && !pendingCaretPoint.current) setSelectedId(page.slotId); }} onBeforeInput={() => pushTextUndo(page.slotId)} onInput={(event) => { rememberLiveHtml(page.slotId, event.currentTarget.innerHTML); captureSelection(); }} onKeyDown={(event) => handleContentsTitleKeyDown(event, page.slotId)} onKeyUp={() => captureSelection()} onClick={selectCanvasObject}/>}</article><div style={{margin:"6px auto 0",fontSize:"11px",letterSpacing:"0.04em",color:"#1a2e1a",background:"#ffffff",padding:"5px 12px",borderRadius:"999px",border:"1px solid #b4532a",boxShadow:"0 2px 8px rgba(0,0,0,0.08)",fontWeight:"800",width:"fit-content"}}>Book page {index+1} of {order.length} — exactly as in Preview</div>{revision.intentionalBlank && <div className="intentional-blank-label">INTENTIONAL BLANK PAGE</div>}</section>; })}</div>
+      <div ref={designerCanvasRef} className={`designer-canvas-wrap designer-whole-book-canvas book-align-${project.bookAlignment || "left"}`} aria-label="Editable whole book">{orderedPages.filter((page) => !revisionFor(page).deleted).map((page, index) => { const revision = revisionFor(page); const fill = page.kind === "chapter" ? designerPageFill(liveBookHtml.current[page.slotId] ?? revision.html, project.audience, page.pageIndex === 0) : { ratio: 100, label: "Designed page", tone: "balanced" }; const pageBackground = { backgroundImage: revision.backgroundImageUrl ? `url(${revision.backgroundImageUrl})` : undefined, backgroundSize: revision.backgroundSize === "repeat" ? "auto" : revision.backgroundSize, backgroundRepeat: revision.backgroundSize === "repeat" ? "repeat" : "no-repeat", backgroundPosition: revision.backgroundPosition, opacity: revision.backgroundOpacity }; const pageBorder = revision.borderStyle === "none" ? undefined : { inset: `${revision.borderInset}px`, border: `${revision.borderWidth}px ${revision.borderStyle} ${revision.borderColor}`, borderRadius: `${revision.borderRadius}px` }; const pageClasses = designerPageClasses(project, page); const isDirty = dirtyPages.includes(page.slotId); return <section className={`designer-flow-page${page.slotId === selectedId ? " selected" : ""}`} id={`designer-flow-${page.slotId}`} key={page.slotId}><div className="designer-flow-page-meta"><span>PAGE {index + 1}</span><b>{page.label}</b><button className={`page-fill-badge ${fill.tone}`} onClick={() => { setSelectedId(page.slotId); setPanel("preflight"); }}>{fill.label} · {fill.ratio}%</button><button className={`page-save-button ${isDirty ? "dirty" : "saved"}`} disabled={busy || !isDirty} onClick={() => void savePageById(page.slotId)}>{busy && page.slotId === selectedId ? "Saving…" : isDirty ? "Save page" : "Saved"}</button></div><article className={`designer-canvas-page book-sheet ${bookClasses} ${pageClasses}${revision.backgroundImageUrl ? " has-background" : ""}${revision.intentionalBlank ? " blank" : ""}`} style={{ backgroundColor: revision.backgroundColor }} onMouseDown={() => { if (page.slotId !== selectedId) setSelectedId(page.slotId); }}><div className="designer-background-layer" style={pageBackground}/><div className="designer-border-layer" style={pageBorder}/><div className={`designer-watermark-layer${revision.watermarkRepeat ? " repeat" : ""}`} style={{ opacity: revision.watermarkOpacity, left: `${revision.watermarkX}%`, top: `${revision.watermarkY}%`, transform: `translate(-50%,-50%) rotate(${revision.watermarkRotation}deg)`, display: revision.watermarkVisible ? "grid" : "none" }}>{Array.from({ length: revision.watermarkRepeat ? 6 : 1 }, (_, watermarkIndex) => <span key={watermarkIndex}>{revision.watermarkImageUrl && <img src={revision.watermarkImageUrl} alt="Custom watermark"/>}{revision.watermarkText}</span>)}</div>{!revision.intentionalBlank && revision.contentVisible && <div ref={(node) => connectBookEditor(page.slotId, revision.html, node)} className="designer-editable-content" style={pageStyleFor(revision)} contentEditable suppressContentEditableWarning onMouseDown={(event) => beginTextInteraction(event, page.slotId)} onMouseUp={() => { if (!pendingCaretPoint.current) captureSelection(); }} onFocus={() => { if (page.slotId !== selectedId && !pendingCaretPoint.current) setSelectedId(page.slotId); }} onBeforeInput={() => pushTextUndo(page.slotId)} onInput={(event) => { rememberLiveHtml(page.slotId, event.currentTarget.innerHTML); captureSelection(); }} onKeyDown={(event) => handleContentsTitleKeyDown(event, page.slotId)} onKeyUp={() => captureSelection()} onClick={selectCanvasObject}/>}</article><div style={{margin:"6px auto 0",fontSize:"11px",letterSpacing:"0.04em",color:"#1a2e1a",background:"#ffffff",padding:"5px 12px",borderRadius:"999px",border:"1px solid #b4532a",boxShadow:"0 2px 8px rgba(0,0,0,0.08)",fontWeight:"800",width:"fit-content"}}>Book page {index+1} of {order.length} — exactly as in Preview</div>{revision.intentionalBlank && <div className="intentional-blank-label">INTENTIONAL BLANK PAGE</div>}</section>; })}</div>
     </main>
     <aside className="designer-controls designer-inspector"><nav>{(["page","text","image","layers","preflight"] as const).map((name) => <button key={name} className={panel === name ? "active" : ""} onClick={() => setPanel(name)}>{name}</button>)}</nav>
       {panel === "image" && selectedObject === "image" && <button className="designer-delete-image" onClick={deleteObject}>Delete selected image</button>}
-      {panel === "page" && <><section><h3>Page structure</h3><label className="designer-check"><input type="checkbox" checked={draft.intentionalBlank} onChange={(event) => changeDraft({ intentionalBlank: event.target.checked })}/> Intentional blank</label><label className="designer-check"><input type="checkbox" checked={draft.layoutLocked} onChange={(event) => changeDraft({ layoutLocked: event.target.checked })}/> Lock this page during reflow</label><label className="designer-check"><input type="checkbox" checked={draft.deleted} onChange={(event) => changeDraft({ deleted: event.target.checked })}/> Remove from final book</label><div className="designer-row"><button onClick={() => void movePage(-1)}>Move up</button><button onClick={() => void movePage(1)}>Move down</button></div><div className="designer-row" style={{marginTop:"8px"}}><label style={{display:"flex",alignItems:"center",gap:"6px",fontSize:"9px",fontWeight:"800"}}>Move to #<input key={selectedId} id="move-page-input" type="number" min="1" max={order.length} defaultValue={order.indexOf(selectedId)+1} style={{width:"60px",border:"1px solid #d6ccbd",padding:"6px",textAlign:"center"}} /></label><button onClick={() => { const el=document.getElementById("move-page-input") as HTMLInputElement | null; const v=Number(el?.value); if(v>=1 && v<=order.length) void movePageTo(v-1); }} disabled={busy} style={{padding:"7px 10px",fontSize:"9px",fontWeight:"800"}}>Go</button></div><div style={{fontSize:"8px",color:"var(--muted)",marginTop:"4px"}}>Page {order.indexOf(selectedId)+1} of {order.length} — built-in number system</div><button onClick={() => void deletePage()} disabled={busy} style={{marginTop:"8px",background:"#a9322e",color:"white",borderColor:"#a9322e",width:"100%",padding:"9px",fontWeight:"800"}}>Delete page</button>{selected.chapterId && <button className="primary" onClick={() => void balanceLayout("chapter")} disabled={busy || draft.layoutLocked}>Balance this chapter</button>}</section><section><h3>Page layout</h3><label>Margins <span>{draft.pagePadding}px</span><input type="range" min="28" max="100" value={draft.pagePadding} onChange={(event) => changeDraft({ pagePadding: Number(event.target.value) })}/></label><label>Columns<select value={draft.columns} onChange={(event) => changeDraft({ columns: Number(event.target.value) })}><option value="1">One</option><option value="2">Two</option></select></label><label>Column gap <span>{draft.columnGap}px</span><input type="range" min="12" max="60" value={draft.columnGap} onChange={(event) => changeDraft({ columnGap: Number(event.target.value) })}/></label></section><section><h3>Page border</h3><label>Style<select value={draft.borderStyle} onChange={(event) => changeDraft({ borderStyle: event.target.value as DesignerPageRevision["borderStyle"] })}><option value="none">None</option><option value="solid">Single</option><option value="double">Double</option><option value="dashed">Decorative dashed</option></select></label><div className="designer-row"><label>Colour<input type="color" value={draft.borderColor} onChange={(event) => changeDraft({ borderColor: event.target.value })}/></label><label>Width<input type="number" min="1" max="12" value={draft.borderWidth} onChange={(event) => changeDraft({ borderWidth: Number(event.target.value) })}/></label></div><label>Inset <span>{draft.borderInset}px</span><input type="range" min="0" max="50" value={draft.borderInset} onChange={(event) => changeDraft({ borderInset: Number(event.target.value) })}/></label><label>Corner radius <span>{draft.borderRadius}px</span><input type="range" min="0" max="60" value={draft.borderRadius} onChange={(event) => changeDraft({ borderRadius: Number(event.target.value) })}/></label></section><section><h3>Background</h3><label>Colour<input type="color" value={draft.backgroundColor} onChange={(event) => changeDraft({ backgroundColor: event.target.value })}/></label><label className="designer-upload">{busy ? "Uploading background…" : "Upload background"}<input ref={backgroundUploadInputRef} type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={(event) => void uploadBackground(event)}/></label><p className="designer-help">After upload, choose whether to use the background on this page only or throughout the whole book.</p><label>Fit<select value={draft.backgroundSize} onChange={(event) => changeDraft({ backgroundSize: event.target.value as DesignerPageRevision["backgroundSize"] })}><option value="cover">Cover</option><option value="contain">Contain</option><option value="auto">Original size</option><option value="repeat">Tile</option></select></label><label>Opacity <span>{Math.round(draft.backgroundOpacity * 100)}%</span><input type="range" min="0" max="1" step=".05" value={draft.backgroundOpacity} onChange={(event) => changeDraft({ backgroundOpacity: Number(event.target.value) })}/></label><button onClick={() => void applyOpacityToBook()} disabled={busy} style={{marginTop:"6px",width:"100%",padding:"8px",fontSize:"8px",fontWeight:"800",border:"1px solid #c9a86a",background:"#fff8e6",color:"#7a3a18"}}>Apply {Math.round(draft.backgroundOpacity * 100)}% opacity to all {allPages.length} pages</button>{draft.backgroundImageUrl && <button onClick={() => changeDraft({ backgroundImageKey: undefined, backgroundImageUrl: undefined })}>Remove background</button>}</section></>}
+      {panel === "page" && <><section><h3>Page structure</h3><label className="designer-check"><input type="checkbox" checked={draft.intentionalBlank} onChange={(event) => changeDraft({ intentionalBlank: event.target.checked })}/> Intentional blank</label><label className="designer-check"><input type="checkbox" checked={draft.layoutLocked} onChange={(event) => changeDraft({ layoutLocked: event.target.checked })}/> Lock this page during reflow</label><label className="designer-check"><input type="checkbox" checked={draft.deleted} onChange={(event) => changeDraft({ deleted: event.target.checked })}/> Remove from final book</label><div className="designer-row"><button onClick={() => void movePage(-1)}>Move up</button><button onClick={() => void movePage(1)}>Move down</button></div><div className="designer-row" style={{marginTop:"8px"}}><label style={{display:"flex",alignItems:"center",gap:"6px",fontSize:"9px",fontWeight:"800"}}>Move to #<input key={selectedId} id="move-page-input" type="number" min="1" max={order.length} defaultValue={order.indexOf(selectedId)+1} style={{width:"60px",border:"1px solid #d6ccbd",padding:"6px",textAlign:"center"}} /></label><button onClick={() => { const el=document.getElementById("move-page-input") as HTMLInputElement | null; const v=Number(el?.value); if(v>=1 && v<=order.length) void movePageTo(v-1); }} disabled={busy} style={{padding:"7px 10px",fontSize:"9px",fontWeight:"800"}}>Go</button></div><div style={{fontSize:"8px",color:"var(--muted)",marginTop:"4px"}}>Page {order.indexOf(selectedId)+1} of {order.length} — built-in number system</div><button onClick={() => void deletePage()} disabled={busy} style={{marginTop:"8px",background:"#a9322e",color:"white",borderColor:"#a9322e",width:"100%",padding:"9px",fontWeight:"800"}}>Delete page</button>{selected.chapterId && <button className="primary" onClick={() => void balanceLayout("chapter")} disabled={busy || draft.layoutLocked}>Balance this chapter</button>}</section><section><h3>Page layout</h3><label>Margins <span>{draft.pagePadding}px</span><input type="range" min="28" max="100" value={draft.pagePadding} onChange={(event) => changeDraft({ pagePadding: Number(event.target.value) })}/></label><label>Columns<select value={draft.columns} onChange={(event) => changeDraft({ columns: Number(event.target.value) })}><option value="1">One</option><option value="2">Two</option></select></label><label>Column gap <span>{draft.columnGap}px</span><input type="range" min="12" max="60" value={draft.columnGap} onChange={(event) => changeDraft({ columnGap: Number(event.target.value) })}/></label></section><section><h3>Page border</h3><label>Style<select value={draft.borderStyle} onChange={(event) => changeDraft({ borderStyle: event.target.value as DesignerPageRevision["borderStyle"] })}><option value="none">None</option><option value="solid">Single</option><option value="double">Double</option><option value="dashed">Decorative dashed</option></select></label><div className="designer-row"><label>Colour<input type="color" value={draft.borderColor} onChange={(event) => changeDraft({ borderColor: event.target.value })}/></label><label>Width<input type="number" min="1" max="12" value={draft.borderWidth} onChange={(event) => changeDraft({ borderWidth: Number(event.target.value) })}/></label></div><label>Inset <span>{draft.borderInset}px</span><input type="range" min="0" max="50" value={draft.borderInset} onChange={(event) => changeDraft({ borderInset: Number(event.target.value) })}/></label><label>Corner radius <span>{draft.borderRadius}px</span><input type="range" min="0" max="60" value={draft.borderRadius} onChange={(event) => changeDraft({ borderRadius: Number(event.target.value) })}/></label></section><section><h3>Background</h3><label>Colour<input type="color" value={draft.backgroundColor} onChange={(event) => changeDraft({ backgroundColor: event.target.value })}/></label><label className="designer-upload">{busy ? "Uploading background…" : "Upload background"}<input ref={backgroundUploadInputRef} type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={(event) => void uploadBackground(event)}/></label><p className="designer-help">After upload, choose whether to use the background on this page only or throughout the whole book.</p><label>Fit<select value={draft.backgroundSize} onChange={(event) => changeDraft({ backgroundSize: event.target.value as DesignerPageRevision["backgroundSize"] })}><option value="cover">Cover</option><option value="contain">Contain</option><option value="auto">Original size</option><option value="repeat">Tile</option></select></label><label>Opacity <span>{Math.round(draft.backgroundOpacity * 100)}%</span><input type="range" min="0" max="1" step=".05" value={draft.backgroundOpacity} onChange={(event) => changeDraft({ backgroundOpacity: Number(event.target.value) })}/></label><button onClick={() => void applyOpacityToBook()} disabled={busy} style={{marginTop:"6px",width:"100%",padding:"8px",fontSize:"8px",fontWeight:"800",border:"1px solid #c9a86a",background:"#fff8e6",color:"#7a3a18"}}>Apply {Math.round(draft.backgroundOpacity * 100)}% opacity to all {allPages.length} pages</button>{draft.backgroundImageUrl && <button onClick={() => changeDraft({ backgroundImageKey: undefined, backgroundImageUrl: undefined })}>Remove background</button>}</section><section><h3>Book alignment (whole book)</h3><p className="designer-help">Like Google Docs — left, center, right or justify. Applies to every paragraph in the whole book.</p><div className="designer-alignment-row"><button className={project.bookAlignment === "left" || !project.bookAlignment ? "active" : ""} onClick={() => void onCommit({ ...project, bookAlignment: "left" })}><span>☰</span>Left</button><button className={project.bookAlignment === "center" ? "active" : ""} onClick={() => void onCommit({ ...project, bookAlignment: "center" })}><span>☰</span>Centre</button><button className={project.bookAlignment === "right" ? "active" : ""} onClick={() => void onCommit({ ...project, bookAlignment: "right" })}><span>☰</span>Right</button><button className={project.bookAlignment === "justify" ? "active" : ""} onClick={() => void onCommit({ ...project, bookAlignment: "justify" })}><span>☰</span>Justify</button></div></section></>}
       {panel === "text" && <><section><h3>Typography</h3><label>Page font<select value={draft.fontFamily} onChange={(event) => changeDraft({ fontFamily: event.target.value })}><option value="Georgia, serif">Editorial Serif</option><option value="Arial, sans-serif">Clear Sans</option><option value="'Trebuchet MS', sans-serif">Friendly Reader</option><option value="'Noto Serif', serif">Sanskrit Scholar</option><option value="'Noto Sans Devanagari', sans-serif">Devanagari Sans</option></select></label><div className="designer-row"><label>Size<input type="number" min="9" max="34" value={draft.fontSize} onChange={(event) => changeDraft({ fontSize: Number(event.target.value) })}/></label><label>Colour<input type="color" value={draft.textColor} onChange={(event) => changeDraft({ textColor: event.target.value })}/></label></div><label>Line height <span>{draft.lineHeight.toFixed(2)}</span><input type="range" min="1" max="2.2" step=".05" value={draft.lineHeight} onChange={(event) => changeDraft({ lineHeight: Number(event.target.value) })}/></label><label>Letter spacing <span>{draft.letterSpacing}px</span><input type="range" min="-1" max="5" step=".1" value={draft.letterSpacing} onChange={(event) => changeDraft({ letterSpacing: Number(event.target.value) })}/></label><label>Paragraph spacing <span>{draft.paragraphSpacing}px</span><input type="range" min="0" max="35" value={draft.paragraphSpacing} onChange={(event) => changeDraft({ paragraphSpacing: Number(event.target.value) })}/></label></section><section><h3>Selected text box</h3><p className="designer-help">Select a custom text box on the page, then move, resize, layer or lock it.</p><div className="object-nudge"><button onClick={() => moveObject(0,-5)}>↑</button><button onClick={() => moveObject(-5,0)}>←</button><button onClick={() => moveObject(5,0)}>→</button><button onClick={() => moveObject(0,5)}>↓</button></div><label>Width<input type="range" min="120" max="520" defaultValue="360" onChange={(event) => mutateObject("width", `${event.target.value}px`)}/></label><label>Padding<input type="range" min="0" max="40" defaultValue="12" onChange={(event) => mutateObject("padding", `${event.target.value}px`)}/></label><div className="designer-row"><button onClick={() => mutateObject("zIndex", "4")}>Bring front</button><button onClick={() => mutateObject("zIndex", "0")}>Send back</button></div><div className="designer-row"><button onClick={duplicateObject}>Duplicate</button><button onClick={deleteObject}>Delete</button></div><button onClick={() => { if (!selectedNode.current) return; selectedNode.current.dataset.designerLocked = selectedNode.current.dataset.designerLocked === "true" ? "false" : "true"; }}>Lock / unlock object</button></section></>}
       {panel === "image" && <section key={selectedObjectIdentity?.objectId ?? "image-inspector"}><h3>Selected image</h3><p className="designer-help">Click an image once, then resize it continuously. Changes are stored inside the page edition.</p>
         <label>Width <span>{selectedImageSize.width}px</span><div className="designer-size-control"><input aria-label="Image width slider" type="range" min="80" max="520" value={selectedImageSize.width} onPointerDown={beginImageResize} onPointerUp={finishImageResize} onPointerCancel={finishImageResize} onKeyDown={beginImageResize} onBlur={finishImageResize} onChange={(event) => resizeSelectedImage("width", Number(event.target.value))}/><input aria-label="Image width in pixels" type="number" min="80" max="520" value={selectedImageSize.width} onFocus={beginImageResize} onBlur={finishImageResize} onChange={(event) => resizeSelectedImage("width", Number(event.target.value))}/></div></label>
@@ -4438,7 +4643,7 @@ function CanvaPreview({ project, exportBusy, pdfProgress, onClose, onDownload, o
     const image = Boolean(sheet.imageUrl) && !sheet.body;
     const combined = Boolean(sheet.imageUrl) && Boolean(sheet.body);
     const waitingForContent = chapterWordCount(sheet.chapter) < 45 && !sheet.chapter.importValidated;
-    return <article data-page-slot={slot.slotId} className={`${base} preview-page chapter-preview ${ageClass}${image ? " chapter-visual-sheet" : ""}${combined ? " chapter-text-visual-sheet" : ""}`} key={key}><header className="print-chapter-header"><span>CHAPTER {sheet.chapter.id}</span><span>PAGE {sheet.pageIndex + 1} OF {sheet.pageCount}</span></header>{sheet.pageIndex === 0 && <h2>{sheet.chapter.title}</h2>}{sheet.pageIndex > 0 && !image && <p className="continued-title">{sheet.chapter.title} · continued</p>}{sheet.body && <div className="preview-body" dangerouslySetInnerHTML={{ __html: sheet.body }}/>} {waitingForContent && sheet.pageIndex === 0 && <div className="unfinished-page-note"><b>Chapter in progress</b><span>Generated content will appear here automatically. You can still preview and download the complete book layout now.</span></div>}{sheet.imageUrl && <figure className="chapter-image"><img src={sheet.imageUrl} alt={sheet.imageAlt || sheet.imageCaption || sheet.chapter.title}/><figcaption>{sheet.imageCaption || sheet.chapter.title}</figcaption></figure>}<footer className="sheet-number"><span>{project.title}</span><span>{sheet.pageIndex + 1}</span></footer></article>;
+    return <article data-page-slot={slot.slotId} className={`${base} preview-page chapter-preview ${ageClass}${image ? " chapter-visual-sheet" : ""}${combined ? " chapter-text-visual-sheet" : ""}`} key={key}><header className="print-chapter-header"><span>CHAPTER {sheet.chapter.id}</span><span>PAGE {sheet.pageIndex + 1} OF {sheet.pageCount}</span></header>{sheet.pageIndex === 0 && <h2>{sheet.chapter.title}</h2>}{sheet.pageIndex > 0 && !image && <p className="continued-title">{sheet.chapter.title} · continued</p>}{sheet.body && <div className="preview-body" dangerouslySetInnerHTML={{ __html: sheet.body }}/>} {waitingForContent && sheet.pageIndex === 0 && <div className="unfinished-page-note"><b>Chapter in progress</b><span>Generated content will appear here automatically. You can still preview and download the complete book layout now.</span></div>}{sheet.imageUrl && <figure className="chapter-image"><img src={sheet.imageUrl} alt={sheet.imageAlt || sheet.imageCaption || sheet.chapter.title}/><figcaption>{sheet.imageCaption || sheet.chapter.title}</figcaption></figure>}{!sheet.imageUrl && sheet.chapter.visualType === "illustration-pending" && sheet.pageIndex === sheet.pageCount - 1 && <div className="illustration-pending-panel"><b>Illustration pending</b><span>{sheet.chapter.imageCaption || `Add the reviewed illustration for ${sheet.chapter.title}.`}</span></div>}<footer className="sheet-number"><span>{project.title}</span><span>{sheet.pageIndex + 1}</span></footer></article>;
   };
   const renderSheet = (sheet: Sheet, key: string) => {
     const slot = slotFor(sheet);
