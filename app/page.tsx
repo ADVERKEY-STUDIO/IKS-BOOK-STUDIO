@@ -2394,7 +2394,7 @@ OUTPUT REQUIREMENTS
       {view === "analysis" && <Analysis project={project} sourceBusy={sourceBusy} onPatch={patchProject} onBack={() => { setView("wizard"); setWizardStep(3); }} onUseExternal={() => { patchProject({ creationMode: "external" }); setView("external"); }} onContinue={confirmAdaptationPlan} onRunOcr={runSourceOcr} onUpdateOutline={updateSourceOutline} onAcceptOutline={acceptSourceOutline} />}
       {view === "brief" && <BookBrief project={project} allocated={allocatedPages} draftBusy={draftBusy} onBack={() => setView("analysis")} onUpdateChapter={updateChapter} onPrepare={prepareDraft} onContinue={() => { patchProject({ briefApproved: true }); setActiveChapter(project.chapters[0]?.id ?? 1); setEditorWorkspace("workflow"); setView("editor"); }} />}
       {view === "editor" && editorWorkspace === "workflow" && <Editor project={project} active={active} activeId={activeChapter} allocated={allocatedPages} draftBusy={draftBusy} onSelect={setActiveChapter} onSaveBody={saveChapterBody} editorRef={editorRef} onAi={aiAction} onRemember={rememberPreference} onAddChapter={addChapter} onUploadImage={uploadChapterImage} onPatchProject={patchProject} onUpdateChapter={updateChapter} />}
-      {view === "editor" && editorWorkspace === "designer" && <DesignerStudio ref={designerStudioRef} embedded project={project} onClose={() => setEditorWorkspace("workflow")} onPreview={() => setShowPreview(true)} onCommit={async (next) => { setProject(next); await persistProject(next); }} />}
+      {view === "editor" && editorWorkspace === "designer" && <DesignerStudio ref={designerStudioRef} embedded key={project.id} project={project} onClose={() => setEditorWorkspace("workflow")} onPreview={() => setShowPreview(true)} onCommit={async (next) => { setProject(next); await persistProject(next); }} />}
 
       {showPreview && <CanvaPreview project={project} exportBusy={exportBusy} pdfProgress={pdfProgress} onClose={() => setShowPreview(false)} onDownload={() => void downloadPdf()} onSaveCanvaPage={uploadCanvaPage} onSetCanvaActive={setCanvaPageActive} />}
       {showReviewQueue && <ReviewQueue project={project} busy={draftBusy} onClose={() => setShowReviewQueue(false)} onOpen={(chapterId) => { setActiveChapter(chapterId); setEditorWorkspace("workflow"); setShowReviewQueue(false); }} onRepair={(chapterId) => { setActiveChapter(chapterId); setEditorWorkspace("workflow"); setShowReviewQueue(false); void prepareDraft("active", { chapterId }); }} onApprove={(chapterId) => void approveChapterManually(chapterId)} onDesigner={(chapterId) => void leaveChapterForDesigner(chapterId)} onRestore={() => void restorePreviousVersion()} />}
@@ -3149,6 +3149,24 @@ type DesignerImageSize = {
   height: number;
 };
 
+type DesignerSelectionBookmark = {
+  slotId: string;
+  anchorPath: number[];
+  anchorOffset: number;
+  anchorTextOffset: number;
+  focusPath: number[];
+  focusOffset: number;
+  focusTextOffset: number;
+};
+
+type DesignerPendingCaretPoint = {
+  slotId: string;
+  x: number;
+  y: number;
+  scrollTop: number;
+  scrollLeft: number;
+};
+
 type DesignerStudioProps = {
   project: Project;
   embedded?: boolean;
@@ -3194,6 +3212,7 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
   const editor = useRef<HTMLDivElement>(null);
   const backgroundUploadInputRef = useRef<HTMLInputElement>(null);
   const backgroundChoicePrimaryRef = useRef<HTMLButtonElement>(null);
+  const designerCanvasRef = useRef<HTMLDivElement>(null);
   const bookEditors = useRef(new Map<string, HTMLDivElement>());
   const liveBookHtml = useRef<Record<string, string>>({});
   const liveBookDrafts = useRef<Record<string, DesignerPageRevision>>({});
@@ -3202,6 +3221,8 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
   const selectedObjectIdentityRef = useRef<DesignerObjectIdentity | null>(null);
   const imageResizeSession = useRef(false);
   const wiredFreeImages = useRef(new WeakSet<HTMLElement>());
+  const selectionBookmark = useRef<DesignerSelectionBookmark | null>(null);
+  const pendingCaretPoint = useRef<DesignerPendingCaretPoint | null>(null);
 
   useEffect(() => {
     const nextSaved = savedPages.find((page) => page.slotId === selected?.slotId);
@@ -3252,6 +3273,156 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     liveBookHtml.current[slotId] = html;
     setDirtyPages((current) => current.includes(slotId) ? current : [...current, slotId]);
   };
+  const nodePath = (root: Node, node: Node) => {
+    const path: number[] = [];
+    let current: Node | null = node;
+    while (current && current !== root) {
+      const parent: Node | null = current.parentNode;
+      if (!parent) return [];
+      path.unshift(Array.prototype.indexOf.call(parent.childNodes, current));
+      current = parent;
+    }
+    return current === root ? path : [];
+  };
+  const nodeAtPath = (root: Node, path: number[]) => path.reduce<Node | null>((current, index) => current?.childNodes[index] ?? null, root);
+  const textOffsetFromRoot = (root: Node, node: Node, offset: number) => {
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(root);
+      range.setEnd(node, offset);
+      return range.toString().length;
+    } catch {
+      return 0;
+    }
+  };
+  const pointAtTextOffset = (root: Node, requestedOffset: number) => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let remaining = Math.max(0, requestedOffset);
+    let lastText: Text | null = null;
+    for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+      lastText = node;
+      const length = node.data.length;
+      if (remaining <= length) return { node, offset: remaining };
+      remaining -= length;
+    }
+    return lastText ? { node: lastText, offset: lastText.data.length } : { node: root, offset: root.childNodes.length };
+  };
+  const captureSelection = (): DesignerSelectionBookmark | null => {
+    const selection = window.getSelection();
+    if (!selection?.anchorNode || !selection.focusNode) return selectionBookmark.current;
+    for (const [slotId, root] of bookEditors.current.entries()) {
+      if (!root.contains(selection.anchorNode) || !root.contains(selection.focusNode)) continue;
+      const bookmark = {
+        slotId,
+        anchorPath: nodePath(root, selection.anchorNode),
+        anchorOffset: selection.anchorOffset,
+        anchorTextOffset: textOffsetFromRoot(root, selection.anchorNode, selection.anchorOffset),
+        focusPath: nodePath(root, selection.focusNode),
+        focusOffset: selection.focusOffset,
+        focusTextOffset: textOffsetFromRoot(root, selection.focusNode, selection.focusOffset),
+      };
+      selectionBookmark.current = bookmark;
+      return bookmark;
+    }
+    return selectionBookmark.current;
+  };
+  const restoreSelection = (bookmark = selectionBookmark.current, preferTextOffsets = false) => {
+    if (!bookmark) return false;
+    const root = bookEditors.current.get(bookmark.slotId);
+    if (!root) return false;
+    const pathAnchor = nodeAtPath(root, bookmark.anchorPath);
+    const pathFocus = nodeAtPath(root, bookmark.focusPath);
+    const fallbackAnchor = pointAtTextOffset(root, bookmark.anchorTextOffset);
+    const fallbackFocus = pointAtTextOffset(root, bookmark.focusTextOffset);
+    const anchor = preferTextOffsets ? fallbackAnchor.node : pathAnchor ?? fallbackAnchor.node;
+    const focus = preferTextOffsets ? fallbackFocus.node : pathFocus ?? fallbackFocus.node;
+    const anchorOffset = preferTextOffsets || !pathAnchor ? fallbackAnchor.offset : bookmark.anchorOffset;
+    const focusOffset = preferTextOffsets || !pathFocus ? fallbackFocus.offset : bookmark.focusOffset;
+    const selection = window.getSelection();
+    if (!selection) return false;
+    const boundedOffset = (node: Node, offset: number) => Math.min(offset, node.nodeType === Node.TEXT_NODE ? (node.textContent?.length ?? 0) : node.childNodes.length);
+    selection.removeAllRanges();
+    selection.setBaseAndExtent(anchor, boundedOffset(anchor, anchorOffset), focus, boundedOffset(focus, focusOffset));
+    root.focus({ preventScroll: true });
+    selectionBookmark.current = bookmark;
+    return true;
+  };
+  const replaceEditorHtml = (slotId: string, html: string, restoreCaret = true) => {
+    const root = bookEditors.current.get(slotId);
+    const bookmark = restoreCaret ? captureSelection() : selectionBookmark.current;
+    const canvas = designerCanvasRef.current;
+    const scrollTop = canvas?.scrollTop ?? 0;
+    const scrollLeft = canvas?.scrollLeft ?? 0;
+    liveBookHtml.current[slotId] = html;
+    if (!root || root.innerHTML === html) return;
+    root.innerHTML = html;
+    if (!restoreCaret || bookmark?.slotId !== slotId) return;
+    window.requestAnimationFrame(() => {
+      if (canvas) { canvas.scrollTop = scrollTop; canvas.scrollLeft = scrollLeft; }
+      restoreSelection(bookmark, true);
+    });
+  };
+  const connectBookEditor = (slotId: string, initialHtml: string, node: HTMLDivElement | null) => {
+    if (!node) return;
+    const needsInitialization = node.dataset.designerProjectId !== project.id || node.dataset.designerPageSlot !== slotId;
+    if (needsInitialization) {
+      node.innerHTML = liveBookHtml.current[slotId] ?? initialHtml;
+      node.dataset.designerProjectId = project.id;
+      node.dataset.designerPageSlot = slotId;
+    }
+    bookEditors.current.set(slotId, node);
+    if (slotId === selectedId) editor.current = node;
+  };
+  const clearObjectSelectionForText = () => {
+    selectedNode.current?.classList.remove("designer-object-selected");
+    selectedNode.current = null;
+    selectedObjectIdentityRef.current = null;
+    setSelectedObjectIdentity(null);
+    setSelectedObject("page");
+    setPanel("text");
+  };
+  const placeCaretAtPoint = (point: DesignerPendingCaretPoint) => {
+    const root = bookEditors.current.get(point.slotId);
+    const canvas = designerCanvasRef.current;
+    if (!root) { pendingCaretPoint.current = null; return; }
+    if (canvas) { canvas.scrollTop = point.scrollTop; canvas.scrollLeft = point.scrollLeft; }
+    root.focus({ preventScroll: true });
+    const caretDocument = document as Document & {
+      caretRangeFromPoint?: (x: number, y: number) => Range | null;
+      caretPositionFromPoint?: (x: number, y: number) => CaretPosition | null;
+    };
+    let range = caretDocument.caretRangeFromPoint?.(point.x, point.y) ?? null;
+    const position = !range ? caretDocument.caretPositionFromPoint?.(point.x, point.y) : null;
+    if (position) {
+      range = document.createRange();
+      range.setStart(position.offsetNode, position.offset);
+      range.collapse(true);
+    }
+    if (!range || !root.contains(range.startContainer)) {
+      range = document.createRange();
+      range.selectNodeContents(root);
+      range.collapse(false);
+    }
+    const selection = window.getSelection();
+    if (!selection) { pendingCaretPoint.current = null; return; }
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const bookmark = captureSelection();
+    clearObjectSelectionForText();
+    window.requestAnimationFrame(() => {
+      if (canvas) { canvas.scrollTop = point.scrollTop; canvas.scrollLeft = point.scrollLeft; }
+      restoreSelection(bookmark);
+      pendingCaretPoint.current = null;
+    });
+  };
+  useEffect(() => {
+    const point = pendingCaretPoint.current;
+    if (!point || point.slotId !== selectedId) return;
+    const firstFrame = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => placeCaretAtPoint(point));
+    });
+    return () => window.cancelAnimationFrame(firstFrame);
+  }, [selectedId]);
   const rootForNode = (node: HTMLElement) => {
     for (const [slotId, root] of bookEditors.current.entries()) if (root.contains(node)) return { slotId, root };
     return null;
@@ -3335,11 +3506,20 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
   const undo = () => {
     const previous = undoStack.at(-1); if (!previous) return;
     setRedoStack((stack) => [...stack, { ...draft, html: editor.current?.innerHTML ?? draft.html }]);
-    setUndoStack((stack) => stack.slice(0, -1)); liveBookDrafts.current[selectedId] = previous; setDraft(previous);
+    setUndoStack((stack) => stack.slice(0, -1));
+    liveBookDrafts.current[selectedId] = previous;
+    replaceEditorHtml(selectedId, previous.html);
+    setDraft(previous);
+    setDirtyPages((current) => current.includes(selectedId) ? current : [...current, selectedId]);
   };
   const redo = () => {
     const next = redoStack.at(-1); if (!next) return;
-    setUndoStack((stack) => [...stack, draft]); setRedoStack((stack) => stack.slice(0, -1)); liveBookDrafts.current[selectedId] = next; setDraft(next);
+    const current = { ...draft, html: editor.current?.innerHTML ?? draft.html };
+    setUndoStack((stack) => [...stack, current]); setRedoStack((stack) => stack.slice(0, -1));
+    liveBookDrafts.current[selectedId] = next;
+    replaceEditorHtml(selectedId, next.html);
+    setDraft(next);
+    setDirtyPages((pages) => pages.includes(selectedId) ? pages : [...pages, selectedId]);
   };
   const command = (name: string, value?: string) => { setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]); setRedoStack([]); editor.current?.focus(); document.execCommand(name, false, value); if (editor.current) rememberLiveHtml(selectedId, editor.current.innerHTML); setMessage("Text formatting changed. Save the whole book when ready."); };
   const uploadAsset = async (file: File) => {
@@ -3534,7 +3714,7 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
           const existing = replacements.get(slotId);
           const revision = { ...firstStyle, deleted: false, intentionalBlank: false, layoutLocked: false, html: designerChapterPageHtml(project, chapter, body, pageIndex, bodies.length), savedAt: new Date().toISOString() };
           replacements.set(slotId, makeOverride(descriptor, revision, existing));
-          liveBookHtml.current[slotId] = revision.html;
+          replaceEditorHtml(slotId, revision.html, slotId === selectedId);
           nextIds.push(slotId);
         });
         chapterPages.slice(bodies.length).forEach((page) => {
@@ -3677,11 +3857,21 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
   };
   const restorePrevious = async () => {
     if (!saved?.history.length) return; const [previous, ...history] = saved.history; const replacement = { ...saved, ...hydrateDesignerRevision(previous, previous.html), history };
-    await onCommit({ ...project, designerPages: [...savedPages.filter((page) => page.slotId !== selectedId), replacement] }); setDraft(replacement); setMessage("Previous page version restored.");
+    await onCommit({ ...project, designerPages: [...savedPages.filter((page) => page.slotId !== selectedId), replacement] });
+    liveBookDrafts.current[selectedId] = replacement;
+    replaceEditorHtml(selectedId, replacement.html);
+    setDraft(replacement);
+    setMessage("Previous page version restored.");
   };
   const resetPage = async () => {
     await onCommit({ ...project, designerPages: savedPages.filter((page) => page.slotId !== selectedId), designerPageOrder: selected?.kind === "custom" ? order.filter((slotId) => slotId !== selectedId) : order });
-    if (selected?.kind === "custom") setSelectedId(order.find((slotId) => slotId !== selectedId) ?? "cover"); else setDraft(defaultDesignerRevision(selected?.html));
+    if (selected?.kind === "custom") setSelectedId(order.find((slotId) => slotId !== selectedId) ?? "cover");
+    else {
+      const reset = defaultDesignerRevision(selected?.html);
+      liveBookDrafts.current[selectedId] = reset;
+      replaceEditorHtml(selectedId, reset.html);
+      setDraft(reset);
+    }
   };
   const applyStyle = async (scope: "page" | "chapter" | "book") => {
     if (!selected) return; const style = designerStyleFrom(draft);
@@ -3694,6 +3884,31 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     const preset: DesignerStylePreset = { id: `preset-${Date.now().toString(36)}`, name: `Custom style ${(project.designerPresets?.length ?? 0) + 1}`, style: designerStyleFrom(draft) };
     await onCommit({ ...project, designerPresets: [...(project.designerPresets ?? []), preset] }); setMessage(`${preset.name} saved for reuse.`);
   };
+  const beginTextInteraction = (event: ReactMouseEvent<HTMLDivElement>, slotId: string) => {
+    event.stopPropagation();
+    const target = event.target as HTMLElement;
+    if (target.closest(".designer-free-image,.designer-free-text,img")) return;
+    if (slotId === selectedId) return;
+    event.preventDefault();
+    const canvas = designerCanvasRef.current;
+    pendingCaretPoint.current = {
+      slotId,
+      x: event.clientX,
+      y: event.clientY,
+      scrollTop: canvas?.scrollTop ?? 0,
+      scrollLeft: canvas?.scrollLeft ?? 0,
+    };
+    setSelectedId(slotId);
+  };
+  const restoreCaretAfterInspectorChange = (bookmark: DesignerSelectionBookmark | null, scrollTop: number, scrollLeft: number) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const canvas = designerCanvasRef.current;
+        if (canvas) { canvas.scrollTop = scrollTop; canvas.scrollLeft = scrollLeft; }
+        restoreSelection(bookmark);
+      });
+    });
+  };
   const selectCanvasObject = (event: ReactMouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
     const freeImage = target.closest(".designer-free-image") as HTMLElement | null;
@@ -3703,13 +3918,49 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
       const kind = freeImage || node.tagName === "IMG" ? "image" : "text box";
       selectDesignerObject(node, location?.slotId ?? selectedId, kind);
     } else {
-      selectedNode.current?.classList.remove("designer-object-selected");
-      selectedNode.current = null;
-      selectedObjectIdentityRef.current = null;
-      setSelectedObjectIdentity(null);
-      setSelectedObject("page");
-      setPanel("page");
+      if (pendingCaretPoint.current) return;
+      const bookmark = captureSelection();
+      const canvas = designerCanvasRef.current;
+      const scrollTop = canvas?.scrollTop ?? 0;
+      const scrollLeft = canvas?.scrollLeft ?? 0;
+      clearObjectSelectionForText();
+      restoreCaretAfterInspectorChange(bookmark, scrollTop, scrollLeft);
     }
+  };
+  const handleContentsTitleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>, slotId: string) => {
+    if (descriptorFor(slotId)?.kind !== "contents" || (event.key !== " " && event.key !== "Backspace")) return;
+    const root = bookEditors.current.get(slotId);
+    const selection = window.getSelection();
+    if (!root || !selection?.isCollapsed || !selection.anchorNode || !root.contains(selection.anchorNode)) return;
+    const anchorElement = selection.anchorNode.nodeType === Node.ELEMENT_NODE ? selection.anchorNode as Element : selection.anchorNode.parentElement;
+    const title = anchorElement?.closest("li > span") as HTMLElement | null;
+    if (!title) return;
+    const beforeCaret = document.createRange();
+    beforeCaret.selectNodeContents(title);
+    beforeCaret.setEnd(selection.anchorNode, selection.anchorOffset);
+    if (beforeCaret.toString().replace(/[\s\u00a0\u200b]/g, "").length > 0) return;
+
+    const currentIndent = Math.max(0, Math.min(64, Number(title.dataset.designerIndent ?? (parseFloat(title.style.marginInlineStart) || 0))));
+    if (event.key === "Backspace" && currentIndent === 0) {
+      event.preventDefault();
+      return;
+    }
+    event.preventDefault();
+    setUndoStack((stack) => [...stack.slice(-29), { ...draft, html: root.innerHTML }]);
+    setRedoStack([]);
+    const nextIndent = event.key === " " ? Math.min(64, currentIndent + 8) : Math.max(0, currentIndent - 8);
+    title.dataset.designerIndent = String(nextIndent);
+    title.style.marginInlineStart = nextIndent ? `${nextIndent}px` : "";
+    const range = document.createRange();
+    range.selectNodeContents(title);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const html = root.innerHTML;
+    liveBookDrafts.current[slotId] = { ...draft, html };
+    rememberLiveHtml(slotId, html);
+    captureSelection();
+    setMessage(nextIndent ? `Contents title indented to ${nextIndent}px.` : "Contents title indentation removed.");
   };
   const mutateObject = (property: string, value: string) => {
     const node = resolveSelectedObject();
@@ -3966,7 +4217,7 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     <div className="designer-status"><span>◆</span><b>{message}</b><i>{dirtyPages.length ? `${dirtyPages.length} unsaved page${dirtyPages.length === 1 ? "" : "s"}` : `${orderedPages.filter((page) => !revisionFor(page).deleted).length} pages`} · {selected.label}</i></div>
     <div className="designer-workspace designer-book-workspace"><aside className="designer-pages designer-book-nav"><p className="designer-nav-label">BOOK SECTIONS</p>{orderedPages.filter((page) => page.kind === "cover" || page.kind === "contents").map((page) => <button key={page.slotId} className={page.slotId === selectedId ? "active" : ""} onClick={() => selectAndReveal(page.slotId)}><span>{page.kind === "cover" ? "C" : "T"}</span><div><b>{page.label}</b><small>Book matter</small></div></button>)}{project.chapters.map((chapter) => { const pages = orderedPages.filter((page) => page.chapterId === chapter.id && !revisionFor(page).deleted); const hasIssue = pages.some((page) => ["empty", "overflow"].includes(designerPageFill(liveBookHtml.current[page.slotId] ?? revisionFor(page).html, project.audience, page.pageIndex === 0).tone)); return <button key={chapter.id} className={selected.chapterId === chapter.id ? "active" : ""} onClick={() => jumpToChapter(chapter.id)}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small>{pages.length} page{pages.length === 1 ? "" : "s"}{hasIssue ? " · check spacing" : " · balanced"}</small></div></button>; })}{orderedPages.filter((page) => page.kind === "back").map((page) => <button key={page.slotId} className={page.slotId === selectedId ? "active" : ""} onClick={() => selectAndReveal(page.slotId)}><span>B</span><div><b>{page.label}</b><small>Book matter</small></div></button>)}</aside>
     <main className="designer-stage"><nav className="designer-toolbar designer-book-toolbar"><button onClick={undo} disabled={!undoStack.length} title="Undo selected page" style={{background: undoStack.length ? "#fff7ed" : "#f5f5f5", border: undoStack.length ? "2px solid #b4532a" : "1px solid #ddd", color: undoStack.length ? "#b4532a" : "#999", padding:"8px 14px", fontSize:"13px", fontWeight:"800", borderRadius:"6px", display:"flex", alignItems:"center", gap:"6px", cursor: undoStack.length ? "pointer" : "not-allowed", opacity: undoStack.length ? 1 : 0.6}}>↶ Undo</button><button onClick={redo} disabled={!redoStack.length} title="Redo selected page" style={{background: redoStack.length ? "#fff7ed" : "#f5f5f5", border: redoStack.length ? "2px solid #1a3d2e" : "1px solid #ddd", color: redoStack.length ? "#1a3d2e" : "#999", padding:"8px 14px", fontSize:"13px", fontWeight:"800", borderRadius:"6px", display:"flex", alignItems:"center", gap:"6px", cursor: redoStack.length ? "pointer" : "not-allowed", opacity: redoStack.length ? 1 : 0.6}}>Redo ↷</button><select aria-label="Selected text font" defaultValue="Georgia" onChange={(event) => command("fontName", event.target.value)}><option>Georgia</option><option>Arial</option><option>Verdana</option><option>Trebuchet MS</option><option>Times New Roman</option><option>Noto Serif</option><option>Noto Sans Devanagari</option></select><select aria-label="Selected text size" defaultValue="3" onChange={(event) => command("fontSize", event.target.value)}><option value="1">Small</option><option value="3">Body</option><option value="5">Subheading</option><option value="7">Title</option></select><button onClick={() => command("bold")}><b>B</b></button><button onClick={() => command("italic")}><i>I</i></button><button onClick={() => command("underline")}><u>U</u></button><button onClick={() => command("insertUnorderedList")}>• List</button><button onClick={() => command("justifyLeft")}>Left</button><button onClick={() => command("justifyCenter")}>Centre</button><button onClick={() => command("justifyRight")}>Right</button><label title="Text colour"><input type="color" defaultValue="#243b34" onChange={(event) => command("foreColor", event.target.value)}/></label><label title="Highlight"><input type="color" defaultValue="#f6e6ad" onChange={(event) => command("hiliteColor", event.target.value)}/></label><button onClick={addTextBox}>＋ Text box</button><input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp" style={{display:"none"}} onChange={(e)=>{const f=e.target.files?.[0]; if(f) void addFreeImage(f)}} /><button onClick={()=>imageInputRef.current?.click()} disabled={busy} title="Add image anywhere, drag to move, handles to resize">＋ Image</button><button className="balance-chapter-button" onClick={() => void balanceLayout("chapter")} disabled={!selected.chapterId || busy}>Balance this chapter</button></nav>
-      <div className="designer-canvas-wrap designer-whole-book-canvas" aria-label="Editable whole book">{orderedPages.filter((page) => !revisionFor(page).deleted).map((page, index) => { const revision = revisionFor(page); const fill = page.kind === "chapter" ? designerPageFill(liveBookHtml.current[page.slotId] ?? revision.html, project.audience, page.pageIndex === 0) : { ratio: 100, label: "Designed page", tone: "balanced" }; const pageBackground = { backgroundImage: revision.backgroundImageUrl ? `url(${revision.backgroundImageUrl})` : undefined, backgroundSize: revision.backgroundSize === "repeat" ? "auto" : revision.backgroundSize, backgroundRepeat: revision.backgroundSize === "repeat" ? "repeat" : "no-repeat", backgroundPosition: revision.backgroundPosition, opacity: revision.backgroundOpacity }; const pageBorder = revision.borderStyle === "none" ? undefined : { inset: `${revision.borderInset}px`, border: `${revision.borderWidth}px ${revision.borderStyle} ${revision.borderColor}`, borderRadius: `${revision.borderRadius}px` }; const pageClasses = designerPageClasses(project, page); const isDirty = dirtyPages.includes(page.slotId); return <section className={`designer-flow-page${page.slotId === selectedId ? " selected" : ""}`} id={`designer-flow-${page.slotId}`} key={page.slotId}><div className="designer-flow-page-meta"><span>PAGE {index + 1}</span><b>{page.label}</b><button className={`page-fill-badge ${fill.tone}`} onClick={() => { setSelectedId(page.slotId); setPanel("preflight"); }}>{fill.label} · {fill.ratio}%</button><button className={`page-save-button ${isDirty ? "dirty" : "saved"}`} disabled={busy || !isDirty} onClick={() => void savePageById(page.slotId)}>{busy && page.slotId === selectedId ? "Saving…" : isDirty ? "Save page" : "Saved"}</button></div><article className={`designer-canvas-page book-sheet ${bookClasses} ${pageClasses}${revision.backgroundImageUrl ? " has-background" : ""}${revision.intentionalBlank ? " blank" : ""}`} style={{ backgroundColor: revision.backgroundColor }} onMouseDown={() => setSelectedId(page.slotId)}><div className="designer-background-layer" style={pageBackground}/><div className="designer-border-layer" style={pageBorder}/><div className={`designer-watermark-layer${revision.watermarkRepeat ? " repeat" : ""}`} style={{ opacity: revision.watermarkOpacity, left: `${revision.watermarkX}%`, top: `${revision.watermarkY}%`, transform: `translate(-50%,-50%) rotate(${revision.watermarkRotation}deg)`, display: revision.watermarkVisible ? "grid" : "none" }}>{Array.from({ length: revision.watermarkRepeat ? 6 : 1 }, (_, watermarkIndex) => <span key={watermarkIndex}>{revision.watermarkImageUrl && <img src={revision.watermarkImageUrl} alt="Custom watermark"/>}{revision.watermarkText}</span>)}</div>{!revision.intentionalBlank && revision.contentVisible && <div ref={(node) => { if (node) { bookEditors.current.set(page.slotId, node); if (page.slotId === selectedId) editor.current = node; } else bookEditors.current.delete(page.slotId); }} className="designer-editable-content" style={pageStyleFor(revision)} contentEditable suppressContentEditableWarning onFocus={() => setSelectedId(page.slotId)} onInput={(event) => rememberLiveHtml(page.slotId, event.currentTarget.innerHTML)} onClick={selectCanvasObject} dangerouslySetInnerHTML={{ __html: liveBookHtml.current[page.slotId] ?? revision.html }}/>}</article><div style={{margin:"6px auto 0",fontSize:"11px",letterSpacing:"0.04em",color:"#1a2e1a",background:"#ffffff",padding:"5px 12px",borderRadius:"999px",border:"1px solid #b4532a",boxShadow:"0 2px 8px rgba(0,0,0,0.08)",fontWeight:"800",width:"fit-content"}}>Book page {index+1} of {order.length} — exactly as in Preview</div>{revision.intentionalBlank && <div className="intentional-blank-label">INTENTIONAL BLANK PAGE</div>}</section>; })}</div>
+      <div ref={designerCanvasRef} className="designer-canvas-wrap designer-whole-book-canvas" aria-label="Editable whole book">{orderedPages.filter((page) => !revisionFor(page).deleted).map((page, index) => { const revision = revisionFor(page); const fill = page.kind === "chapter" ? designerPageFill(liveBookHtml.current[page.slotId] ?? revision.html, project.audience, page.pageIndex === 0) : { ratio: 100, label: "Designed page", tone: "balanced" }; const pageBackground = { backgroundImage: revision.backgroundImageUrl ? `url(${revision.backgroundImageUrl})` : undefined, backgroundSize: revision.backgroundSize === "repeat" ? "auto" : revision.backgroundSize, backgroundRepeat: revision.backgroundSize === "repeat" ? "repeat" : "no-repeat", backgroundPosition: revision.backgroundPosition, opacity: revision.backgroundOpacity }; const pageBorder = revision.borderStyle === "none" ? undefined : { inset: `${revision.borderInset}px`, border: `${revision.borderWidth}px ${revision.borderStyle} ${revision.borderColor}`, borderRadius: `${revision.borderRadius}px` }; const pageClasses = designerPageClasses(project, page); const isDirty = dirtyPages.includes(page.slotId); return <section className={`designer-flow-page${page.slotId === selectedId ? " selected" : ""}`} id={`designer-flow-${page.slotId}`} key={page.slotId}><div className="designer-flow-page-meta"><span>PAGE {index + 1}</span><b>{page.label}</b><button className={`page-fill-badge ${fill.tone}`} onClick={() => { setSelectedId(page.slotId); setPanel("preflight"); }}>{fill.label} · {fill.ratio}%</button><button className={`page-save-button ${isDirty ? "dirty" : "saved"}`} disabled={busy || !isDirty} onClick={() => void savePageById(page.slotId)}>{busy && page.slotId === selectedId ? "Saving…" : isDirty ? "Save page" : "Saved"}</button></div><article className={`designer-canvas-page book-sheet ${bookClasses} ${pageClasses}${revision.backgroundImageUrl ? " has-background" : ""}${revision.intentionalBlank ? " blank" : ""}`} style={{ backgroundColor: revision.backgroundColor }} onMouseDown={() => { if (page.slotId !== selectedId) setSelectedId(page.slotId); }}><div className="designer-background-layer" style={pageBackground}/><div className="designer-border-layer" style={pageBorder}/><div className={`designer-watermark-layer${revision.watermarkRepeat ? " repeat" : ""}`} style={{ opacity: revision.watermarkOpacity, left: `${revision.watermarkX}%`, top: `${revision.watermarkY}%`, transform: `translate(-50%,-50%) rotate(${revision.watermarkRotation}deg)`, display: revision.watermarkVisible ? "grid" : "none" }}>{Array.from({ length: revision.watermarkRepeat ? 6 : 1 }, (_, watermarkIndex) => <span key={watermarkIndex}>{revision.watermarkImageUrl && <img src={revision.watermarkImageUrl} alt="Custom watermark"/>}{revision.watermarkText}</span>)}</div>{!revision.intentionalBlank && revision.contentVisible && <div ref={(node) => connectBookEditor(page.slotId, revision.html, node)} className="designer-editable-content" style={pageStyleFor(revision)} contentEditable suppressContentEditableWarning onMouseDown={(event) => beginTextInteraction(event, page.slotId)} onMouseUp={() => { if (!pendingCaretPoint.current) captureSelection(); }} onFocus={() => { if (page.slotId !== selectedId && !pendingCaretPoint.current) setSelectedId(page.slotId); }} onInput={(event) => { rememberLiveHtml(page.slotId, event.currentTarget.innerHTML); captureSelection(); }} onKeyDown={(event) => handleContentsTitleKeyDown(event, page.slotId)} onKeyUp={() => captureSelection()} onClick={selectCanvasObject}/>}</article><div style={{margin:"6px auto 0",fontSize:"11px",letterSpacing:"0.04em",color:"#1a2e1a",background:"#ffffff",padding:"5px 12px",borderRadius:"999px",border:"1px solid #b4532a",boxShadow:"0 2px 8px rgba(0,0,0,0.08)",fontWeight:"800",width:"fit-content"}}>Book page {index+1} of {order.length} — exactly as in Preview</div>{revision.intentionalBlank && <div className="intentional-blank-label">INTENTIONAL BLANK PAGE</div>}</section>; })}</div>
     </main>
     <aside className="designer-controls designer-inspector"><nav>{(["page","text","image","layers","preflight"] as const).map((name) => <button key={name} className={panel === name ? "active" : ""} onClick={() => setPanel(name)}>{name}</button>)}</nav>
       {panel === "image" && selectedObject === "image" && <button className="designer-delete-image" onClick={deleteObject}>Delete selected image</button>}

@@ -119,6 +119,47 @@ test("designer can edit content and manage page structure", () => {
   assert.match(page, /Restore studio page/);
 });
 
+test("text clicks preserve the caret while selecting pages and opening text tools", () => {
+  assert.match(page, /type DesignerSelectionBookmark/);
+  assert.match(page, /type DesignerPendingCaretPoint/);
+  assert.match(page, /beginTextInteraction/);
+  assert.match(page, /event\.stopPropagation\(\)/);
+  assert.match(page, /caretRangeFromPoint/);
+  assert.match(page, /caretPositionFromPoint/);
+  assert.match(page, /root\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(page, /restoreSelection\(bookmark\)/);
+  assert.match(page, /clearObjectSelectionForText/);
+  assert.match(page, /setPanel\("text"\)/);
+  assert.match(page, /ref=\{designerCanvasRef\}/);
+  assert.match(page, /page\.slotId !== selectedId/);
+});
+
+test("live Designer pages are uncontrolled so ordinary rerenders cannot reset the caret", () => {
+  const activeDesigner = page.slice(page.indexOf("const DesignerStudio ="), page.indexOf("function LegacyDesignerStudio"));
+  assert.match(activeDesigner, /const connectBookEditor/);
+  assert.match(activeDesigner, /node\.innerHTML = liveBookHtml\.current\[slotId\] \?\? initialHtml/);
+  assert.match(activeDesigner, /const replaceEditorHtml/);
+  assert.match(activeDesigner, /anchorTextOffset/);
+  assert.match(activeDesigner, /focusTextOffset/);
+  assert.match(activeDesigner, /restoreSelection\(bookmark, true\)/);
+  assert.match(activeDesigner, /ref=\{\(node\) => connectBookEditor\(page\.slotId, revision\.html, node\)\}/);
+  assert.doesNotMatch(activeDesigner, /dangerouslySetInnerHTML/);
+  assert.match(page, /<DesignerStudio ref=\{designerStudioRef\} embedded key=\{project\.id\}/);
+});
+
+test("contents titles indent horizontally with Space and reverse with Backspace", () => {
+  assert.match(page, /handleContentsTitleKeyDown/);
+  assert.match(page, /event\.key !== " " && event\.key !== "Backspace"/);
+  assert.match(page, /closest\("li > span"\)/);
+  assert.match(page, /Math\.min\(64, currentIndent \+ 8\)/);
+  assert.match(page, /Math\.max\(0, currentIndent - 8\)/);
+  assert.match(page, /title\.dataset\.designerIndent/);
+  assert.match(page, /title\.style\.marginInlineStart/);
+  assert.match(page, /rememberLiveHtml\(slotId, html\)/);
+  assert.match(page, /replaceEditorHtml\(selectedId, previous\.html\)/);
+  assert.match(page, /replaceEditorHtml\(selectedId, next\.html\)/);
+});
+
 test("custom backgrounds, watermarks, and layers are available", () => {
   assert.match(page, /backgroundImageKey/);
   assert.match(page, /watermarkImageKey/);
