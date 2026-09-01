@@ -2720,11 +2720,11 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
     anchor.download = `${project.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "book"}-illustration-prompt.md`;
     anchor.click();
     URL.revokeObjectURL(href);
-    onNotify("Complete image-session prompt downloaded");
+    onNotify("Complete illustration ZIP prompt downloaded");
   };
   const copyPrompt = async () => {
     await navigator.clipboard.writeText(prompt);
-    onNotify("Complete image-session prompt copied. Generate item 1, then reply NEXT for each following image.");
+    onNotify("Complete illustration ZIP prompt copied. Paste it once; the external AI should return one ZIP.");
   };
   const updateCandidate = (slotId: string, patch: Partial<ExternalIllustrationCandidate>) => setCandidates((current) => current.map((item) => item.slotId === slotId ? { ...item, ...patch } : item));
   const copySlotPrompt = async (slot: ExternalIllustrationSlot) => {
@@ -2745,27 +2745,60 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
     updateCandidate(slot.id, { file, sourcePath: file.name, decision: "accept", error: undefined });
     onNotify(`${slot.id} image is ready for review`);
   };
-  const chooseImages = async (files: File[]) => {
-    if (!files.length) return;
-    const selected = files.slice(0, 100);
-    const entries = await Promise.all(selected.map(async (file) => ({ path: `images/${file.name}`, bytes: new Uint8Array(await file.arrayBuffer()) })));
-    const result = matchExternalIllustrationArchive(entries, slots);
-    const filesByName = new Map(selected.map((file) => [file.name.toLowerCase(), file]));
-    const matched = result.matches.flatMap((match) => {
-      if (!match.bytes || !match.sourcePath || match.error) return [];
-      const name = match.sourcePath.split("/").pop()?.toLowerCase() || "";
-      const file = filesByName.get(name);
-      return file ? [{ match, file }] : [];
-    });
-    setCandidates((current) => current.map((candidate) => {
-      const found = matched.find(({ match }) => match.slotId === candidate.slotId);
-      return found ? { ...candidate, file: found.file, sourcePath: found.file.name, decision: "accept", error: undefined } : candidate;
-    }));
-    const rejected = result.matches.filter((match) => match.sourcePath && match.error).map((match) => `${match.slotId}: ${match.error}`);
-    setUploadIssues([...result.issues, ...rejected]);
-    const firstUnmatched = slots.findIndex((slot) => !matched.some(({ match }) => match.slotId === slot.id) && slot.status !== "ready");
-    if (firstUnmatched >= 0) setActiveIndex(firstUnmatched);
-    onNotify(`${matched.length} of ${selected.length} selected images matched automatically`);
+  const chooseIllustrationZip = async (file: File) => {
+    setUploadIssues([]);
+    if (!/\.zip$/i.test(file.name)) {
+      setUploadIssues(["Choose the single illustration ZIP returned by the external AI."]);
+      return;
+    }
+    if (file.size > 100 * 1024 * 1024) {
+      setUploadIssues(["The illustration ZIP is larger than the 100 MB safety limit."]);
+      return;
+    }
+    setBusy(true);
+    try {
+      const archive = unzipSync(new Uint8Array(await file.arrayBuffer()));
+      const archiveEntries = Object.entries(archive).filter(([path]) => !path.endsWith("/"));
+      const illustrationPaths = archiveEntries.filter(([path]) => /(^|\/)images\/(?:cover|CH-\d+-IMG-\d+)\.(?:jpe?g|png|webp)$/i.test(path));
+      const commonWrapper = illustrationPaths.length && illustrationPaths.every(([path]) => path.includes("/") && !/^images\//i.test(path))
+        ? illustrationPaths[0][0].slice(0, illustrationPaths[0][0].toLowerCase().indexOf("images/"))
+        : "";
+      const wrapperIsShared = Boolean(commonWrapper) && illustrationPaths.every(([path]) => path.startsWith(commonWrapper));
+      const entries = archiveEntries.map(([path, bytes]) => ({ path: wrapperIsShared && path.startsWith(commonWrapper) ? path.slice(commonWrapper.length) : path, bytes }));
+      const result = matchExternalIllustrationArchive(entries, slots);
+      const matched = result.matches.flatMap((match) => {
+        if (!match.bytes || !match.sourcePath || !match.mimeType || match.error) return [];
+        const name = match.sourcePath.split("/").pop() || `${match.slotId}.jpg`;
+        const buffer = match.bytes.slice().buffer;
+        return [{ match, file: new File([buffer], name, { type: match.mimeType }) }];
+      });
+      const nextCandidates = candidates.map((candidate) => {
+        const found = matched.find(({ match }) => match.slotId === candidate.slotId);
+        const failure = result.matches.find((match) => match.slotId === candidate.slotId)?.error;
+        return found
+          ? { ...candidate, file: found.file, sourcePath: found.match.sourcePath, decision: "accept" as const, error: undefined }
+          : { ...candidate, file: undefined, sourcePath: undefined, decision: "accept" as const, error: failure };
+      });
+      const rejected = result.matches.filter((match) => match.error).map((match) => `${match.slotId}: ${match.error}`);
+      const issues = [...result.issues, ...rejected];
+      setCandidates(nextCandidates);
+      setUploadIssues(issues);
+      const firstUnmatched = slots.findIndex((slot) => !matched.some(({ match }) => match.slotId === slot.id) && slot.status !== "ready");
+      if (firstUnmatched >= 0) setActiveIndex(firstUnmatched);
+      if (matched.length !== slots.length) {
+        onNotify(`${matched.length} of ${slots.length} images matched. Nothing was changed; repair the ZIP or review the missing slots.`);
+        return;
+      }
+      onNotify(`All ${matched.length} images matched. Uploading and placing them automatically…`);
+      await onImport(nextCandidates, result.issues);
+      onNotify(`All ${matched.length} illustrations were placed in their correct cover and chapters.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The illustration ZIP could not be read";
+      setUploadIssues([`The illustration ZIP could not be read: ${message}`]);
+      onNotify("The illustration ZIP could not be read. No book pages were changed.");
+    } finally {
+      setBusy(false);
+    }
   };
   const readyCount = slots.filter((slot) => slot.status === "ready").length;
   const stagedCount = candidates.filter((candidate) => candidate.file && candidate.decision === "accept" && !candidate.error).length;
@@ -2775,9 +2808,9 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
   const resolvedCount = slots.filter((slot) => slot.status === "ready" || candidates.some((candidate) => candidate.slotId === slot.id && candidate.file && candidate.decision === "accept" && !candidate.error)).length;
   return <main className="external-manuscript-page external-illustration-page">
     <button className="text-button" onClick={onBack}>← Back to Designer</button>
-    <header className="external-manuscript-hero"><div><p className="eyebrow">STAGE TWO · SIMPLE IMAGE SESSION</p><h1>One prompt. Type NEXT. Upload everything once.</h1><p>No API and no repetitive chapter cards. The complete prompt controls the sequence while the external AI generates one high-quality image at a time.</p></div><span>{resolvedCount}/{slots.length} ready</span></header>
-    <section className="simple-image-steps" aria-label="Simple external image workflow"><div><b>1</b><span>Copy the complete prompt<small>Paste it once into ChatGPT or another image AI.</small></span></div><div><b>2</b><span>Download, then type NEXT<small>Repeat NEXT until the queue is finished.</small></span></div><div><b>3</b><span>Select all images once<small>Book Studio matches the filenames automatically.</small></span></div></section>
-    <section className="image-session-actions"><div><p className="eyebrow">ONE-TIME PROMPT</p><h2>Start the complete image session</h2><p>The AI reads every chapter scene now, creates the first image, then waits for <b>NEXT</b> before creating each following image.</p><button className="primary" onClick={() => void copyPrompt()}>Copy complete image prompt</button><button className="secondary" onClick={downloadPrompt}>Download prompt</button></div><label className="bulk-image-upload"><input type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={(event) => void chooseImages(Array.from(event.target.files || []))}/><span>↑</span><b>Select all downloaded images</b><small>Expected names: cover.jpg, CH-01-IMG-01.jpg, CH-02-IMG-01.jpg…</small></label></section>
+    <header className="external-manuscript-hero"><div><p className="eyebrow">STAGE TWO · BATCH ILLUSTRATION PACKAGE</p><h1>One prompt. One ZIP. Automatic placement.</h1><p>No image API and no repeated NEXT messages. The prompt contains every chapter scene and exact filename; the completed ZIP is checked and placed into the book in one upload.</p></div><span>{resolvedCount}/{slots.length} ready</span></header>
+    <section className="simple-image-steps" aria-label="Simple external image workflow"><div><b>1</b><span>Copy one complete prompt<small>Paste it once into an external AI that can create files.</small></span></div><div><b>2</b><span>Download one finished ZIP<small>The AI generates and packages every requested image.</small></span></div><div><b>3</b><span>Upload the ZIP once<small>Book Studio verifies filenames and places every image automatically.</small></span></div></section>
+    <section className="image-session-actions"><div><p className="eyebrow">ONE-TIME PROMPT</p><h2>Request the complete illustration ZIP</h2><p>The AI receives every scene, quality rule and destination filename now. It should return one ZIP containing the cover and all chapter illustrations.</p><button className="primary" onClick={() => void copyPrompt()}>Copy complete ZIP prompt</button><button className="secondary" onClick={downloadPrompt}>Download prompt</button></div><label className={`bulk-image-upload${busy ? " busy" : ""}`}><input type="file" accept=".zip,application/zip,application/x-zip-compressed" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void chooseIllustrationZip(file); }}/><span>{busy ? "…" : "↑"}</span><b>{busy ? "Checking and placing illustrations…" : "Upload the completed illustration ZIP"}</b><small>One ZIP with images/cover.jpg, images/CH-01-IMG-01.jpg, images/CH-02-IMG-01.jpg…</small></label></section>
     {uploadIssues.length > 0 && <div className="bulk-image-issues">{uploadIssues.map((issue) => <span key={issue}>{issue}</span>)}</div>}
     {activeSlot && <section className="active-image-slot"><div className="active-image-preview">{activeCandidate?.file ? <LocalImagePreview file={activeCandidate.file} alt={activeSlot.altText}/> : activeSlot.imageUrl ? <img src={activeSlot.imageUrl} alt={activeSlot.altText}/> : <span>Illustration pending</span>}</div><div className="active-image-copy"><p className="eyebrow">{activeIndex + 1} OF {slots.length} · {activeSlot.id}</p><h2>{activeSlot.chapterTitle}</h2><p>{activeSlot.sceneBrief}</p><div className="active-image-actions"><button disabled={activeIndex === 0} onClick={() => setActiveIndex((index) => Math.max(0, index - 1))}>← Previous</button><button onClick={() => void copySlotPrompt(activeSlot)}>Copy only this prompt</button><label>{activeCandidate?.file || activeSlot.imageUrl ? "Replace image" : "Upload this image"}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void chooseImage(activeSlot, file); }}/></label><button disabled={activeIndex === slots.length - 1} onClick={() => setActiveIndex((index) => Math.min(slots.length - 1, index + 1))}>Next →</button></div></div></section>}
     <section className="compact-image-review"><header><div><p className="eyebrow">QUICK REVIEW</p><h2>{resolvedCount} of {slots.length} images ready</h2></div><span>Click a thumbnail only when you need to inspect or replace it.</span></header><div>{slots.map((slot, index) => { const candidate = candidates.find((item) => item.slotId === slot.id); const ready = Boolean(candidate?.file || slot.imageUrl); return <button key={slot.id} className={`${ready ? "ready" : "pending"} ${activeIndex === index ? "active" : ""}`} onClick={() => setActiveIndex(index)}><span>{candidate?.file ? <LocalImagePreview file={candidate.file} alt=""/> : slot.imageUrl ? <img src={slot.imageUrl} alt=""/> : <i>{index + 1}</i>}</span><b>{slot.id}</b><small>{ready ? "Ready" : "Missing"}</small></button>; })}</div><footer><button className="secondary" onClick={onReplaceManuscript}>Replace manuscript</button><button className="secondary" onClick={onOpenDesigner}>Continue with pending images</button>{hasChanges && <button className="primary" disabled={busy} onClick={() => { setBusy(true); void onImport(candidates, uploadIssues).finally(() => setBusy(false)); }}>{busy ? "Saving images…" : "Import ready images"}</button>}</footer></section>

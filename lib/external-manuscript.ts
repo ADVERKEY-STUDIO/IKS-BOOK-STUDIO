@@ -343,15 +343,17 @@ export function buildExternalIllustrationPrompt(project: ExternalIllustrationPro
     const context = plainReaderText(chapter?.body || chapter?.context || "").slice(0, 1800);
     const dimensions = slot.role === "cover" ? "portrait A4, 2480 × 3508 px, full bleed" : "landscape 4:3, 2400 × 1800 px";
     return `## ${index + 1}. ${slot.id} — ${slot.role === "cover" ? "FRONT COVER" : slot.chapterTitle}
-- Save/download filename: ${slot.filename.split("/").pop()}
+- Exact ZIP path: ${slot.filename}
 - Format: ${dimensions}
 - Scene: ${slot.sceneBrief}
 ${slot.role === "cover" ? `- Book subject: ${project.title}` : `- Chapter context: ${context}`}
 - Caption intent: ${slot.caption}`;
   }).join("\n\n");
-  return `# IKS BOOK STUDIO — COMPLETE IMAGE SESSION
+  const zipTree = project.slots.map((slot) => `- ${slot.filename}`).join("\n");
+  const zipName = `${project.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "book"}-illustrations.zip`;
+  return `# IKS BOOK STUDIO — COMPLETE ILLUSTRATION ZIP REQUEST
 
-The manuscript for “${project.title}” is complete and approved. This is one continuous image-generation session. Read the complete queue now, generate only item 1, and wait. Whenever the designer replies NEXT, generate only the next numbered item.
+The manuscript for “${project.title}” is complete and approved. Create the entire illustration package in this one response. Use your image-generation tool separately for every item below, inspect every finished image, and return one downloadable ZIP containing the actual full-resolution raster files.
 
 ## BOOK ART BIBLE
 - Reader: ${project.audience} (${project.readingLevel})
@@ -370,23 +372,31 @@ The manuscript for “${project.title}” is complete and approved. This is one 
 - Do NOT return image links or hotlinked web assets. Return the actual image files.
 - Preserve faces and hands carefully. Keep children age-appropriate and scenes emotionally safe.
 - Make every chapter image visually distinct while keeping one coherent book style.
+- Every image must depict its own requested chapter scene. Do not reuse the same composition, landscape, people or background with minor changes.
+- Before packaging, visually inspect every image at full size. Regenerate any result that looks like a placeholder, icon, diagram, unfinished draft, corrupted file, repeated scene or generic stock landscape.
 
 ## IMAGE QUEUE
 
 ${requests}
 
-## REQUIRED WORKFLOW
-- Silently read the complete queue and visual rules before generating anything.
-- Generate item 1 now. After returning its image, wait for the exact reply NEXT.
-- Each NEXT advances by exactly one numbered item. Never skip, combine or repeat items.
-- Return the actual full-resolution image itself, followed by one short line containing only its required filename.
-- Keep this conversation as the shared visual reference so recurring characters and style remain consistent.
-- Generate exactly ONE requested image at a time.
-- Never create substitute files, thumbnails, icons, diagrams, contact sheets or a ZIP containing fake placeholders.
-- Do not start another destination until the designer replies NEXT.
-- The designer will download the images and upload all of them to Book Studio together after the session.
+## REQUIRED ZIP TREE
 
-Begin now with item 1 only.`;
+Create exactly these image paths at the root of the ZIP:
+
+${zipTree}
+
+## REQUIRED BATCH WORKFLOW
+- Silently read the complete queue and visual rules before generating anything.
+- Generate every requested image with the image-generation tool. Do not ask the designer to type NEXT and do not require another prompt.
+- Work through the queue internally, one real image-generation operation per destination, while using earlier approved results as the shared style reference.
+- Save each actual full-resolution raster image at its exact path above. The ZIP root must contain the \`images\` folder directly; do not add an enclosing project folder.
+- A JPG slot may instead use the same path stem with \`.png\` or \`.webp\` when the image tool cannot export JPG. Do not change any other part of the filename.
+- Do not create substitute files, thumbnails, icons, diagrams, contact sheets, SVGs, text descriptions or fake image placeholders.
+- Open and visually inspect all generated files before packaging. Confirm that each file is a distinct, complete editorial illustration matching its destination.
+- Put only the requested finished images in one ZIP named \`${zipName}\`.
+- Return the ZIP as the final downloadable file. Do not return the images one by one and do not stop midway.
+
+Begin the complete batch now and finish by attaching only \`${zipName}\`.`;
 }
 
 export function buildExternalIllustrationSlotPrompt(project: ExternalIllustrationPromptProject, slot: ExternalIllustrationSlot) {

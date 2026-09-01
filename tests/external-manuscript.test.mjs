@@ -78,18 +78,20 @@ test("approved manuscript creates one cover and one stable image slot per real c
   assert.equal(slots[1].filename, "images/CH-01-IMG-01.jpg");
 });
 
-test("second-stage session prompt queues every scene while generating one image per NEXT", () => {
+test("second-stage prompt requests one complete, quality-checked illustration ZIP", () => {
   const slots = [{ id: "COVER", role: "cover", chapterTitle: "Front cover", filename: "images/cover.jpg", sceneBrief: "Cover", altText: "Cover", caption: "Cover", status: "pending" }, { id: "CH-01-IMG-01", role: "chapter", chapterId: 1, chapterTitle: "Seeing Rasa", filename: "images/CH-01-IMG-01.jpg", sceneBrief: "A dancer performs for attentive children", altText: "Children watching a dancer", caption: "Expression and attention", status: "pending" }];
   const project = { ...settings, chapters: [{ id: 1, title: "Seeing Rasa", body: "A chapter about expression, gesture and an attentive audience." }], slots };
   const prompt = buildExternalIllustrationPrompt(project);
-  assert.match(prompt, /COMPLETE IMAGE SESSION/);
+  assert.match(prompt, /COMPLETE ILLUSTRATION ZIP REQUEST/);
   assert.match(prompt, /Do NOT produce SVG/);
   assert.match(prompt, /Do NOT imitate the simple diagram-like placeholder artwork/);
-  assert.match(prompt, /Generate item 1 now/);
-  assert.match(prompt, /Each NEXT advances by exactly one numbered item/);
-  assert.match(prompt, /Save\/download filename: CH-01-IMG-01\.jpg/);
+  assert.match(prompt, /Do not ask the designer to type NEXT/);
+  assert.match(prompt, /return one downloadable ZIP/);
+  assert.match(prompt, /Exact ZIP path: images\/CH-01-IMG-01\.jpg/);
+  assert.match(prompt, /The ZIP root must contain the `images` folder directly/);
+  assert.match(prompt, /visually inspect all generated files/);
   assert.match(prompt, /A dancer performs for attentive children/);
-  assert.match(prompt, /Never create substitute files, thumbnails, icons, diagrams, contact sheets or a ZIP/);
+  assert.match(prompt, /Do not create substitute files, thumbnails, icons, diagrams, contact sheets, SVGs/);
   const slotPrompt = buildExternalIllustrationSlotPrompt(project, slots[1]);
   assert.match(slotPrompt, /Generate exactly ONE finished illustration/);
   assert.match(slotPrompt, /A dancer performs for attentive children/);
@@ -121,11 +123,11 @@ test("site exposes the external workflow, supported imports and DOCX extraction 
   assert.match(page, /accept="\.md,\.markdown,\.txt,\.docx,\.zip"/);
   assert.match(page, /Use the simple external-AI workflow/);
   assert.match(page, /Accept manuscript & create image prompt/);
-  assert.match(page, /One prompt\. Type NEXT\. Upload everything once/);
-  assert.match(page, /Copy complete image prompt/);
-  assert.match(page, /Select all downloaded images/);
-  assert.match(page, /multiple accept="image\/png,image\/jpeg,image\/webp"/);
-  assert.doesNotMatch(page, /Upload illustration ZIP/);
+  assert.match(page, /One prompt\. One ZIP\. Automatic placement/);
+  assert.match(page, /Copy complete ZIP prompt/);
+  assert.match(page, /Upload the completed illustration ZIP/);
+  assert.match(page, /accept="\.zip,application\/zip,application\/x-zip-compressed"/);
+  assert.doesNotMatch(page, /Type NEXT/);
   assert.match(page, /Continue with pending images/);
   assert.match(worker, /\/api\/manuscript\/extract/);
   assert.match(worker, /mammoth\.extractRawText/);
