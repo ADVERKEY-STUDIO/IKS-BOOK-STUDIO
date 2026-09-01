@@ -3277,8 +3277,43 @@ function defaultDesignerRevision(html = ""): DesignerPageRevision {
   return { html, intentionalBlank: false, deleted: false, layoutLocked: false, backgroundColor: "#fffdf8", watermarkText: "", watermarkOpacity: .12, watermarkRotation: -25, contentVisible: true, watermarkVisible: true, fontFamily: "Georgia, serif", fontSize: 15, textColor: "#243b34", lineHeight: 1.55, letterSpacing: 0, paragraphSpacing: 11, columns: 1, columnGap: 28, pagePadding: 60, borderStyle: "none", borderColor: "#b4863e", borderWidth: 2, borderInset: 10, borderRadius: 0, backgroundSize: "cover", backgroundPosition: "center", backgroundOpacity: 1, watermarkRepeat: false, watermarkX: 50, watermarkY: 50, savedAt: new Date().toISOString() };
 }
 
+const SAFE_WRAPPED_IMAGE_WIDTH = 260;
+
+function repairUnsafeDesignerImageHtml(html: string) {
+  if (!html || !/<img\b/i.test(html)) return html;
+  return html.replace(/<img\b([^>]*)>/gi, (tag, attributes: string) => {
+    if (/pointer-events\s*:\s*none/i.test(attributes) || /data-free-image/i.test(attributes)) return tag;
+    const styleMatch = attributes.match(/\sstyle=(['"])([\s\S]*?)\1/i);
+    if (!styleMatch) return tag;
+    const styles = new Map<string, string>();
+    styleMatch[2].split(";").forEach((declaration) => {
+      const separator = declaration.indexOf(":");
+      if (separator < 0) return;
+      const property = declaration.slice(0, separator).trim().toLowerCase();
+      const value = declaration.slice(separator + 1).trim();
+      if (property && value) styles.set(property, value);
+    });
+    const float = styles.get("float")?.toLowerCase();
+    if (float !== "left" && float !== "right") return tag;
+    const width = parseFloat(styles.get("width") || "");
+    const height = parseFloat(styles.get("height") || "");
+    const unsafeRatio = Number.isFinite(width) && Number.isFinite(height) && height > 0 && (width / height < .45 || width / height > 2.8);
+    if (!Number.isFinite(width) || width < 160 || width > 280 || unsafeRatio) styles.set("width", `${SAFE_WRAPPED_IMAGE_WIDTH}px`);
+    styles.set("height", "auto");
+    styles.set("max-width", "42%");
+    styles.set("display", "block");
+    styles.set("position", "relative");
+    styles.delete("left"); styles.delete("right"); styles.delete("top"); styles.delete("bottom");
+    styles.set("margin", float === "left" ? "0 18px 12px 0" : "0 0 12px 18px");
+    const repairedStyle = [...styles].map(([property, value]) => `${property}:${value}`).join(";");
+    const wrapAttribute = ` data-designer-wrap="${float === "left" ? "left" : "right"}"`;
+    const nextAttributes = attributes.replace(styleMatch[0], ` style="${repairedStyle}"`).replace(/\sdata-designer-wrap=(['"])[\s\S]*?\1/i, "");
+    return `<img${nextAttributes}${wrapAttribute}>`;
+  });
+}
+
 function hydrateDesignerRevision(revision: Partial<DesignerPageRevision> | undefined, html = ""): DesignerPageRevision {
-  return { ...defaultDesignerRevision(html), ...(revision ?? {}), html: revision?.html ?? html };
+  return { ...defaultDesignerRevision(html), ...(revision ?? {}), html: repairUnsafeDesignerImageHtml(revision?.html ?? html) };
 }
 
 function hydrateDesignerOverride(page: DesignerPageOverride): DesignerPageOverride {
@@ -3381,6 +3416,8 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
   const [selectedObject, setSelectedObject] = useState<"page" | "text box" | "image">("page");
   const [selectedObjectIdentity, setSelectedObjectIdentity] = useState<DesignerObjectIdentity | null>(null);
   const [selectedImageSize, setSelectedImageSize] = useState<DesignerImageSize>({ width: 420, height: 300 });
+  const [selectedImageLayout, setSelectedImageLayout] = useState<"block" | "wrap-left" | "wrap-right" | "free">("block");
+  const [imageAspectLocked, setImageAspectLocked] = useState(true);
   const [undoStack, setUndoStack] = useState<DesignerPageRevision[]>([]);
   const [redoStack, setRedoStack] = useState<DesignerPageRevision[]>([]);
   const [issues, setIssues] = useState<string[]>([]);
@@ -3673,7 +3710,12 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
       setSelectedObjectIdentity(identity);
       setSelectedObject(kind);
       setPanel(kind === "image" ? "image" : "text");
-      if (kind === "image") setSelectedImageSize(readImageSize(node));
+      if (kind === "image") {
+        const { frame } = imageParts(node);
+        const float = frame.style.float;
+        setSelectedImageSize(readImageSize(node));
+        setSelectedImageLayout(frame.classList.contains("designer-free-image") ? "free" : float === "left" ? "wrap-left" : float === "right" ? "wrap-right" : "block");
+      }
     }
     if (gainedIdentity) {
       const root = bookEditors.current.get(slotId);
@@ -4220,16 +4262,79 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]);
     setRedoStack([]);
   };
+  const setImageLayout = (layout: "block" | "wrap-left" | "wrap-right" | "free") => {
+    const node = resolveSelectedObject();
+    if (!node || node.dataset.designerLocked === "true") return;
+    const { frame } = imageParts(node);
+    const isFree = frame.classList.contains("designer-free-image");
+    if (isFree) {
+      frame.style.position = "absolute";
+      frame.style.float = "none";
+      frame.style.margin = "0";
+      frame.dataset.designerWrap = "free";
+      setSelectedImageLayout("free");
+      captureObjectPageHtml();
+      return;
+    }
+    setUndoStack((stack) => [...stack.slice(-29), currentSnapshot()]);
+    setRedoStack([]);
+    frame.style.position = "relative";
+    frame.style.left = ""; frame.style.right = ""; frame.style.top = ""; frame.style.bottom = "";
+    frame.style.display = "block";
+    frame.style.height = "auto";
+    if (layout === "wrap-left" || layout === "wrap-right") {
+      frame.style.float = layout === "wrap-left" ? "left" : "right";
+      frame.style.width = `${SAFE_WRAPPED_IMAGE_WIDTH}px`;
+      frame.style.maxWidth = "42%";
+      frame.style.margin = layout === "wrap-left" ? "0 18px 12px 0" : "0 0 12px 18px";
+      frame.dataset.designerWrap = layout === "wrap-left" ? "left" : "right";
+    } else {
+      frame.style.float = "none";
+      frame.style.width = "100%";
+      frame.style.maxWidth = "100%";
+      frame.style.margin = "18px auto";
+      frame.dataset.designerWrap = "block";
+      layout = "block";
+    }
+    setSelectedImageLayout(layout);
+    setSelectedImageSize(readImageSize(node));
+    captureObjectPageHtml();
+    setMessage(layout === "block" ? "Image reset to a safe block layout." : "Safe text wrapping applied. A readable text column is protected.");
+  };
   const resizeSelectedImage = (dimension: keyof DesignerImageSize, rawValue: number) => {
     const node = resolveSelectedObject();
     if (!node || node.dataset.designerLocked === "true" || !Number.isFinite(rawValue)) return;
     beginImageResize();
-    const value = Math.max(80, Math.min(520, Math.round(rawValue)));
     const { frame } = imageParts(node);
+    const isFree = frame.classList.contains("designer-free-image");
+    const isWrapped = !isFree && (frame.style.float === "left" || frame.style.float === "right");
+    const value = Math.max(80, Math.min(isWrapped && dimension === "width" ? 280 : 520, Math.round(rawValue)));
+    const previous = readImageSize(node);
+    const ratio = previous.height > 0 ? previous.width / previous.height : 1;
     frame.style[dimension] = `${value}px`;
+    let nextSize = { ...previous, [dimension]: value };
+    if (!isFree) {
+      frame.style.height = "auto";
+      if (isWrapped) {
+        const safeWidth = Math.max(160, Math.min(280, value));
+        frame.style.width = `${safeWidth}px`;
+        frame.style.maxWidth = "42%";
+        nextSize = { width: safeWidth, height: Math.max(80, Math.round(safeWidth / Math.max(.1, ratio))) };
+      }
+    } else if (imageAspectLocked && ratio > 0) {
+      if (dimension === "width") {
+        const nextHeight = Math.max(80, Math.min(520, Math.round(value / ratio)));
+        frame.style.height = `${nextHeight}px`;
+        nextSize.height = nextHeight;
+      } else {
+        const nextWidth = Math.max(80, Math.min(520, Math.round(value * ratio)));
+        frame.style.width = `${nextWidth}px`;
+        nextSize.width = nextWidth;
+      }
+    }
     const location = rootForNode(frame);
     if (location) clampFreeImageFrame(frame, location.root);
-    setSelectedImageSize((current) => ({ ...current, [dimension]: value }));
+    setSelectedImageSize(nextSize);
     captureObjectPageHtml();
   };
   const finishImageResize = () => {
@@ -4390,7 +4495,15 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     if (draft.intentionalBlank) found.push("Intentional blank page — accepted.");
     if (!draft.intentionalBlank && root && root.scrollHeight > root.clientHeight + 2) found.push("Text or objects overflow the printable page.");
     if (draft.fontSize < 11) found.push("Body text is smaller than the recommended print size.");
-    root?.querySelectorAll("img").forEach((image) => { if (!image.getAttribute("alt")) found.push("An image is missing accessibility text."); if (image.naturalWidth && image.clientWidth > image.naturalWidth) found.push("An image may be too low-resolution for its displayed size."); });
+    root?.querySelectorAll("img").forEach((image) => {
+      if (!image.getAttribute("alt")) found.push("An image is missing accessibility text.");
+      if (image.naturalWidth && image.clientWidth > image.naturalWidth) found.push("An image may be too low-resolution for its displayed size.");
+      if (image.closest(".designer-free-image")) return;
+      const style = window.getComputedStyle(image);
+      const wrapped = style.float === "left" || style.float === "right";
+      if (wrapped && root && image.clientWidth > root.clientWidth * .42 + 1) found.push("A wrapped image leaves too little room for readable text. Reset it to Block or reduce its width.");
+      if (wrapped && image.clientWidth && image.clientHeight / image.clientWidth > 2.2) found.push("A wrapped image is excessively tall and may create a narrow text column. Reset its layout.");
+    });
     root?.querySelectorAll<HTMLElement>("*").forEach((node) => { const box = node.getBoundingClientRect(); const page = root.getBoundingClientRect(); if (box.right > page.right + 2 || box.left < page.left - 2) found.push("An object crosses the print-safe page boundary."); });
     root?.querySelectorAll<HTMLElement>(".designer-free-image").forEach((node) => { const box = node.getBoundingClientRect(); const page = root.getBoundingClientRect(); const scale = root.offsetHeight ? page.height / root.offsetHeight : 1; if (box.bottom > page.bottom - (58 * scale) + 2) found.push("A freely placed image overlaps the page-number or footer area. Move it upward or make it shorter."); });
     setIssues([...new Set(found)]); setPanel("preflight"); setMessage(found.length ? `${found.length} preflight item${found.length === 1 ? "" : "s"} found.` : "Preflight passed for this page.");
@@ -4445,9 +4558,11 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
       {panel === "page" && <><section><h3>Page structure</h3><label className="designer-check"><input type="checkbox" checked={draft.intentionalBlank} onChange={(event) => changeDraft({ intentionalBlank: event.target.checked })}/> Intentional blank</label><label className="designer-check"><input type="checkbox" checked={draft.layoutLocked} onChange={(event) => changeDraft({ layoutLocked: event.target.checked })}/> Lock this page during reflow</label><label className="designer-check"><input type="checkbox" checked={draft.deleted} onChange={(event) => changeDraft({ deleted: event.target.checked })}/> Remove from final book</label><div className="designer-row"><button onClick={() => void movePage(-1)}>Move up</button><button onClick={() => void movePage(1)}>Move down</button></div><div className="designer-row" style={{marginTop:"8px"}}><label style={{display:"flex",alignItems:"center",gap:"6px",fontSize:"9px",fontWeight:"800"}}>Move to #<input key={selectedId} id="move-page-input" type="number" min="1" max={order.length} defaultValue={order.indexOf(selectedId)+1} style={{width:"60px",border:"1px solid #d6ccbd",padding:"6px",textAlign:"center"}} /></label><button onClick={() => { const el=document.getElementById("move-page-input") as HTMLInputElement | null; const v=Number(el?.value); if(v>=1 && v<=order.length) void movePageTo(v-1); }} disabled={busy} style={{padding:"7px 10px",fontSize:"9px",fontWeight:"800"}}>Go</button></div><div style={{fontSize:"8px",color:"var(--muted)",marginTop:"4px"}}>Page {order.indexOf(selectedId)+1} of {order.length} — built-in number system</div><button onClick={() => void deletePage()} disabled={busy} style={{marginTop:"8px",background:"#a9322e",color:"white",borderColor:"#a9322e",width:"100%",padding:"9px",fontWeight:"800"}}>Delete page</button>{selected.chapterId && <button className="primary" onClick={() => void balanceLayout("chapter")} disabled={busy || draft.layoutLocked}>Balance this chapter</button>}</section><section><h3>Page layout</h3><label>Margins <span>{draft.pagePadding}px</span><input type="range" min="28" max="100" value={draft.pagePadding} onChange={(event) => changeDraft({ pagePadding: Number(event.target.value) })}/></label><label>Columns<select value={draft.columns} onChange={(event) => changeDraft({ columns: Number(event.target.value) })}><option value="1">One</option><option value="2">Two</option></select></label><label style={{opacity: draft.columns === 1 ? 0.45 : 1}}>Column gap <span>{draft.columns === 1 ? "—" : `${draft.columnGap}px`}</span><input type="range" min="12" max="60" value={draft.columnGap} disabled={draft.columns === 1} onChange={(event) => changeDraft({ columnGap: Number(event.target.value) })}/></label></section><section><h3>Page border</h3><label>Style<select value={draft.borderStyle} onChange={(event) => changeDraft({ borderStyle: event.target.value as DesignerPageRevision["borderStyle"] })}><option value="none">None</option><option value="solid">Single</option><option value="double">Double</option><option value="dashed">Decorative dashed</option></select></label><div className="designer-row"><label>Colour<input type="color" value={draft.borderColor} onChange={(event) => changeDraft({ borderColor: event.target.value })}/></label><label>Width<input type="number" min="1" max="12" value={draft.borderWidth} onChange={(event) => changeDraft({ borderWidth: Number(event.target.value) })}/></label></div><label>Inset <span>{draft.borderInset}px</span><input type="range" min="0" max="50" value={draft.borderInset} onChange={(event) => changeDraft({ borderInset: Number(event.target.value) })}/></label><label>Corner radius <span>{draft.borderRadius}px</span><input type="range" min="0" max="60" value={draft.borderRadius} onChange={(event) => changeDraft({ borderRadius: Number(event.target.value) })}/></label></section><section><h3>Background</h3><label>Colour<input type="color" value={draft.backgroundColor} onChange={(event) => changeDraft({ backgroundColor: event.target.value })}/></label><label className="designer-upload">{busy ? "Uploading background…" : "Upload background"}<input ref={backgroundUploadInputRef} type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={(event) => void uploadBackground(event)}/></label><p className="designer-help">After upload, choose whether to use the background on this page only or throughout the whole book.</p><label>Fit<select value={draft.backgroundSize} onChange={(event) => changeDraft({ backgroundSize: event.target.value as DesignerPageRevision["backgroundSize"] })}><option value="cover">Cover</option><option value="contain">Contain</option><option value="auto">Original size</option><option value="repeat">Tile</option></select></label><label>Opacity <span>{Math.round(draft.backgroundOpacity * 100)}%</span><input type="range" min="0" max="1" step=".05" value={draft.backgroundOpacity} onChange={(event) => changeDraft({ backgroundOpacity: Number(event.target.value) })}/></label><button onClick={() => void applyOpacityToBook()} disabled={busy} style={{marginTop:"6px",width:"100%",padding:"8px",fontSize:"8px",fontWeight:"800",border:"1px solid #c9a86a",background:"#fff8e6",color:"#7a3a18"}}>Apply {Math.round(draft.backgroundOpacity * 100)}% opacity to all {allPages.length} pages</button>{draft.backgroundImageUrl && <button onClick={() => changeDraft({ backgroundImageKey: undefined, backgroundImageUrl: undefined })}>Remove background</button>}</section><section><h3>Book alignment (whole book)</h3><p className="designer-help">Like Google Docs — left, center, right or justify. Applies to every paragraph in the whole book.</p><div className="designer-alignment-row"><button className={project.bookAlignment === "left" || !project.bookAlignment ? "active" : ""} onClick={() => void onCommit({ ...project, bookAlignment: "left" })}><span>☰</span>Left</button><button className={project.bookAlignment === "center" ? "active" : ""} onClick={() => void onCommit({ ...project, bookAlignment: "center" })}><span>☰</span>Centre</button><button className={project.bookAlignment === "right" ? "active" : ""} onClick={() => void onCommit({ ...project, bookAlignment: "right" })}><span>☰</span>Right</button><button className={project.bookAlignment === "justify" ? "active" : ""} onClick={() => void onCommit({ ...project, bookAlignment: "justify" })}><span>☰</span>Justify</button></div></section></>}
       {panel === "text" && <><section><h3>Typography</h3><label>Page font<select value={draft.fontFamily} onChange={(event) => changeDraft({ fontFamily: event.target.value })}><option value="Georgia, serif">Editorial Serif</option><option value="Arial, sans-serif">Clear Sans</option><option value="'Trebuchet MS', sans-serif">Friendly Reader</option><option value="'Noto Serif', serif">Sanskrit Scholar</option><option value="'Noto Sans Devanagari', sans-serif">Devanagari Sans</option></select></label><div className="designer-row"><label>Size<input type="number" min="9" max="34" value={draft.fontSize} onChange={(event) => changeDraft({ fontSize: Number(event.target.value) })}/></label><label>Colour<input type="color" value={draft.textColor} onChange={(event) => changeDraft({ textColor: event.target.value })}/></label></div><label>Line height <span>{draft.lineHeight.toFixed(2)}</span><input type="range" min="1" max="2.2" step=".05" value={draft.lineHeight} onChange={(event) => changeDraft({ lineHeight: Number(event.target.value) })}/></label><label>Letter spacing <span>{draft.letterSpacing}px</span><input type="range" min="-1" max="5" step=".1" value={draft.letterSpacing} onChange={(event) => changeDraft({ letterSpacing: Number(event.target.value) })}/></label><label>Paragraph spacing <span>{draft.paragraphSpacing}px</span><input type="range" min="0" max="35" value={draft.paragraphSpacing} onChange={(event) => changeDraft({ paragraphSpacing: Number(event.target.value) })}/></label></section><section><h3>Selected text box</h3><p className="designer-help">Select a custom text box on the page, then move, resize, layer or lock it.</p><div className="object-nudge"><button onClick={() => moveObject(0,-5)}>↑</button><button onClick={() => moveObject(-5,0)}>←</button><button onClick={() => moveObject(5,0)}>→</button><button onClick={() => moveObject(0,5)}>↓</button></div><label>Width<input type="range" min="120" max="520" defaultValue="360" onChange={(event) => mutateObject("width", `${event.target.value}px`)}/></label><label>Padding<input type="range" min="0" max="40" defaultValue="12" onChange={(event) => mutateObject("padding", `${event.target.value}px`)}/></label><div className="designer-row"><button onClick={() => mutateObject("zIndex", "4")}>Bring front</button><button onClick={() => mutateObject("zIndex", "0")}>Send back</button></div><div className="designer-row"><button onClick={duplicateObject}>Duplicate</button><button onClick={deleteObject}>Delete</button></div><button onClick={() => { if (!selectedNode.current) return; selectedNode.current.dataset.designerLocked = selectedNode.current.dataset.designerLocked === "true" ? "false" : "true"; }}>Lock / unlock object</button></section></>}
       {panel === "image" && <section key={selectedObjectIdentity?.objectId ?? "image-inspector"}><h3>Selected image</h3><p className="designer-help">Click an image once, then resize it continuously. Changes are stored inside the page edition.</p>
-        <label>Width <span>{selectedImageSize.width}px</span><div className="designer-size-control"><input aria-label="Image width slider" type="range" min="80" max="520" value={selectedImageSize.width} onPointerDown={beginImageResize} onPointerUp={finishImageResize} onPointerCancel={finishImageResize} onKeyDown={beginImageResize} onBlur={finishImageResize} onChange={(event) => resizeSelectedImage("width", Number(event.target.value))}/><input aria-label="Image width in pixels" type="number" min="80" max="520" value={selectedImageSize.width} onFocus={beginImageResize} onBlur={finishImageResize} onChange={(event) => resizeSelectedImage("width", Number(event.target.value))}/></div></label>
-        <label>Height <span>{selectedImageSize.height}px</span><div className="designer-size-control"><input aria-label="Image height slider" type="range" min="80" max="520" value={selectedImageSize.height} onPointerDown={beginImageResize} onPointerUp={finishImageResize} onPointerCancel={finishImageResize} onKeyDown={beginImageResize} onBlur={finishImageResize} onChange={(event) => resizeSelectedImage("height", Number(event.target.value))}/><input aria-label="Image height in pixels" type="number" min="80" max="520" value={selectedImageSize.height} onFocus={beginImageResize} onBlur={finishImageResize} onChange={(event) => resizeSelectedImage("height", Number(event.target.value))}/></div></label>
-        <label>Crop / fit<select defaultValue="contain" onChange={(event) => mutateObject("objectFit", event.target.value)}><option value="contain">Fit</option><option value="cover">Fill and crop</option><option value="fill">Stretch</option></select></label><label>Focal position<select defaultValue="center" onChange={(event) => mutateObject("objectPosition", event.target.value)}><option value="center">Centre</option><option value="top">Top</option><option value="bottom">Bottom</option><option value="left">Left</option><option value="right">Right</option></select></label><label>Opacity<input type="range" min="0.1" max="1" step=".05" defaultValue="1" onChange={(event) => mutateObject("opacity", event.target.value)}/></label><label>Rounded corners<input type="range" min="0" max="80" defaultValue="0" onChange={(event) => mutateObject("borderRadius", `${event.target.value}px`)}/></label><label>Border width<input type="range" min="0" max="16" defaultValue="0" onChange={(event) => mutateObject("borderWidth", `${event.target.value}px`)}/></label><label>Border colour<input type="color" defaultValue="#173f37" onChange={(event) => { mutateObject("borderColor", event.target.value); mutateObject("borderStyle", "solid"); }}/></label><label>Rotation<input type="range" min="-30" max="30" defaultValue="0" onChange={(event) => mutateObject("transform", `rotate(${event.target.value}deg)`)}/></label><label>Shadow<select defaultValue="none" onChange={(event) => mutateObject("boxShadow", event.target.value)}><option value="none">None</option><option value="0 6px 16px #0003">Soft</option><option value="0 12px 28px #0005">Strong</option></select></label><div className="designer-row"><button onClick={() => mutateObject("float", "left")}>Wrap right</button><button onClick={() => mutateObject("float", "right")}>Wrap left</button></div><div className="designer-row"><button onClick={() => mutateObject("transform", "scaleX(-1)")}>Flip horizontal</button><button onClick={() => mutateObject("transform", "scaleY(-1)")}>Flip vertical</button></div><div className="object-nudge"><button onClick={() => moveObject(0,-5)}>↑</button><button onClick={() => moveObject(-5,0)}>←</button><button onClick={() => moveObject(5,0)}>→</button><button onClick={() => moveObject(0,5)}>↓</button></div>
+        <label>Layout<select value={selectedImageLayout} onChange={(event) => setImageLayout(event.target.value as "block" | "wrap-left" | "wrap-right" | "free")}><option value="block" disabled={selectedImageLayout === "free"}>Block — recommended</option><option value="wrap-left" disabled={selectedImageLayout === "free"}>Image left · text right</option><option value="wrap-right" disabled={selectedImageLayout === "free"}>Image right · text left</option>{selectedImageLayout === "free" && <option value="free">Free position · no text wrapping</option>}</select></label>
+        {selectedImageLayout === "free" && <label className="designer-check"><input type="checkbox" checked={imageAspectLocked} onChange={(event) => setImageAspectLocked(event.target.checked)}/> Lock aspect ratio</label>}
+        <label>Width <span>{selectedImageSize.width}px</span><div className="designer-size-control"><input aria-label="Image width slider" type="range" min="80" max={selectedImageLayout === "wrap-left" || selectedImageLayout === "wrap-right" ? 280 : 520} value={selectedImageSize.width} onPointerDown={beginImageResize} onPointerUp={finishImageResize} onPointerCancel={finishImageResize} onKeyDown={beginImageResize} onBlur={finishImageResize} onChange={(event) => resizeSelectedImage("width", Number(event.target.value))}/><input aria-label="Image width in pixels" type="number" min="80" max={selectedImageLayout === "wrap-left" || selectedImageLayout === "wrap-right" ? 280 : 520} value={selectedImageSize.width} onFocus={beginImageResize} onBlur={finishImageResize} onChange={(event) => resizeSelectedImage("width", Number(event.target.value))}/></div></label>
+        {selectedImageLayout === "free" ? <label>Height <span>{selectedImageSize.height}px</span><div className="designer-size-control"><input aria-label="Image height slider" type="range" min="80" max="520" value={selectedImageSize.height} onPointerDown={beginImageResize} onPointerUp={finishImageResize} onPointerCancel={finishImageResize} onKeyDown={beginImageResize} onBlur={finishImageResize} onChange={(event) => resizeSelectedImage("height", Number(event.target.value))}/><input aria-label="Image height in pixels" type="number" min="80" max="520" value={selectedImageSize.height} onFocus={beginImageResize} onBlur={finishImageResize} onChange={(event) => resizeSelectedImage("height", Number(event.target.value))}/></div></label> : <p className="designer-help">Height follows the image’s original proportions automatically so text cannot collapse into a narrow column.</p>}
+        <label>Crop / fit<select defaultValue="contain" onChange={(event) => mutateObject("objectFit", event.target.value)}><option value="contain">Fit</option><option value="cover">Fill and crop</option><option value="fill">Stretch</option></select></label><label>Focal position<select defaultValue="center" onChange={(event) => mutateObject("objectPosition", event.target.value)}><option value="center">Centre</option><option value="top">Top</option><option value="bottom">Bottom</option><option value="left">Left</option><option value="right">Right</option></select></label><label>Opacity<input type="range" min="0.1" max="1" step=".05" defaultValue="1" onChange={(event) => mutateObject("opacity", event.target.value)}/></label><label>Rounded corners<input type="range" min="0" max="80" defaultValue="0" onChange={(event) => mutateObject("borderRadius", `${event.target.value}px`)}/></label><label>Border width<input type="range" min="0" max="16" defaultValue="0" onChange={(event) => mutateObject("borderWidth", `${event.target.value}px`)}/></label><label>Border colour<input type="color" defaultValue="#173f37" onChange={(event) => { mutateObject("borderColor", event.target.value); mutateObject("borderStyle", "solid"); }}/></label><label>Rotation<input type="range" min="-30" max="30" defaultValue="0" onChange={(event) => mutateObject("transform", `rotate(${event.target.value}deg)`)}/></label><label>Shadow<select defaultValue="none" onChange={(event) => mutateObject("boxShadow", event.target.value)}><option value="none">None</option><option value="0 6px 16px #0003">Soft</option><option value="0 12px 28px #0005">Strong</option></select></label><button onClick={() => setImageLayout(selectedImageLayout === "free" ? "free" : "block")}>Reset image layout</button><div className="designer-row"><button onClick={() => mutateObject("transform", "scaleX(-1)")}>Flip horizontal</button><button onClick={() => mutateObject("transform", "scaleY(-1)")}>Flip vertical</button></div><div className="object-nudge"><button onClick={() => moveObject(0,-5)}>↑</button><button onClick={() => moveObject(-5,0)}>←</button><button onClick={() => moveObject(5,0)}>→</button><button onClick={() => moveObject(0,5)}>↓</button></div>
         <label className="designer-upload">Replace image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={async (event) => { const file = event.target.files?.[0]; const node = resolveSelectedObject(); const visual = node ? imageParts(node).visual : null; if (!file || !visual) return; const image = await uploadAsset(file); visual.src = image.url; captureObjectPageHtml(); }}/></label><label>Alternative text<input placeholder="Describe this image" onChange={(event) => { const node = resolveSelectedObject(); const visual = node ? imageParts(node).visual : null; if (visual) { visual.alt = event.target.value; captureObjectPageHtml(); } }}/></label><label>Caption<input placeholder="Image caption" onChange={(event) => { const node = resolveSelectedObject(); const figure = node?.closest("figure"); const caption = figure?.querySelector("figcaption"); if (caption) { caption.textContent = event.target.value; captureObjectPageHtml(); } }}/></label><div className="designer-row"><button onClick={duplicateObject}>Duplicate</button><button onClick={deleteObject}>Remove</button></div><button onClick={() => { const node = resolveSelectedObject(); if (!node) return; node.dataset.designerLocked = node.dataset.designerLocked === "true" ? "false" : "true"; captureObjectPageHtml(); }}>Lock / unlock image</button></section>}
       {panel === "layers" && <><section><h3>Layers</h3><label className="designer-check"><input type="checkbox" checked={draft.contentVisible} onChange={(event) => changeDraft({ contentVisible: event.target.checked })}/> Content and objects</label><label className="designer-check"><input type="checkbox" checked={draft.watermarkVisible} onChange={(event) => changeDraft({ watermarkVisible: event.target.checked })}/> Watermark</label><label className="designer-check"><input type="checkbox" checked={Boolean(draft.backgroundImageUrl)} onChange={(event) => !event.target.checked && changeDraft({ backgroundImageUrl: undefined, backgroundImageKey: undefined })}/> Background image</label></section><section><h3>Watermark</h3><label>Text<input value={draft.watermarkText} onChange={(event) => changeDraft({ watermarkText: event.target.value })}/></label><label className="designer-upload">Upload logo<input type="file" accept="image/png,image/jpeg,image/webp" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; const image = await uploadAsset(file); changeDraft({ watermarkImageKey: image.key, watermarkImageUrl: image.url }); }}/></label><label>Opacity<input type="range" min="0" max=".7" step=".01" value={draft.watermarkOpacity} onChange={(event) => changeDraft({ watermarkOpacity: Number(event.target.value) })}/></label><label>Rotation<input type="range" min="-90" max="90" value={draft.watermarkRotation} onChange={(event) => changeDraft({ watermarkRotation: Number(event.target.value) })}/></label><label>Horizontal position<input type="range" min="10" max="90" value={draft.watermarkX} onChange={(event) => changeDraft({ watermarkX: Number(event.target.value) })}/></label><label>Vertical position<input type="range" min="10" max="90" value={draft.watermarkY} onChange={(event) => changeDraft({ watermarkY: Number(event.target.value) })}/></label><label className="designer-check"><input type="checkbox" checked={draft.watermarkRepeat} onChange={(event) => changeDraft({ watermarkRepeat: event.target.checked })}/> Repeat watermark</label></section><section><h3>Page versions</h3><button onClick={() => void restorePrevious()} disabled={!saved?.history.length}>Restore previous</button><button onClick={() => void resetPage()}>Restore Studio page</button></section></>}
       {panel === "preflight" && <><section><h3>Whole-book preflight</h3>{bookIssues.length ? <ul className="preflight-issues book-preflight-issues">{bookIssues.map((item) => <li key={`${item.slotId}-${item.issue}`}><b>{item.label}</b><span>{item.issue}</span><button onClick={() => selectAndReveal(item.slotId)}>Go to page</button></li>)}</ul> : <div className="preflight-pass">✓ No accidental empty or overflowing pages detected</div>}<button onClick={runBookPreflight}>Check whole book</button><button onClick={() => void balanceLayout("book")} disabled={busy}>Balance whole book</button></section><section><h3>Selected page check</h3>{issues.length ? <ul className="preflight-issues">{issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : <p className="designer-help">Use this check for image resolution and print boundaries on the selected page.</p>}<button onClick={runPreflight}>Check selected page</button></section><section><h3>Apply design</h3><p className="designer-help">Copies visual settings only. Text and images stay unique.</p><button onClick={() => void applyStyle("page")}>Apply to this page</button>{selected.chapterId && <button onClick={() => void applyStyle("chapter")}>Apply to this chapter</button>}<button onClick={() => void applyStyle("book")}>Apply to whole book</button></section><section><h3>Reusable styles</h3><div className="style-presets"><button onClick={() => changeDraft({ fontFamily: "Georgia, serif", fontSize: 15, lineHeight: 1.55, backgroundColor: "#fffdf8", borderStyle: "double", borderColor: "#b4863e" })}>Scholar</button><button onClick={() => changeDraft({ fontFamily: "'Trebuchet MS', sans-serif", fontSize: 16, lineHeight: 1.65, backgroundColor: "#fff8e8", borderStyle: "solid", borderColor: "#d17b43", borderRadius: 18 })}>Storybook</button><button onClick={() => changeDraft({ fontFamily: "Arial, sans-serif", fontSize: 14, lineHeight: 1.5, backgroundColor: "#ffffff", borderStyle: "none" })}>Minimal</button></div>{(project.designerPresets ?? []).map((preset) => <button key={preset.id} onClick={() => changeDraft(preset.style)}>{preset.name}</button>)}<button onClick={() => void savePreset()}>Save current style</button></section></>}

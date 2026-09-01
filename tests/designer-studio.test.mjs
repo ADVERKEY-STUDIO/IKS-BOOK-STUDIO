@@ -70,6 +70,20 @@ test("image inspector keeps a stable selection and resizes both image types cont
   assert.match(css, /\.designer-size-control/);
 });
 
+test("wrapped images can never collapse book text into a narrow vertical column", () => {
+  assert.match(page, /SAFE_WRAPPED_IMAGE_WIDTH = 260/);
+  assert.match(page, /repairUnsafeDesignerImageHtml/);
+  assert.match(page, /html: repairUnsafeDesignerImageHtml/);
+  assert.match(page, /frame\.style\.maxWidth = "42%"/);
+  assert.match(page, /Block — recommended/);
+  assert.match(page, /Image left · text right/);
+  assert.match(page, /Image right · text left/);
+  assert.match(page, /Height follows the image’s original proportions automatically/);
+  assert.match(page, /A wrapped image leaves too little room for readable text/);
+  assert.match(css, /img\[data-designer-wrap=left\]/);
+  assert.match(css, /max-width:42%!important;height:auto!important/);
+});
+
 test("free images hide editing chrome outside selection and can be deleted", () => {
   assert.match(page, /persistableDesignerHtml/);
   assert.match(page, /html: persistableDesignerHtml\(revision\.html\)/);
