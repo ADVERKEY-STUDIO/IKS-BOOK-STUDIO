@@ -84,6 +84,19 @@ test("wrapped images can never collapse book text into a narrow vertical column"
   assert.match(css, /max-width:42%!important;height:auto!important/);
 });
 
+test("page columns flow only inside chapter text and fixed pages self-repair to one column", () => {
+  assert.match(page, /function normalizedDesignerColumns/);
+  assert.match(page, /function designerPageSupportsColumns/);
+  assert.match(page, /function designerColumnsForPage/);
+  assert.match(page, /!designerPageSupportsColumns\(selected\)\) return/);
+  assert.match(page, /columns: designerColumnsForPage\(page, revision\.columns\)/);
+  assert.match(page, /designerColumnVariables\(designerColumnsForPage\(page, revision\.columns\), revision\.columnGap\)/);
+  assert.doesNotMatch(page, /columnCount: revision\.columns/);
+  assert.doesNotMatch(page, /columnCount: page\.columns/);
+  assert.match(css, /\.designer-editable-content>\.preview-body,\.designer-render-content>\.preview-body\{[^}]*column-count:var\(--designer-column-count,1\)/);
+  assert.match(css, /\.designer-canvas-page\.contents-page \.designer-editable-content[^}]*--designer-column-count:1/);
+});
+
 test("free images hide editing chrome outside selection and can be deleted", () => {
   assert.match(page, /persistableDesignerHtml/);
   assert.match(page, /html: persistableDesignerHtml\(revision\.html\)/);

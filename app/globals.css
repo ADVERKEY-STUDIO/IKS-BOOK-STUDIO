@@ -538,6 +538,11 @@
 .designer-render-canvas .designer-render-watermark{z-index:1}
 .designer-render-canvas .designer-render-content{position:relative;z-index:2}
 
+/* Columns belong to the reading story, never to page chrome or fixed-layout matter. */
+.designer-editable-content>.preview-body,.designer-render-content>.preview-body{min-width:0;column-count:var(--designer-column-count,1);column-gap:var(--designer-column-gap,0px);column-width:auto}
+.designer-canvas-page.preview-cover .designer-editable-content,.designer-canvas-page.contents-page .designer-editable-content,.designer-canvas-page.backmatter .designer-editable-content,.designer-render-canvas.preview-cover .designer-render-content,.designer-render-canvas.contents-page .designer-render-content,.designer-render-canvas.backmatter .designer-render-content{--designer-column-count:1;--designer-column-gap:0px}
+.designer-editable-content>.preview-body>*,.designer-render-content>.preview-body>*{max-width:100%}
+
 /* Free images are clean artwork until selected; editing chrome never reaches Preview or PDF. */
 .designer-editable-content .designer-free-image{cursor:grab}
 .designer-editable-content .designer-free-image:not(.designer-object-selected){border-color:transparent!important;background:transparent!important;box-shadow:none!important}
