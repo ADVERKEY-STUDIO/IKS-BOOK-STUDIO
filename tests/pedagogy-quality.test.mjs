@@ -41,6 +41,26 @@ test("the efficient prompt plans, writes, and reviews one complete lesson in one
   assert.match(prompt, /never exceed 945 words/i);
   assert.match(prompt, /Return one JSON object/i);
   assert.match(prompt, /Never mention a source/i);
+  assert.match(prompt, /Do not use “This chapter”/i);
+  assert.match(prompt, /scene|dialogue|guide voice/i);
+  assert.match(prompt, /Anaya, Kabir, and Acharya Mira/);
+});
+
+test("the printed chapter keeps pedagogy but removes repetitive workbook scaffolding", () => {
+  const html = pedagogy.renderTeachingChapter({
+    title: "Dharma in daily life",
+    chapterPromise: "A question at the village well opens the idea.",
+    learningGoals: ["Explain dharma", "Compare choices", "Apply care"],
+    introduction: "Mira pauses before taking the last pot of water and asks what fairness requires.",
+    sections: [{ heading: "A careful choice", paragraphs: ["The neighbours consider duty, need and care together."], exampleTitle: "At the well", example: "Mira listens before choosing.", vocabulary: [{ term: "Dharma", meaning: "responsible conduct" }] }],
+    quickCheck: ["What should Mira consider?"],
+    activity: { title: "Try the choice", prompt: "Compare two actions.", steps: ["Notice who is affected.", "Explain your choice."] },
+    recap: ["Dharma considers responsibility."],
+  }, 1, (value) => value);
+  assert.doesNotMatch(html, /IN THIS CHAPTER|YOU WILL LEARN TO|CHAPTER RECAP/);
+  assert.match(html, /KEY TERMS/);
+  assert.match(html, /THINK IT THROUGH/);
+  assert.match(html, /Mira pauses/);
 });
 
 test("the teaching prompt requires context, ordered concepts, examples, vocabulary, checks and recap", () => {

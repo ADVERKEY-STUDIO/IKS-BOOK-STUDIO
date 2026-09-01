@@ -1,3 +1,5 @@
+import { authorialReaderHtml, readerFacingChapterTitle } from "./child-summary.ts";
+
 export type ExternalManuscriptSettings = {
   title: string;
   sourceName: string;
@@ -36,6 +38,8 @@ export type ExternalIllustrationSlot = {
   sceneBrief: string;
   altText: string;
   caption: string;
+  imageIndex: number;
+  placement: "cover" | "after-opening" | "chapter-middle" | "before-reflection";
   status: "pending" | "ready" | "missing" | "failed" | "skipped";
   imageKey?: string;
   imageUrl?: string;
@@ -64,6 +68,15 @@ export type ExternalIllustrationArchiveMatch = {
 export type ExternalIllustrationArchiveResult = {
   matches: ExternalIllustrationArchiveMatch[];
   issues: string[];
+};
+
+export type ExternalPlacedReaderPage = {
+  body: string;
+  illustrationSlotId?: string;
+  imageKey?: string;
+  imageUrl?: string;
+  imageCaption?: string;
+  imageAlt?: string;
 };
 
 function cleanLine(value: string) {
@@ -178,15 +191,20 @@ export function parseExternalManuscript(value: string, audience: string): Extern
     const end = matches[index + 1]?.index ?? normalized.length;
     const privateSplit = separatePrivateSections(normalized.slice(start, end));
     removedPrivateMetadata ||= privateSplit.removedPrivateMetadata;
-    const wordCount = words(privateSplit.reader).length;
+    const readerHtml = authorialReaderHtml(manuscriptMarkdownToHtml(privateSplit.reader));
+    const wordCount = words(readerHtml.replace(/<[^>]+>/g, " ")).length;
     const issues: string[] = [];
     if (wordCount < (kind === "chapter" ? minimumWords(audience) : 90)) issues.push(`${kind === "chapter" ? "Chapter" : "Section"} is short (${wordCount} words).`);
     if (kind === "chapter") {
-      if (!/^##+\s*IN THIS CHAPTER\b/im.test(privateSplit.reader)) issues.push("Missing “In This Chapter”.");
+      const opening = privateSplit.reader.split(/^##+\s+/m)[0];
+      if (words(opening).length < 35 && !/^##+\s*IN THIS CHAPTER\b/im.test(privateSplit.reader)) issues.push("Missing a substantial narrative opening before the recurring learning blocks.");
       if (!/^##+\s*(KEY TERMS|WORD HELPER|GLOSSARY)\b/im.test(privateSplit.reader)) issues.push("Missing key-term explanation.");
       if (!/^##+\s*(ACTIVITY|TRY IT|THINK ABOUT IT|REFLECT|CHECK YOUR UNDERSTANDING)\b/im.test(privateSplit.reader)) issues.push("Missing activity or comprehension check.");
+      const repeatedChapterOpenings = (privateSplit.reader.match(/(?:^|[.!?]\s+)this chapter\b/gim) ?? []).length;
+      if (repeatedChapterOpenings > 1) issues.push(`Mechanical “This chapter…” wording repeats ${repeatedChapterOpenings} times.`);
+      if (/\b(?:this|the) adaptation\b|\breader-facing\b|\bavoiding claims (?:that|which)\b/i.test(privateSplit.reader)) issues.push("Editorial adaptation commentary was removed from reader-facing prose.");
     }
-    return { kind, title: sectionTitle(label, kind), raw: privateSplit.reader, html: manuscriptMarkdownToHtml(privateSplit.reader), wordCount, illustrationBrief: privateSplit.illustrationBrief, issues };
+    return { kind, title: readerFacingChapterTitle(sectionTitle(label, kind)), raw: privateSplit.reader, html: readerHtml, wordCount, illustrationBrief: privateSplit.illustrationBrief, issues };
   });
   const issues: string[] = [];
   if (removedPrivateMetadata) issues.push("Private production metadata was removed from the reader-facing manuscript.");
@@ -197,10 +215,13 @@ export function parseExternalManuscript(value: string, audience: string): Extern
   return { title, sections, issues, words: sections.reduce((sum, section) => sum + section.wordCount, 0) };
 }
 
-function illustrationSceneBrief(section: ExternalManuscriptSection) {
-  if (section.illustrationBrief) return section.illustrationBrief;
-  const context = cleanLine(section.raw.replace(/[#*_>`~-]/g, " ")).slice(0, 700);
-  return `Create one specific narrative moment from “${section.title}”. Show real people, a believable place, purposeful action, relevant objects, a clear focal point and meaningful background details grounded in this chapter: ${context}`;
+function illustrationSceneBrief(section: ExternalManuscriptSection, imageIndex: number, imageCount: number) {
+  const placementFocus = imageCount === 1 || imageIndex === 1 ? "the opening situation and central question" : imageIndex === imageCount ? "the chapter’s later application or reflective turning point" : "a distinct middle-chapter action that develops the idea";
+  const plain = cleanLine(section.html.replace(/<[^>]+>/g, " ").replace(/[#*_>`~-]/g, " "));
+  const start = Math.max(0, Math.round((plain.length - 700) * ((imageIndex - 1) / Math.max(1, imageCount - 1))));
+  const context = plain.slice(start, start + 700);
+  const supplied = imageIndex === 1 ? section.illustrationBrief : undefined;
+  return supplied || `Create image ${imageIndex} of ${imageCount} for “${section.title}”, focusing on ${placementFocus}. Show a specific narrative moment with real people, a believable place, purposeful action, relevant objects, a clear focal point and meaningful background details grounded in this passage: ${context}`;
 }
 
 export function createExternalIllustrationSlots(result: ExternalManuscriptResult, fallbackTitle: string): ExternalIllustrationSlot[] {
@@ -213,25 +234,97 @@ export function createExternalIllustrationSlots(result: ExternalManuscriptResult
       sceneBrief: `A richly rendered portrait cover that introduces ${result.title || fallbackTitle} through a specific setting, human-scale action and culturally grounded details. No text inside the image.`,
       altText: `Front-cover illustration for ${result.title || fallbackTitle}`,
       caption: "Front cover",
+      imageIndex: 1,
+      placement: "cover",
       status: "pending",
     },
     ...result.sections.flatMap((section, sectionIndex) => {
-      if (section.kind !== "chapter") return [];
-      const chapterOrdinal = result.sections.slice(0, sectionIndex + 1).filter((item) => item.kind === "chapter").length;
-      const slotId = `CH-${String(chapterOrdinal).padStart(2, "0")}-IMG-01`;
-      return [{
-        id: slotId,
-        role: "chapter" as const,
-        chapterId: sectionIndex + 1,
-        chapterTitle: section.title,
-        filename: `images/${slotId}.jpg`,
-        sceneBrief: illustrationSceneBrief(section),
-        altText: `Narrative illustration for ${section.title}`,
-        caption: section.illustrationBrief || `A scene from ${section.title}`,
-        status: "pending" as const,
-      }];
+      if (!(["introduction", "chapter", "conclusion"] as ExternalManuscriptSection["kind"][]).includes(section.kind)) return [];
+      const imageCount = 1;
+      const placements = ["chapter-middle"];
+      return Array.from({ length: imageCount }, (_, imageIndex) => {
+        const slotId = `CH-${String(sectionIndex + 1).padStart(2, "0")}-IMG-${String(imageIndex + 1).padStart(2, "0")}`;
+        const placement = placements[imageIndex] as ExternalIllustrationSlot["placement"];
+        return {
+          id: slotId,
+          role: "chapter" as const,
+          chapterId: sectionIndex + 1,
+          chapterTitle: section.title,
+          filename: `images/${slotId}.jpg`,
+          sceneBrief: illustrationSceneBrief(section, imageIndex + 1, imageCount),
+          altText: `Narrative illustration ${imageIndex + 1} for ${section.title}`,
+          caption: imageIndex === 0 && section.illustrationBrief ? section.illustrationBrief : `${section.title} · ${placement.replace(/-/g, " ")}`,
+          imageIndex: imageIndex + 1,
+          placement,
+          status: "pending" as const,
+        };
+      });
     }),
   ];
+}
+
+export function upgradeExternalIllustrationSlots(
+  chapters: Array<{ id: number; title: string; body?: string; wordCount?: number }>,
+  existingSlots: ExternalIllustrationSlot[],
+) {
+  const cover = existingSlots.find((slot) => slot.role === "cover");
+  const upgraded: ExternalIllustrationSlot[] = cover ? [{ ...cover, imageIndex: cover.imageIndex || 1, placement: "cover" }] : [];
+  for (const chapter of chapters) {
+    if (/^(?:glossary|appendix|activities|references|bibliography|index)\b/i.test(chapter.title.trim())) continue;
+    const existing = existingSlots.filter((slot) => slot.role === "chapter" && slot.chapterId === chapter.id).sort((left, right) => (left.imageIndex || 1) - (right.imageIndex || 1));
+    const plain = cleanLine((chapter.body || "").replace(/<[^>]+>/g, " "));
+    const approvedExtras = existing.slice(1).filter((slot) => slot.status === "ready" && slot.imageUrl);
+    const imageCount = 1 + approvedExtras.length;
+    const placements = imageCount === 1 ? ["chapter-middle"] : imageCount === 2 ? ["after-opening", "before-reflection"] : ["after-opening", "chapter-middle", "before-reflection"];
+    const retained = existing.length ? [existing[0], ...approvedExtras] : [];
+    const prefix = retained[0]?.id.match(/^(CH-\d+)-IMG-/i)?.[1] || `CH-${String(chapter.id).padStart(2, "0")}`;
+    for (let imageIndex = 0; imageIndex < imageCount; imageIndex += 1) {
+      const prior = retained[imageIndex];
+      const id = `${prefix}-IMG-${String(imageIndex + 1).padStart(2, "0")}`;
+      const placement = placements[imageIndex] as ExternalIllustrationSlot["placement"];
+      const start = Math.max(0, Math.round((plain.length - 700) * (imageIndex / Math.max(1, imageCount - 1))));
+      upgraded.push(prior ? { ...prior, id, imageIndex: imageIndex + 1, placement } : {
+        id,
+        role: "chapter",
+        chapterId: chapter.id,
+        chapterTitle: chapter.title,
+        filename: `images/${id}.jpg`,
+        sceneBrief: `Create image ${imageIndex + 1} of ${imageCount} for “${chapter.title}”, showing a distinct text-grounded narrative moment for the ${placement.replace(/-/g, " ")} position: ${plain.slice(start, start + 700)}`,
+        altText: `Narrative illustration ${imageIndex + 1} for ${chapter.title}`,
+        caption: `${chapter.title} · ${placement.replace(/-/g, " ")}`,
+        imageIndex: imageIndex + 1,
+        placement,
+        status: "pending",
+      });
+    }
+  }
+  return upgraded;
+}
+
+export function assignIllustrationsToReaderPages(textPages: string[], slots: ExternalIllustrationSlot[]): ExternalPlacedReaderPage[] {
+  const bodies = textPages.length ? textPages : [""];
+  const buckets = new Map<number, ExternalIllustrationSlot[]>();
+  const pageIndexFor = (placement: ExternalIllustrationSlot["placement"]) => {
+    if (placement === "after-opening") return 0;
+    if (placement === "before-reflection") return bodies.length - 1;
+    return Math.floor((bodies.length - 1) / 2);
+  };
+  for (const slot of slots.filter((item) => item.role === "chapter" && item.status === "ready" && item.imageUrl).sort((left, right) => (left.imageIndex || 1) - (right.imageIndex || 1))) {
+    const target = pageIndexFor(slot.placement || "chapter-middle");
+    buckets.set(target, [...(buckets.get(target) ?? []), slot]);
+  }
+  return bodies.flatMap((body, pageIndex) => {
+    const illustrations = buckets.get(pageIndex) ?? [];
+    if (!illustrations.length) return [{ body }];
+    return illustrations.map((slot, illustrationIndex) => ({
+      body: illustrationIndex === 0 ? body : "",
+      illustrationSlotId: slot.id,
+      imageKey: slot.imageKey,
+      imageUrl: slot.imageUrl,
+      imageCaption: slot.caption,
+      imageAlt: slot.altText,
+    }));
+  });
 }
 
 function normalizedArchivePath(value: string) {
@@ -298,7 +391,7 @@ Read the entire uploaded source before writing. Identify its real Parts, introdu
 
 Write like the book’s author. Never tell the child that text came from an uploaded source, prompt, PDF or AI. Do not invent missing facts. If a passage is unreadable or uncertain, omit the uncertain claim rather than guessing.
 
-Choose the shortest complete structure that explains the source well. Keep genuine chapters in logical order, but combine tiny source subsections when that improves the child’s book. Every chapter must have its own purpose and examples. This first request is for manuscript text only; Book Studio will prepare a separate illustration request after the manuscript is approved.
+Choose the shortest complete structure that explains the source well. Keep genuine chapters in logical order, but combine tiny source subsections when that improves the child’s book. Every chapter must have its own narrative purpose, concrete moments and examples. This first request creates the complete reader manuscript plus a private scene brief for each chapter; Book Studio will turn those briefs into separately runnable image prompts after approval.
 
 ## REQUIRED OUTPUT
 Return one complete Markdown manuscript. Do not return JSON. If the complete manuscript is too large for one response, create a downloadable ZIP containing 00-Introduction.md, numbered chapter files, Conclusion.md and Glossary.md. Do not shorten later chapters to fit a response limit.
@@ -308,21 +401,20 @@ Use this exact heading system:
 # [BOOK TITLE]
 
 # INTRODUCTION
-[A genuine introduction that prepares the child for the whole book]
+[A genuine, inviting opening that prepares the child for the whole book. Do not discuss the adaptation process.]
 
 # CHAPTER 01: [SOURCE-LED TITLE]
-## IN THIS CHAPTER
-[A clear chapter promise]
+[Open directly with a short concrete scene, question, moment of dialogue or sensory detail that connects to the chapter’s real subject. Do not add an “In This Chapter” heading.]
 ## [MEANINGFUL SUBTOPIC]
-[Connected explanatory prose]
+[Connected explanatory prose that carries the opening situation or guide voice forward]
 ## [ANOTHER MEANINGFUL SUBTOPIC]
-[Connected explanatory prose and an age-appropriate example]
+[Connected explanatory prose, an age-appropriate example and a natural transition]
 ## KEY TERMS
 [Explain unfamiliar IKS, Sanskrit and specialist words]
-## CHECK YOUR UNDERSTANDING
+## THINK IT THROUGH
 [Three to five useful questions or one meaningful activity]
-## CHAPTER RECAP
-[A concise recap]
+## ILLUSTRATION BRIEF
+[PRIVATE — one specific narrative scene with people, place, action, objects, mood and culturally grounded visual details. This section will never print.]
 [Repeat the complete chapter structure for every chapter.]
 
 # CONCLUSION
@@ -337,9 +429,14 @@ Use this exact heading system:
 - Introduce ideas before using difficult terminology.
 - Use accurate examples that clarify the source rather than replacing it.
 - Make vocabulary, sentence length and teaching depth appropriate for ${settings.audience}.
-- Do not generate, embed or describe images in this manuscript response. Do not include image links, SVG artwork, diagrams or illustration placeholders.
+- Make the illustrated scenes and prose belong to the same book. Use the recurring learners Anaya, Kabir, and Acharya Mira in every narrative section, while varying the setting, action, objects, mood and central question. They observe and ask; never put invented historical claims or sacred quotations in their mouths.
+- Frame historically loaded social labels with care. Prefer “Varna: Roles and Responsibilities”, “relationships of guidance”, “peers”, and “those in our care” in reader-facing headings; explain original terms accurately inside the discussion.
+- Avoid the mechanical subject “This chapter…”. State ideas directly and vary sentence openings. Never begin a sentence with lowercase “this chapter”.
+- Never include commentary about preserving, modernising, adapting, sanitising or making the source suitable for children. Those are editor decisions, not reader prose.
+- Do not generate or embed images in this manuscript response. Include only the private ILLUSTRATION BRIEF requested above; do not include image links, SVG artwork, diagrams or visible illustration placeholders.
 - Do not include citations inside child-facing prose. If useful, add a final private heading “## SOURCE COVERAGE NOTES” inside each chapter; Book Studio will remove it from the printed book.
-- Check the complete manuscript for missing chapters, repetition, contradictions and abrupt endings before returning it.
+- Use only two recurring learning blocks—KEY TERMS and THINK IT THROUGH. Do not add “In This Chapter”, “You Will Learn” or “Chapter Recap” blocks.
+- Check the complete manuscript for missing chapters, repeated “This chapter” openings, editorial commentary, contradictions and abrupt endings before returning it.
 
 Begin by silently reading and planning from the complete source. Then return only the finished manuscript or downloadable manuscript ZIP.`;
 }
@@ -355,6 +452,7 @@ export function buildExternalIllustrationPrompt(project: ExternalIllustrationPro
     const dimensions = slot.role === "cover" ? "portrait A4, 2480 × 3508 px, full bleed" : "landscape 4:3, 2400 × 1800 px";
     return `## ${index + 1}. ${slot.id} — ${slot.role === "cover" ? "FRONT COVER" : slot.chapterTitle}
 - Exact ZIP path: ${slot.filename}
+- Automatic book placement: ${(slot.placement || (slot.role === "cover" ? "cover" : "chapter-middle")).replace(/-/g, " ")}
 - Format: ${dimensions}
 - Scene: ${slot.sceneBrief}
 ${slot.role === "cover" ? `- Book subject: ${project.title}` : `- Chapter context: ${context}`}
@@ -362,9 +460,9 @@ ${slot.role === "cover" ? `- Book subject: ${project.title}` : `- Chapter contex
   }).join("\n\n");
   const zipTree = project.slots.map((slot) => `- ${slot.filename}`).join("\n");
   const zipName = `${project.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "book"}-illustrations.zip`;
-  return `# IKS BOOK STUDIO — COMPLETE ILLUSTRATION ZIP REQUEST
+  return `# IKS BOOK STUDIO — SEQUENTIAL ILLUSTRATION MANIFEST
 
-The manuscript for “${project.title}” is complete and approved. Create the entire illustration package in this one response. Use your image-generation tool separately for every item below, inspect every finished image, and return one downloadable ZIP containing the actual full-resolution raster files.
+The manuscript for “${project.title}” is complete and approved. This file is the art bible and destination manifest. Do not attempt the complete queue in one response. Open the separate prompt file for each destination and perform one real image-generation operation at a time. Download every result with its exact filename, then place all completed files in one \`images\` folder and ZIP that folder for automatic placement by Book Studio.
 
 ## BOOK ART BIBLE
 - Reader: ${project.audience} (${project.readingLevel})
@@ -396,18 +494,18 @@ Create exactly these image paths at the root of the ZIP:
 
 ${zipTree}
 
-## REQUIRED BATCH WORKFLOW
-- Silently read the complete queue and visual rules before generating anything.
-- Generate every requested image with the image-generation tool. Do not ask the designer to type NEXT and do not require another prompt.
-- Work through the queue internally, one real image-generation operation per destination, while using earlier approved results as the shared style reference.
-- Save each actual full-resolution raster image at its exact path above. The ZIP root must contain the \`images\` folder directly; do not add an enclosing project folder.
+## REQUIRED SEQUENTIAL WORKFLOW
+- Read this art bible once, then open each numbered prompt file in order.
+- Generate each prompt as a separate image operation. Never combine multiple destinations into one generation operation.
+- Download each result immediately using the exact destination filename. Reuse earlier approved results only as style references.
+- Save each full-resolution raster image at its exact path above. When all prompts are complete, package them. The ZIP root must contain the \`images\` folder directly; do not add an enclosing project folder.
 - A JPG slot may instead use the same path stem with \`.png\` or \`.webp\` when the image tool cannot export JPG. Do not change any other part of the filename.
 - Do not create substitute files, thumbnails, icons, diagrams, contact sheets, SVGs, text descriptions or fake image placeholders.
-- Open and visually inspect all generated files before packaging. Confirm that each file is a distinct, complete editorial illustration matching its destination.
+- Open and visually inspect each result before moving to the next prompt. Confirm that it is a distinct, complete editorial illustration matching its destination.
 - Put only the requested finished images in one ZIP named \`${zipName}\`.
-- Return the ZIP as the final downloadable file. Do not return the images one by one and do not stop midway.
+- The external image tool returns one image per prompt; the designer creates the final ZIP only after every required file exists.
 
-Begin the complete batch now and finish by attaching only \`${zipName}\`.`;
+Use the numbered prompt files now. When the queue is complete, package the exact files as \`${zipName}\` and upload it to Book Studio for automatic placement.`;
 }
 
 export function buildExternalIllustrationSlotPrompt(project: ExternalIllustrationPromptProject, slot: ExternalIllustrationSlot) {
@@ -417,6 +515,8 @@ export function buildExternalIllustrationSlotPrompt(project: ExternalIllustratio
   return `Generate exactly ONE finished illustration for the children’s book “${project.title}”. Use your image-generation tool now and return the actual full-resolution image—not code, SVG, a description, a mockup, a contact sheet or a ZIP.
 
 DESTINATION: ${slot.id} — ${slot.role === "cover" ? "FRONT COVER" : slot.chapterTitle}
+EXACT OUTPUT FILENAME: ${slot.filename}
+BOOK PLACEMENT: ${(slot.placement || (slot.role === "cover" ? "cover" : "chapter-middle")).replace(/-/g, " ")}
 FORMAT: ${dimensions}
 STYLE: ${project.illustrationStyle}; ${project.aesthetic}; coherent with the same book’s previously approved images.
 READER: ${project.audience} (${project.readingLevel})
@@ -436,4 +536,14 @@ STRICTLY FORBIDDEN
 - Multiple alternatives, thumbnails, contact sheets, other chapters or fabricated files.
 
 Generate only ${slot.id} now. Return the image itself at the requested orientation and quality.`;
+}
+
+export function buildExternalIllustrationPromptPack(project: ExternalIllustrationPromptProject) {
+  const manifest = buildExternalIllustrationPrompt(project);
+  const prompts = project.slots.map((slot, index) => ({
+    slotId: slot.id,
+    path: `prompts/${String(index + 1).padStart(3, "0")}-${slot.id}.md`,
+    content: buildExternalIllustrationSlotPrompt(project, slot),
+  }));
+  return { manifest, prompts };
 }

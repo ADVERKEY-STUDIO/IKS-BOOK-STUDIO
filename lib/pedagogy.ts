@@ -380,6 +380,9 @@ export function evaluateTeachingChapter(chapter: TeachingChapter, audience: stri
   if (totalWords > maximumWords) failures.push(`The chapter is too long for ${targetPages} comfortable pages (${totalWords} words; maximum ${maximumWords})`);
   if (averageSentenceWords(text) > maximumAverage) failures.push(`Sentence length is too high for ages ${age}`);
   if (/\b(?:the|this|uploaded|original) (?:source|text|book|document)\b|according to (?:the|this) source|source page/iu.test(text)) failures.push("Reader-facing prose mentions the private source workflow");
+  if (/\bthe subject\b/iu.test(text)) failures.push("Mechanical provenance replacement “the subject” appears in reader-facing prose");
+  if ((text.match(/(?:^|[.!?]\s+)this chapter\b/gimu) ?? []).length > 1) failures.push("Mechanical “This chapter…” sentence openings repeat");
+  if (/\b(?:this|the) adaptation\b|\breader-facing\b|\bsuitable for children today\b|\bavoiding claims (?:that|which)\b/iu.test(text)) failures.push("Editorial adaptation commentary appears in reader-facing prose");
   if (/this means [^.]{1,80} and [^.]{1,80} are connected|together,? these ideas show why [^.]+ matters in the chapter/iu.test(text)) failures.push("Generic connection filler remains");
 
   const chapterLower = text.toLowerCase();
@@ -446,13 +449,12 @@ export function renderTeachingChapter(chapter: TeachingChapter, chapterNumber: n
   const sections = chapter.sections.map((section) => {
     const paragraphs = section.paragraphs.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("");
     const example = `<div class="chapter-example"><b>${escapeHtml(section.exampleTitle || "A clear example")}</b><p>${escapeHtml(section.example)}</p></div>`;
-    const vocabulary = section.vocabulary.length
-      ? `<div class="word-helper"><b>WORD HELPER</b>${section.vocabulary.map((item) => `<p><strong>${escapeHtml(item.term)}</strong> — ${escapeHtml(item.meaning)}</p>`).join("")}</div>`
-      : "";
-    return `<section class="teaching-section"><h2>${escapeHtml(section.heading)}</h2>${paragraphs}${example}${vocabulary}</section>`;
+    return `<section class="teaching-section"><h2>${escapeHtml(section.heading)}</h2>${paragraphs}${example}</section>`;
   }).join("");
+  const vocabulary = chapter.sections.flatMap((section) => section.vocabulary);
+  const keyTerms = vocabulary.length ? `<div class="word-helper key-terms"><b>KEY TERMS</b>${vocabulary.map((item) => `<p><strong>${escapeHtml(item.term)}</strong> — ${escapeHtml(item.meaning)}</p>`).join("")}</div>` : "";
 
-  return `<p class="chapter-kicker">CHAPTER ${String(chapterNumber).padStart(2, "0")}</p><h1>${escapeHtml(chapter.title)}</h1><div class="lesson-promise"><b>IN THIS CHAPTER</b><p>${escapeHtml(chapter.chapterPromise)}</p></div><div class="learning-goals"><b>YOU WILL LEARN TO</b>${list(chapter.learningGoals)}</div><div class="child-opening child-opening-natural"><p>${escapeHtml(chapter.introduction)}</p></div>${sections}<div class="quick-check"><b>CHECK YOUR UNDERSTANDING</b>${list(chapter.quickCheck)}</div><div class="takeaway child-activity"><b>${escapeHtml(chapter.activity.title)}</b><p>${escapeHtml(chapter.activity.prompt)}</p><ol>${chapter.activity.steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol></div><div class="chapter-recap"><b>CHAPTER RECAP</b>${list(chapter.recap)}</div>`;
+  return `<p class="chapter-kicker">CHAPTER ${String(chapterNumber).padStart(2, "0")}</p><h1>${escapeHtml(chapter.title)}</h1><p class="chapter-deck">${escapeHtml(chapter.chapterPromise)}</p><div class="child-opening child-opening-natural"><p>${escapeHtml(chapter.introduction)}</p></div>${sections}${keyTerms}<div class="quick-check"><b>THINK IT THROUGH</b>${list(chapter.quickCheck)}<div class="takeaway child-activity"><b>${escapeHtml(chapter.activity.title)}</b><p>${escapeHtml(chapter.activity.prompt)}</p><ol>${chapter.activity.steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol></div></div>`;
 }
 
 export function blueprintPrompt({ title, audience, language, targetPages = 5, sourceMaterial }: { title: string; audience: string; language: string; targetPages?: number; sourceMaterial: string }) {
@@ -487,7 +489,10 @@ NON-NEGOTIABLE WRITING STANDARD:
 6. Add comprehension questions, one purposeful activity, and a recap.
 7. Preserve nuance. Do not reduce ideas to empty claims that two words are “connected.”
 8. Write flowing book prose, not bullet-point notes disguised as paragraphs. Vary openings and sentence patterns. Do not repeat the introduction, section claims, examples, questions, or recap in slightly different words.
-9. Use the exact original chapter title. Do not add invented characters, quotations, dates, events, morals, or claims.
+9. Use the reader-safe chapter title. Use only the recurring learners Anaya, Kabir, and Acharya Mira; do not invent additional characters, quotations, dates, events, morals, or claims.
+10. Do not use “This chapter” as a sentence subject. State the idea directly.
+11. Begin with a fact-supported concrete scene, child question, brief dialogue, meaningful object or guide voice featuring Anaya, Kabir, and Acharya Mira, and carry that thread into at least two explanations so the prose and illustration belong to the same book. They may ask and observe, but never give them invented historical claims or sacred quotations.
+12. Frame historically loaded social labels with care. Prefer “Varna: Roles and Responsibilities”, “relationships of guidance”, “peers”, and “those in our care” in reader-facing headings while explaining original terms accurately in the prose.
 
 VOICE AND SAFETY:
 - Write as the author of the finished children’s book. Never mention a source, upload, document, adaptation, page number, evidence, prompt, or AI.
@@ -525,6 +530,8 @@ THE COMPLETE LESSON MUST:
 9. Treat war, espionage, punishment, intoxicants, weapons, or other mature material in historical and ethical context without operational instructions.
 10. Write as the author of the finished book. Never mention a source, upload, document, adaptation, page number, evidence, prompt, or AI.
 11. Use only facts, names, roles, dates, places, and qualifiers explicitly stated in the private chapter material. If the material says only that a work came to light in 1905, do not invent who found it, their job, or where they worked.
+12. Do not use “This chapter” or “the subject” as a sentence subject. Use the recurring learners Anaya, Kabir, and Acharya Mira. Open with a fact-supported concrete scene, child question, brief dialogue or meaningful object, then carry that same narrative thread into at least two teaching sections. They may ask and observe, but never give them invented historical claims or sacred quotations.
+13. Frame historically loaded social labels with care. Prefer “Varna: Roles and Responsibilities”, “relationships of guidance”, “peers”, and “those in our care” in reader-facing headings while explaining original terms accurately in the prose.
 
 Before returning, silently estimate the reader-facing word count and expand an under-length explanation with source-grounded context, causes, consequences, or clarification. Do not count JSON keys. Keep the JSON compact: use one paragraph string per section, short labels, and no commentary. Finish and close the JSON object before the token limit. Return one JSON object with exactly one top-level field named chapter. Do not return scores, summary, checks, or self-review prose. Follow this exact shape: {"chapter":{"title":"...","chapterPromise":"...","learningGoals":["..."],"introduction":"...","sections":[{"heading":"...","paragraphs":["65–85 word explanation"],"exampleTitle":"...","example":"...","vocabulary":[{"term":"...","meaning":"..."}]}],"quickCheck":["..."],"activity":{"title":"...","prompt":"...","steps":["...","..."]},"recap":["..."]}}. The sections array must contain exactly four complete section objects. The website will perform all scoring and validation locally. Return no markdown and no text outside the JSON object.
 

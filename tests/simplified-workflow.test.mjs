@@ -59,21 +59,25 @@ test("the main workflow is chapter-wise instead of a wall of global buttons", ()
   assert.match(page, /prepareDraft\("active", \{ chapterId \}\)/);
 });
 
-test("failed chapters can be handed to a designer without blocking PDF export", () => {
+test("failed chapters can be handed to a designer while keeping draft-proof export", () => {
   assert.match(page, /\| "Designer handoff"/);
   assert.match(page, /async function leaveChapterForDesigner\(chapterId = active\?\.id\)/);
   assert.match(page, /Send Chapter \{active\.id\} to designer/);
   assert.match(page, /chapterGenerationState\(chapter\) !== "Designer handoff"/);
   assert.match(page, /async function downloadPdf\(\)/);
   assert.match(page, /pdf\.save\(`/);
-  assert.match(page, /Download PDF/);
+  assert.match(page, /Download draft proof/);
 });
 
-test("preview and PDF stay available while chapters are unfinished", () => {
+test("draft proof remains available but publication PDF is gated while chapters are unfinished", () => {
   assert.match(page, /function openPreview\(\)/);
-  assert.match(page, /Preview and PDF are available now/);
-  assert.match(page, /Nothing is locked, and unfinished pages are included/);
-  assert.doesNotMatch(page, /disabled=\{exportBusy \|\| Boolean\(unresolved\.length\)\}/);
+  assert.match(page, /Download draft proof/);
+  assert.match(page, /Download publication PDF/);
+  assert.match(page, /disabled=\{exportBusy \|\| !publication\.ready\}/);
+  assert.match(page, /DRAFT PROOF/);
+  assert.match(page, /draft-proof/);
+  assert.match(page, /renderingMode:\s*"invisible"/);
+  assert.match(page, /Publication PDF is locked/);
 });
 
 test("preview supports the complete book, a complete chapter, and a single page", () => {
@@ -87,7 +91,7 @@ test("preview supports the complete book, a complete chapter, and a single page"
 });
 
 test("publishing workflow exposes review, operations and real PDF controls", () => {
-  for (const label of ["Source uploaded", "Chapters generated", "Quality review", "Illustrations", "Preview & PDF", "Review Queue", "Request History", "BOOK PREVIEW", "Download PDF"]) {
+  for (const label of ["Source uploaded", "Chapters generated", "Quality review", "Illustrations", "Preview & PDF", "Review Queue", "Request History", "BOOK PREVIEW", "Download publication PDF"]) {
     assert.match(page, new RegExp(label));
   }
   assert.doesNotMatch(page, /Proof mode|Final-book mode/);
