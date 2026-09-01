@@ -9,6 +9,7 @@ import { BOOK_PACKAGE_FORMAT, expectedChapterId, expectedContextKey, expectedPag
 import { bookPersonaClass, bookPersonaDefinitions, bookPersonaPatch, inferBookPersona, materializePersona, personaById, type BookPersona } from "../lib/book-persona";
 import { outlineForMode, pdfChunkRanges, SAFE_OCR_CHUNK_BYTES, SAFE_OCR_CHUNK_PAGES, type OutlineMode, type SourceIntelligence, type SourceOutlineItem } from "../lib/source-intelligence";
 import { buildExternalAiPrompt, buildExternalIllustrationPrompt, buildExternalIllustrationSlotPrompt, createExternalIllustrationSlots, matchExternalIllustrationArchive, parseExternalManuscript, type ExternalIllustrationSlot, type ExternalManuscriptResult } from "../lib/external-manuscript";
+import { assessPublication, hasPrivateProductionText, paginateContents, sanitizeReaderHtml, type ContentsEntry } from "../lib/publication";
 
 type View = "dashboard" | "wizard" | "external" | "analysis" | "brief" | "editor";
 type EditorWorkspace = "designer" | "workflow";
@@ -1841,7 +1842,7 @@ OUTPUT REQUIREMENTS
   }
 
   async function downloadPdf() {
-    const unfinished = project.chapters.filter((chapter) => !isPublishApproved(chapter)).length;
+    const publication = assessPublication(project.chapters);
     setShowPreview(true);
     setExportBusy(true);
     setPdfProgress(0);
@@ -1850,18 +1851,27 @@ OUTPUT REQUIREMENTS
       await document.fonts?.ready;
       const sheets = Array.from(document.querySelectorAll<HTMLElement>(".pdf-render-stack .book-sheet"));
       if (!sheets.length) throw new Error("Preview pages are not ready");
+      const renderedBlockers = sheets.flatMap((sheet, index) => {
+        const content = sheet.querySelector<HTMLElement>(".designer-render-content") ?? sheet;
+        const issues: string[] = [];
+        if (content.scrollHeight > content.clientHeight + 3 || content.scrollWidth > content.clientWidth + 3) issues.push(`page ${index + 1} overflows its printable area`);
+        if (hasPrivateProductionText(content.textContent ?? "")) issues.push(`page ${index + 1} contains private production text`);
+        return issues;
+      });
+      const unfinished = new Set(publication.blockers.map((blocker) => blocker.chapterId)).size + renderedBlockers.length;
       const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")]);
       const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4", compress: true });
+      pdf.setProperties({ title: project.title, subject: unfinished ? "Work-in-progress book proof" : "Publication-ready book", author: "IKS Book Studio", creator: "IKS Book Studio" });
       for (let index = 0; index < sheets.length; index += 1) {
-        const canvas = await html2canvas(sheets[index], { backgroundColor: "#fffdf8", scale: 1.55, useCORS: true, logging: false, imageTimeout: 15000 });
+        const canvas = await html2canvas(sheets[index], { backgroundColor: "#fffdf8", scale: 2.5, useCORS: true, logging: false, imageTimeout: 15000 });
         if (index > 0) pdf.addPage("a4", "portrait");
-        pdf.addImage(canvas.toDataURL("image/jpeg", 0.9), "JPEG", 0, 0, 210, 297, undefined, "FAST");
+        pdf.addImage(canvas.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, 210, 297, undefined, "FAST");
         setPdfProgress(Math.round((index + 1) / sheets.length * 100));
         await new Promise((resolve) => window.setTimeout(resolve, 0));
       }
       const safeTitle = project.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "book";
       pdf.save(`${safeTitle}${unfinished ? "-work-in-progress" : "-complete"}.pdf`);
-      notify(unfinished ? `Book PDF downloaded with ${unfinished} unfinished chapter${unfinished === 1 ? "" : "s"}` : "Complete book PDF downloaded");
+      notify(unfinished ? `Work-in-progress PDF downloaded with ${unfinished} publication blocker${unfinished === 1 ? "" : "s"}` : "Complete book PDF downloaded");
     } catch {
       notify("The PDF could not be created. Preview remains open so you can inspect the pages.");
     } finally {
@@ -3263,21 +3273,35 @@ type DesignerBasePage = {
 
 function designerBasePages(project: Project): DesignerBasePage[] {
   const printable = printableChapters(project.chapters);
+  const chapterLayouts = printable.chapters.map((chapter) => {
+    const cleanImportedPages = (chapter.importedPages ?? []).map((page) => sanitizeReaderHtml(page.body)).filter((body) => readerTextLength(body) > 0);
+    const textPages = chapter.importValidated && cleanImportedPages.length ? cleanImportedPages : paginateReaderHtml(sanitizeReaderHtml(chapter.body), project.audience);
+    const hasSeparateIllustration = Boolean(chapter.imageUrl) && !textPages.some((body) => body.includes(chapter.imageUrl!));
+    return { chapter, textPages, hasSeparateIllustration, pageCount: textPages.length + (hasSeparateIllustration ? 1 : 0) };
+  });
+  const renderedPageCounts = new Map(chapterLayouts.map(({ chapter, pageCount }) => [chapter.id, pageCount]));
+  const generatedContentsPages = paginateContents(printable.chapters, renderedPageCounts);
+  const preserveLockedContents = (project.designerPages ?? []).some((page) => page.slotId === "contents" && page.layoutLocked && !page.deleted);
+  const contentsPages = preserveLockedContents ? generatedContentsPages.slice(0, 1) : generatedContentsPages;
   const pages: DesignerBasePage[] = [
     { slotId: "cover", label: "Front cover", kind: "cover", html: `<div class="cover-edition">IKS BOOK STUDIO · ${escapeHtml(project.audience.toUpperCase())}</div><h1>${escapeHtml(project.title)}</h1><span>An illustrated book shaped from your source</span><b>✦</b>` },
-    { slotId: "contents", label: "Contents page", kind: "contents", html: `<span>CONTENTS</span><h2>Inside this book</h2><ol>${printable.chapters.map((chapter, index) => `<li><b>${String(index + 1).padStart(2, "0")}</b><span>${escapeHtml(chapter.title)}</span><i>${isPublishApproved(chapter) ? `${chapter.pages} pages` : "In progress"}</i></li>`).join("")}</ol>` },
+    ...contentsPages.map((entries, contentsPageIndex) => ({
+      slotId: contentsPageIndex === 0 ? "contents" : `contents-${contentsPageIndex + 1}`,
+      label: contentsPageIndex === 0 ? "Contents page" : `Contents page ${contentsPageIndex + 1}`,
+      kind: "contents" as const,
+      html: `<span>CONTENTS${contentsPageIndex ? " · CONTINUED" : ""}</span><h2>${contentsPageIndex ? "Inside this book · continued" : "Inside this book"}</h2><ol>${entries.map((entry) => `<li><b>${String(entry.ordinal).padStart(2, "0")}</b><span>${escapeHtml(entry.title)}</span><i>${entry.pageCount} page${entry.pageCount === 1 ? "" : "s"}</i></li>`).join("")}</ol>`,
+    })),
   ];
-  printable.chapters.forEach((chapter) => {
-    const textPages = chapter.importValidated && chapter.importedPages?.length ? chapter.importedPages.map((page) => page.body) : paginateReaderHtml(chapter.body, project.audience);
+  chapterLayouts.forEach(({ chapter, textPages, hasSeparateIllustration, pageCount }) => {
     textPages.forEach((body, pageIndex) => pages.push({
       slotId: `chapter-${chapter.id}-page-${pageIndex + 1}`,
       label: `Chapter ${chapter.id} · page ${pageIndex + 1}`,
       kind: "chapter",
       chapterId: chapter.id,
       pageIndex,
-      html: `<header class="print-chapter-header"><span>CHAPTER ${chapter.id}</span><span>PAGE ${pageIndex + 1} OF ${textPages.length}</span></header>${pageIndex === 0 ? `<h2>${escapeHtml(chapter.title)}</h2>` : `<p class="continued-title">${escapeHtml(chapter.title)} · continued</p>`}<div class="preview-body">${body}</div>${chapter.imageUrl && pageIndex === textPages.length - 1 ? `<figure class="chapter-image"><img src="${escapeHtml(chapter.imageUrl)}" alt="${escapeHtml(chapter.imageAlt || chapter.title)}"><figcaption>${escapeHtml(chapter.imageCaption || chapter.title)}</figcaption></figure>` : ""}${!chapter.imageUrl && chapter.visualType === "illustration-pending" && pageIndex === textPages.length - 1 ? `<div class="illustration-pending-panel" contenteditable="false"><b>Illustration pending</b><span>${escapeHtml(chapter.imageCaption || `Add the reviewed illustration for ${chapter.title}.`)}</span></div>` : ""}<footer class="sheet-number"><span>${escapeHtml(project.title)}</span><span>${pageIndex + 1}</span></footer>`,
+      html: `<header class="print-chapter-header"><span>CHAPTER ${chapter.id}</span><span>PAGE ${pageIndex + 1} OF ${pageCount}</span></header>${pageIndex === 0 ? `<h2>${escapeHtml(chapter.title)}</h2>` : `<p class="continued-title">${escapeHtml(chapter.title)} · continued</p>`}<div class="preview-body">${body}</div>${chapter.imageUrl && !hasSeparateIllustration && pageIndex === textPages.length - 1 ? `<figure class="chapter-image"><img src="${escapeHtml(chapter.imageUrl)}" alt="${escapeHtml(chapter.imageAlt || chapter.title)}"><figcaption>${escapeHtml(chapter.imageCaption || chapter.title)}</figcaption></figure>` : ""}${!chapter.imageUrl && chapter.visualType === "illustration-pending" && pageIndex === textPages.length - 1 ? `<div class="illustration-pending-panel" contenteditable="false"><b>Illustration pending</b><span>${escapeHtml(chapter.imageCaption || `Add the reviewed illustration for ${chapter.title}.`)}</span></div>` : ""}<footer class="sheet-number"><span>${escapeHtml(project.title)}</span><span>${pageIndex + 1}</span></footer>`,
     }));
-    if (chapter.imageUrl && !textPages.some((body) => body.includes(chapter.imageUrl!))) pages.push({
+    if (chapter.imageUrl && hasSeparateIllustration) pages.push({
       slotId: `chapter-${chapter.id}-page-${textPages.length + 1}`,
       label: `Chapter ${chapter.id} · illustration`,
       kind: "chapter",
@@ -3304,6 +3328,10 @@ function designerPageClasses(project: Project, page: { kind: string; chapterId?:
 
 function isLegacyDesignerScaffold(page: DesignerPageOverride) {
   return page.html.includes("designer-cover-copy") || page.html.includes("designer-kicker");
+}
+
+function isGeneratedContentsScaffold(page: DesignerPageOverride) {
+  return page.kind === "contents" && !page.layoutLocked && /<h2>Inside this book(?: · continued)?<\/h2>/i.test(page.html) && /<ol>/i.test(page.html);
 }
 
 function defaultDesignerRevision(html = ""): DesignerPageRevision {
@@ -4751,7 +4779,9 @@ function CanvaPreview({ project, exportBusy, pdfProgress, onClose, onDownload, o
   const [studioPagePreview, setStudioPagePreview] = useState("");
   const [canvaBusy, setCanvaBusy] = useState(false);
   const printable = useMemo(() => printableChapters(project.chapters), [project.chapters]);
-  const unresolved = project.chapters.filter((chapter) => !isPublishApproved(chapter));
+  const publication = useMemo(() => assessPublication(project.chapters), [project.chapters]);
+  const unresolvedChapterCount = new Set(publication.blockers.map((blocker) => blocker.chapterId)).size;
+  const unresolved = { length: unresolvedChapterCount };
   const worldClass = `${bookPersonaClass(project.bookPersona)} world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")}`;
   const pageClass = `page-aesthetic-${normalizedTitle(project.pageAesthetic).replace(/[^a-z]+/g, "-")}`;
   const borderClass = `book-border-${normalizedTitle(project.bookBorder).replace(/[^a-z]+/g, "-")}`;
@@ -4759,8 +4789,9 @@ function CanvaPreview({ project, exportBusy, pdfProgress, onClose, onDownload, o
   const watermarkSlug = normalizedTitle(project.pageWatermark).replace(/[^a-z]+/g, "-");
   const ageClass = `age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}`;
   const chapterSheets = printable.chapters.flatMap((chapter) => {
-    if (chapter.importValidated && chapter.importedPages?.length) return chapter.importedPages.map((page, index) => ({ kind: "chapter" as const, chapter, body: page.body, pageIndex: index, pageCount: chapter.importedPages!.length, imageUrl: page.imageUrl, imageCaption: page.imageCaption, imageAlt: page.imageAlt }));
-    const pages = paginateReaderHtml(chapter.body, project.audience);
+    const cleanImportedPages = (chapter.importedPages ?? []).map((page) => ({ ...page, body: sanitizeReaderHtml(page.body) })).filter((page) => readerTextLength(page.body) > 0 || Boolean(page.imageUrl));
+    if (chapter.importValidated && cleanImportedPages.length) return cleanImportedPages.map((page, index) => ({ kind: "chapter" as const, chapter, body: page.body, pageIndex: index, pageCount: cleanImportedPages.length, imageUrl: page.imageUrl, imageCaption: page.imageCaption, imageAlt: page.imageAlt }));
+    const pages = paginateReaderHtml(sanitizeReaderHtml(chapter.body), project.audience);
     const age = childAgeBand(project.audience);
     const shareLimit = age === "7-9" ? 1500 : age === "13-15" ? 1750 : 1625;
     const shareIllustration = Boolean(chapter.imageUrl) && readerTextLength(pages[pages.length - 1] ?? "") <= shareLimit;
@@ -4768,23 +4799,39 @@ function CanvaPreview({ project, exportBusy, pdfProgress, onClose, onDownload, o
     const text = pages.map((body, index) => ({ kind: "chapter" as const, chapter, body, pageIndex: index, pageCount, imageUrl: shareIllustration && index === pages.length - 1 ? chapter.imageUrl : undefined, imageCaption: shareIllustration && index === pages.length - 1 ? chapter.imageCaption : undefined, imageAlt: shareIllustration && index === pages.length - 1 ? chapter.imageAlt : undefined }));
     return chapter.imageUrl && !shareIllustration ? [...text, { kind: "chapter" as const, chapter, body: "", pageIndex: pages.length, pageCount, imageUrl: chapter.imageUrl, imageCaption: chapter.imageCaption, imageAlt: chapter.imageAlt }] : text;
   });
-  const baseSheets: ({ kind: "cover" | "contents" | "back" } | (typeof chapterSheets)[number])[] = [{ kind: "cover" }, { kind: "contents" }, ...chapterSheets, { kind: "back" }];
+  const renderedPageCounts = new Map<number, number>();
+  chapterSheets.forEach((sheet) => renderedPageCounts.set(sheet.chapter.id, sheet.pageCount));
+  const generatedContentsPages = paginateContents(printable.chapters, renderedPageCounts);
+  const preserveLockedContents = (project.designerPages ?? []).some((page) => page.slotId === "contents" && page.layoutLocked && !page.deleted);
+  const contentsPages = preserveLockedContents ? generatedContentsPages.slice(0, 1) : generatedContentsPages;
+  type ContentsSheet = { kind: "contents"; contentsPageIndex: number; entries: ContentsEntry[] };
+  const baseSheets: ({ kind: "cover" } | { kind: "back" } | ContentsSheet | (typeof chapterSheets)[number])[] = [
+    { kind: "cover" },
+    ...contentsPages.map((entries, contentsPageIndex) => ({ kind: "contents" as const, contentsPageIndex, entries })),
+    ...chapterSheets,
+    { kind: "back" },
+  ];
   type BaseSheet = (typeof baseSheets)[number];
   type Sheet = BaseSheet | { kind: "custom"; designerPage: DesignerPageOverride };
-  const baseSlotId = (sheet: BaseSheet) => sheet.kind === "cover" || sheet.kind === "contents" || sheet.kind === "back" ? sheet.kind : `chapter-${sheet.chapter.id}-page-${sheet.pageIndex + 1}`;
+  const baseSlotId = (sheet: BaseSheet) => sheet.kind === "cover" || sheet.kind === "back" ? sheet.kind : sheet.kind === "contents" ? (sheet.contentsPageIndex === 0 ? "contents" : `contents-${sheet.contentsPageIndex + 1}`) : `chapter-${sheet.chapter.id}-page-${sheet.pageIndex + 1}`;
   const customSheets: Sheet[] = (project.designerPages ?? []).filter((page) => page.kind === "custom" && !page.deleted).map((designerPage) => ({ kind: "custom", designerPage }));
-  const availableSheets: Sheet[] = [...baseSheets.filter((sheet) => !(project.designerPages ?? []).find((page) => page.slotId === baseSlotId(sheet))?.deleted), ...customSheets];
+  const contentsDeleted = (project.designerPages ?? []).some((page) => page.slotId === "contents" && page.deleted);
+  const availableSheets: Sheet[] = [...baseSheets.filter((sheet) => !(sheet.kind === "contents" && contentsDeleted) && !(project.designerPages ?? []).find((page) => page.slotId === baseSlotId(sheet))?.deleted), ...customSheets];
   const desiredOrder = project.designerPageOrder ?? [];
-  const sheets = [...availableSheets].sort((left, right) => {
+  const orderedSheets = [...availableSheets].sort((left, right) => {
     const leftId = left.kind === "custom" ? left.designerPage.slotId : baseSlotId(left);
     const rightId = right.kind === "custom" ? right.designerPage.slotId : baseSlotId(right);
     const leftIndex = desiredOrder.indexOf(leftId); const rightIndex = desiredOrder.indexOf(rightId);
     return (leftIndex < 0 ? Number.MAX_SAFE_INTEGER : leftIndex) - (rightIndex < 0 ? Number.MAX_SAFE_INTEGER : rightIndex);
   });
+  const contentsContinuations = orderedSheets.filter((sheet) => sheet.kind === "contents" && sheet.contentsPageIndex > 0);
+  const sheetsWithoutContinuations = orderedSheets.filter((sheet) => sheet.kind !== "contents" || sheet.contentsPageIndex === 0);
+  const firstContentsIndex = sheetsWithoutContinuations.findIndex((sheet) => sheet.kind === "contents");
+  const sheets = firstContentsIndex < 0 ? sheetsWithoutContinuations : [...sheetsWithoutContinuations.slice(0, firstContentsIndex + 1), ...contentsContinuations, ...sheetsWithoutContinuations.slice(firstContentsIndex + 1)];
   const slotFor = (sheet: Sheet): Omit<CanvaPageOverride, "active" | "current" | "history"> => {
     if (sheet.kind === "custom") return { slotId: sheet.designerPage.slotId, label: sheet.designerPage.label, kind: "chapter", chapterId: sheet.designerPage.chapterId, pageIndex: sheet.designerPage.pageIndex };
     if (sheet.kind === "cover") return { slotId: "cover", label: "Front cover", kind: "cover" };
-    if (sheet.kind === "contents") return { slotId: "contents", label: "Contents page", kind: "contents" };
+    if (sheet.kind === "contents") return { slotId: sheet.contentsPageIndex === 0 ? "contents" : `contents-${sheet.contentsPageIndex + 1}`, label: sheet.contentsPageIndex === 0 ? "Contents page" : `Contents page ${sheet.contentsPageIndex + 1}`, kind: "contents" };
     if (sheet.kind === "back") return { slotId: "back", label: "Back cover", kind: "back" };
     return { slotId: `chapter-${sheet.chapter.id}-page-${sheet.pageIndex + 1}`, label: `Chapter ${sheet.chapter.id} · page ${sheet.pageIndex + 1}`, kind: "chapter", chapterId: sheet.chapter.id, pageIndex: sheet.pageIndex };
   };
@@ -4792,7 +4839,7 @@ function CanvaPreview({ project, exportBusy, pdfProgress, onClose, onDownload, o
   const designerFor = (sheet: Sheet) => sheet.kind === "custom" ? sheet.designerPage : (project.designerPages ?? []).find((page) => page.slotId === slotFor(sheet).slotId);
   const renderDesignerSheet = (rawPage: DesignerPageOverride, key: string) => {
     const currentBase = designerBasePages(project).find((candidate) => candidate.slotId === rawPage.slotId);
-    const page = hydrateDesignerOverride(currentBase && isLegacyDesignerScaffold(rawPage) ? { ...rawPage, html: currentBase.html } : rawPage);
+    const page = hydrateDesignerOverride(currentBase && (isLegacyDesignerScaffold(rawPage) || isGeneratedContentsScaffold(rawPage) || (!rawPage.layoutLocked && hasPrivateProductionText(rawPage.html))) ? { ...rawPage, html: currentBase.html } : rawPage);
     const surfaceClasses = `${designerBookClasses(project)} ${designerPageClasses(project, page)}${page.backgroundImageUrl ? " has-background" : ""}`;
     const backgroundStyle: CSSProperties = { backgroundImage: page.backgroundImageUrl ? `url(${page.backgroundImageUrl})` : undefined, backgroundSize: page.backgroundSize === "repeat" ? "auto" : page.backgroundSize, backgroundRepeat: page.backgroundSize === "repeat" ? "repeat" : "no-repeat", backgroundPosition: page.backgroundPosition, opacity: page.backgroundOpacity };
     const contentStyle = { fontFamily: page.fontFamily, fontSize: `${page.fontSize}px`, color: page.textColor, lineHeight: page.lineHeight, letterSpacing: `${page.letterSpacing}px`, padding: `${page.pagePadding}px`, "--designer-paragraph-space": `${page.paragraphSpacing}px`, ...designerColumnVariables(designerColumnsForPage(page, page.columns), page.columnGap) } as CSSProperties;
@@ -4803,8 +4850,8 @@ function CanvaPreview({ project, exportBusy, pdfProgress, onClose, onDownload, o
     const slot = slotFor(sheet);
     const base = `book-sheet ${worldClass} ${pageClass} ${borderClass} ${typographyClass}`;
     if (sheet.kind === "custom") return renderDesignerSheet(sheet.designerPage, key);
-    if (sheet.kind === "cover") return <article data-page-slot={slot.slotId} className={`${base} preview-cover`} key={key}><div className="cover-edition">IKS BOOK STUDIO · {project.audience.toUpperCase()}</div><h1>{project.title}</h1><span>An illustrated book shaped from your source</span><b>✦</b>{unresolved.length > 0 && <small className="draft-status">Working preview · {unresolved.length} chapter{unresolved.length === 1 ? "" : "s"} still in progress</small>}</article>;
-    if (sheet.kind === "contents") return <article data-page-slot={slot.slotId} className={`${base} preview-page contents-page`} key={key}><span>CONTENTS</span><h2>Inside this book</h2><ol>{printable.chapters.map((chapter, index) => <li key={chapter.id}><b>{String(index + 1).padStart(2, "0")}</b><span>{chapter.title}</span><i>{isPublishApproved(chapter) ? `${chapter.pages} pages` : "In progress"}</i></li>)}</ol></article>;
+    if (sheet.kind === "cover") return <article data-page-slot={slot.slotId} className={`${base} preview-cover`} key={key}><div className="cover-edition">IKS BOOK STUDIO · {project.audience.toUpperCase()}</div><h1>{project.title}</h1><span>An illustrated book shaped from your source</span><b>✦</b>{unresolvedChapterCount > 0 && <small className="draft-status">Working preview · {unresolvedChapterCount} chapter{unresolvedChapterCount === 1 ? "" : "s"} still in progress</small>}</article>;
+    if (sheet.kind === "contents") return <article data-page-slot={slot.slotId} className={`${base} preview-page contents-page`} key={key}><span>CONTENTS{sheet.contentsPageIndex ? " · CONTINUED" : ""}</span><h2>{sheet.contentsPageIndex ? "Inside this book · continued" : "Inside this book"}</h2><ol>{sheet.entries.map((entry) => <li key={entry.chapterId}><b>{String(entry.ordinal).padStart(2, "0")}</b><span>{entry.title}</span><i>{entry.pageCount} page{entry.pageCount === 1 ? "" : "s"}</i></li>)}</ol></article>;
     if (sheet.kind === "back") return <article data-page-slot={slot.slotId} className={`${base} preview-page backmatter`} key={key}><div className="back-main"><span>A FINAL THOUGHT</span><h2>Keep wondering</h2><p>The most powerful ideas do not end on the last page. They grow when we ask careful questions, notice new connections and share what we discover.</p><p>Carry one idea from this book into the world—and see where it leads.</p></div><div className="back-isbn-strip"><div className="back-isbn-meta"><b>IKS Book Studio</b><span>{project.audience} • iks-book.studio</span></div><div className="back-mrp" title="Click to edit MRP">MRP ₹ 399</div><div className="back-isbn-box"><span>ISBN — place sticker here</span></div></div></article>;
     const image = Boolean(sheet.imageUrl) && !sheet.body;
     const combined = Boolean(sheet.imageUrl) && Boolean(sheet.body);

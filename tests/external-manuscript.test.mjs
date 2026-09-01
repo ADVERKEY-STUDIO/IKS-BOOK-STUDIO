@@ -69,6 +69,31 @@ test("external manuscript parser reports missing publishing sections", () => {
   assert.ok(result.sections[0].issues.length >= 4);
 });
 
+test("external manuscript parser removes private file-manifest tails", () => {
+  const result = parseExternalManuscript(`# Test Book
+# INTRODUCTION
+${"Introductory reader text ".repeat(100)}
+# CHAPTER 01: A real chapter
+## IN THIS CHAPTER
+${"Substantial connected chapter text ".repeat(360)}
+## KEY TERMS
+Dharma means responsible conduct.
+## CHECK YOUR UNDERSTANDING
+What did this chapter explain?
+# CONCLUSION
+${"Concluding reader text ".repeat(100)}
+# GLOSSARY
+Dharma — responsible conduct.
+## MANUSCRIPT FILE MANIFEST
+01-a-real-chapter.md: 720 words`, "Ages 10–12");
+
+  const glossary = result.sections.find((section) => section.kind === "glossary");
+  assert.ok(glossary);
+  assert.doesNotMatch(glossary.raw, /MANUSCRIPT FILE MANIFEST/i);
+  assert.doesNotMatch(glossary.html, /\.md:\s*\d+\s+words/i);
+  assert.ok(result.issues.some((issue) => /private production metadata/i.test(issue)));
+});
+
 test("approved manuscript creates one cover and one stable image slot per real chapter", () => {
   const result = parseExternalManuscript(`# Book\n\n# INTRODUCTION\n${"welcome ".repeat(100)}\n\n# CHAPTER 01: First light\n## IN THIS CHAPTER\nA promise.\n## STORY\n${"A child watches a craftsperson prepare pigments in a sunlit courtyard. ".repeat(45)}\n## KEY TERMS\nPigment means colour material.\n## CHECK YOUR UNDERSTANDING\nWhat did you notice?\n## CHAPTER RECAP\nColour begins with careful work.\n\n# CONCLUSION\n${"together ".repeat(100)}`, settings.audience);
   const slots = createExternalIllustrationSlots(result, settings.title);

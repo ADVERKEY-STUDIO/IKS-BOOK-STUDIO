@@ -139,15 +139,23 @@ function sectionTitle(label: string, kind: ExternalManuscriptSection["kind"]) {
   return title || "Untitled chapter";
 }
 
+function removePrivateProductionTail(raw: string) {
+  const heading = /^#{1,6}\s*(?:MANUSCRIPT FILE MANIFEST|PACKAGE MANIFEST|DELIVERY MANIFEST|MANUSCRIPT PACKAGE NOTES?)\b.*$/im;
+  const match = heading.exec(raw);
+  if (!match) return { reader: raw, removedPrivateMetadata: false };
+  return { reader: raw.slice(0, match.index).trim(), removedPrivateMetadata: true };
+}
+
 function separatePrivateSections(raw: string) {
+  const production = removePrivateProductionTail(raw);
   const privateHeading = /^##+\s*(ILLUSTRATION BRIEF|SOURCE COVERAGE NOTES?|PRIVATE SOURCE NOTES?)\s*$/im;
-  const match = privateHeading.exec(raw);
-  if (!match) return { reader: raw.trim(), illustrationBrief: undefined };
-  const reader = raw.slice(0, match.index).trim();
-  const tail = raw.slice(match.index);
+  const match = privateHeading.exec(production.reader);
+  if (!match) return { reader: production.reader.trim(), illustrationBrief: undefined, removedPrivateMetadata: production.removedPrivateMetadata };
+  const reader = production.reader.slice(0, match.index).trim();
+  const tail = production.reader.slice(match.index);
   const nextHeading = tail.slice(match[0].length).search(/^##+\s+/m);
   const privateBody = nextHeading >= 0 ? tail.slice(match[0].length, match[0].length + nextHeading) : tail.slice(match[0].length);
-  return { reader, illustrationBrief: /illustration/i.test(match[1]) ? cleanLine(privateBody.replace(/\n+/g, " ")) : undefined };
+  return { reader, illustrationBrief: /illustration/i.test(match[1]) ? cleanLine(privateBody.replace(/\n+/g, " ")) : undefined, removedPrivateMetadata: production.removedPrivateMetadata };
 }
 
 function minimumWords(audience: string) {
@@ -162,12 +170,14 @@ export function parseExternalManuscript(value: string, audience: string): Extern
   const title = cleanLine(titleMatch?.[1] || "Imported book");
   const boundary = /^#{1,2}\s*((?:INTRODUCTION|CHAPTER\s*(?:\d+|[IVXLCDM]+)\s*[:.\-–—]?[^\n]*|CONCLUSION[^\n]*|GLOSSARY[^\n]*|APPENDIX[^\n]*|ACTIVITIES[^\n]*|REFERENCES[^\n]*))\s*$/gim;
   const matches = [...normalized.matchAll(boundary)];
+  let removedPrivateMetadata = false;
   const sections: ExternalManuscriptSection[] = matches.map((match, index) => {
     const label = cleanLine(match[1]);
     const kind = sectionKind(label);
     const start = (match.index || 0) + match[0].length;
     const end = matches[index + 1]?.index ?? normalized.length;
     const privateSplit = separatePrivateSections(normalized.slice(start, end));
+    removedPrivateMetadata ||= privateSplit.removedPrivateMetadata;
     const wordCount = words(privateSplit.reader).length;
     const issues: string[] = [];
     if (wordCount < (kind === "chapter" ? minimumWords(audience) : 90)) issues.push(`${kind === "chapter" ? "Chapter" : "Section"} is short (${wordCount} words).`);
@@ -179,6 +189,7 @@ export function parseExternalManuscript(value: string, audience: string): Extern
     return { kind, title: sectionTitle(label, kind), raw: privateSplit.reader, html: manuscriptMarkdownToHtml(privateSplit.reader), wordCount, illustrationBrief: privateSplit.illustrationBrief, issues };
   });
   const issues: string[] = [];
+  if (removedPrivateMetadata) issues.push("Private production metadata was removed from the reader-facing manuscript.");
   if (!sections.some((section) => section.kind === "introduction")) issues.push("Introduction is missing.");
   if (!sections.some((section) => section.kind === "chapter")) issues.push("No chapter headings were detected. Use headings such as # CHAPTER 01: Title.");
   if (!sections.some((section) => section.kind === "conclusion")) issues.push("Conclusion is missing.");
