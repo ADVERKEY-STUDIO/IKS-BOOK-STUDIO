@@ -8,7 +8,7 @@ import type { ChapterOneGate, PedagogyQuality } from "../lib/pedagogy";
 import { BOOK_PACKAGE_FORMAT, expectedChapterId, expectedContextKey, expectedPageId, type BookPackage, type BookPackageValidation, validateBookPackage } from "../lib/book-package";
 import { bookPersonaClass, bookPersonaDefinitions, bookPersonaPatch, inferBookPersona, materializePersona, personaById, type BookPersona } from "../lib/book-persona";
 import { outlineForMode, pdfChunkRanges, SAFE_OCR_CHUNK_BYTES, SAFE_OCR_CHUNK_PAGES, type OutlineMode, type SourceIntelligence, type SourceOutlineItem } from "../lib/source-intelligence";
-import { buildExternalAiPrompt, buildExternalIllustrationPrompt, parseExternalManuscript, type ExternalIllustrationSlot, type ExternalManuscriptResult } from "../lib/external-manuscript";
+import { buildExternalAiPrompt, buildExternalIllustrationPrompt, buildExternalIllustrationSlotPrompt, createExternalIllustrationSlots, matchExternalIllustrationArchive, parseExternalManuscript, type ExternalIllustrationSlot, type ExternalManuscriptResult } from "../lib/external-manuscript";
 
 type View = "dashboard" | "wizard" | "external" | "analysis" | "brief" | "editor";
 type EditorWorkspace = "designer" | "workflow";
@@ -253,7 +253,7 @@ type ExternalIllustrationCandidate = {
   slotId: string;
   file?: File;
   sourcePath?: string;
-  decision: "accept" | "skip";
+  decision: "accept" | "keep" | "skip";
   error?: string;
 };
 
@@ -1569,35 +1569,7 @@ export default function Home() {
         generationRuns: [],
       };
     });
-    const illustrationSlots: ExternalIllustrationSlot[] = [
-      {
-        id: "COVER",
-        role: "cover",
-        chapterTitle: "Front cover",
-        filename: "images/cover.jpg",
-        sceneBrief: `A richly rendered portrait cover that introduces ${result.title || project.title} through a specific setting, human-scale action and culturally grounded details. No text inside the image.`,
-        altText: `Front-cover illustration for ${result.title || project.title}`,
-        caption: "Front cover",
-        status: "pending",
-      },
-      ...result.sections.flatMap((section, sectionIndex) => {
-        if (section.kind !== "chapter") return [];
-        const chapterOrdinal = result.sections.slice(0, sectionIndex + 1).filter((item) => item.kind === "chapter").length;
-        const slotId = `CH-${String(chapterOrdinal).padStart(2, "0")}-IMG-01`;
-        const chapterId = sectionIndex + 1;
-        return [{
-          id: slotId,
-          role: "chapter" as const,
-          chapterId,
-          chapterTitle: section.title,
-          filename: `images/${slotId}.jpg`,
-          sceneBrief: section.illustrationBrief || `A specific narrative moment from “${section.title}” showing its real people, place, objects and central action—not a diagram or symbolic collage.`,
-          altText: `Narrative illustration for ${section.title}`,
-          caption: section.illustrationBrief || `A scene from ${section.title}`,
-          status: "pending" as const,
-        }];
-      }),
-    ];
+    const illustrationSlots = createExternalIllustrationSlots(result, project.title);
     const persona = inferBookPersona({ title: result.title || project.title, sourcePreview: result.sections.map((section) => `${section.title} ${section.raw.slice(0, 220)}`).join(" "), sourceHeadings: result.sections.map((section) => section.title), bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
     const nextBase: Project = {
       ...project,
@@ -1647,6 +1619,7 @@ export default function Home() {
       const decision = decisions.get(slot.id);
       const image = uploaded.get(slot.id);
       if (image) return { ...slot, status: "ready" as const, imageKey: image.key, imageUrl: image.url, sourcePath: image.sourcePath, error: undefined };
+      if (decision?.decision === "keep") return slot;
       if (decision?.decision === "skip") return { ...slot, status: "skipped" as const, error: undefined };
       if (decision?.error || uploadErrors.some((issue) => issue.startsWith(`${slot.id}:`))) return { ...slot, status: "failed" as const, error: decision?.error || uploadErrors.find((issue) => issue.startsWith(`${slot.id}:`)) };
       return { ...slot, status: "missing" as const, error: "The expected image was not present in the ZIP." };
@@ -2722,7 +2695,7 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
   onNotify: (message: string) => void;
 }) {
   const slots = project.externalIllustrations?.slots ?? [];
-  const prompt = useMemo(() => buildExternalIllustrationPrompt({
+  const promptProject = useMemo(() => ({
     title: project.title,
     sourceName: project.source,
     audience: project.audience,
@@ -2735,9 +2708,11 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
     chapters: project.chapters.map((chapter) => ({ id: chapter.id, title: chapter.title, body: chapter.body, context: chapter.context })),
     slots,
   }), [project, slots]);
-  const [candidates, setCandidates] = useState<ExternalIllustrationCandidate[]>([]);
-  const [issues, setIssues] = useState<string[]>([]);
+  const prompt = useMemo(() => buildExternalIllustrationPrompt(promptProject), [promptProject]);
+  const [candidates, setCandidates] = useState<ExternalIllustrationCandidate[]>(() => slots.map((slot) => ({ slotId: slot.id, decision: slot.status === "ready" ? "keep" : "accept" })));
   const [busy, setBusy] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [uploadIssues, setUploadIssues] = useState<string[]>([]);
   const downloadPrompt = () => {
     const href = URL.createObjectURL(new Blob([prompt], { type: "text/markdown;charset=utf-8" }));
     const anchor = document.createElement("a");
@@ -2745,57 +2720,67 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
     anchor.download = `${project.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "book"}-illustration-prompt.md`;
     anchor.click();
     URL.revokeObjectURL(href);
-    onNotify("Separate illustration prompt downloaded");
+    onNotify("Complete image-session prompt downloaded");
   };
   const copyPrompt = async () => {
     await navigator.clipboard.writeText(prompt);
-    onNotify("Separate illustration prompt copied");
-  };
-  const readZip = async (file: File) => {
-    setBusy(true);
-    try {
-      if (!/\.zip$/i.test(file.name)) throw new Error("Choose the illustration ZIP returned by your external AI");
-      if (file.size > 25 * 1024 * 1024) throw new Error("The compressed illustration ZIP must be 25 MB or smaller");
-      const archive = unzipSync(new Uint8Array(await file.arrayBuffer()));
-      const entries = Object.entries(archive).filter(([name]) => !name.startsWith("__MACOSX/") && !name.endsWith("/"));
-      if (entries.length > 100) throw new Error("The ZIP contains too many files (maximum 100)");
-      const unpackedBytes = entries.reduce((sum, [, bytes]) => sum + bytes.byteLength, 0);
-      if (unpackedBytes > 100 * 1024 * 1024) throw new Error("The unpacked ZIP is larger than the safe 100 MB limit");
-      const normalized = new Map(entries.map(([name, bytes]) => [name.replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase(), { name, bytes }]));
-      const used = new Set<string>();
-      const next = slots.map((slot): ExternalIllustrationCandidate => {
-        const stem = slot.filename.replace(/\.(?:jpe?g|png|webp)$/i, "").toLowerCase();
-        const match = [...normalized.entries()].find(([name]) => name.replace(/\.(?:jpe?g|png|webp)$/i, "") === stem && /\.(?:jpe?g|png|webp)$/i.test(name));
-        if (!match) return { slotId: slot.id, decision: "accept", error: `Missing ${slot.filename}` };
-        const [, entry] = match;
-        used.add(entry.name);
-        if (entry.bytes.byteLength > 10 * 1024 * 1024) return { slotId: slot.id, decision: "accept", sourcePath: entry.name, error: "Image is larger than 10 MB" };
-        const extension = entry.name.toLowerCase().split(".").pop();
-        const type = extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : "image/jpeg";
-        const buffer = entry.bytes.buffer.slice(entry.bytes.byteOffset, entry.bytes.byteOffset + entry.bytes.byteLength) as ArrayBuffer;
-        return { slotId: slot.id, decision: "accept", sourcePath: entry.name, file: new File([buffer], entry.name.split("/").pop() || `${slot.id}.jpg`, { type }) };
-      });
-      const extras = entries.filter(([name]) => /\.(?:jpe?g|png|webp|svg)$/i.test(name) && !used.has(name)).map(([name]) => `Unused file ignored: ${name}`);
-      const unsafe = entries.filter(([name]) => /\.svg$/i.test(name)).map(([name]) => `SVG rejected: ${name}`);
-      setCandidates(next);
-      setIssues([...unsafe, ...extras]);
-      onNotify(`${next.filter((item) => item.file).length} of ${slots.length} requested images matched`);
-    } catch (error) {
-      setCandidates([]);
-      setIssues([error instanceof Error ? error.message : "The illustration ZIP could not be read"]);
-      onNotify(error instanceof Error ? error.message : "The illustration ZIP could not be read");
-    } finally { setBusy(false); }
+    onNotify("Complete image-session prompt copied. Generate item 1, then reply NEXT for each following image.");
   };
   const updateCandidate = (slotId: string, patch: Partial<ExternalIllustrationCandidate>) => setCandidates((current) => current.map((item) => item.slotId === slotId ? { ...item, ...patch } : item));
+  const copySlotPrompt = async (slot: ExternalIllustrationSlot) => {
+    await navigator.clipboard.writeText(buildExternalIllustrationSlotPrompt(promptProject, slot));
+    onNotify(`${slot.id} image prompt copied. Generate only this one image.`);
+  };
+  const chooseImage = async (slot: ExternalIllustrationSlot, file: File) => {
+    if (file.size > 10 * 1024 * 1024) {
+      updateCandidate(slot.id, { file: undefined, sourcePath: file.name, decision: "accept", error: "Image is larger than 10 MB" });
+      return;
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const checked = matchExternalIllustrationArchive([{ path: slot.filename, bytes }], [slot]).matches[0];
+    if (!checked?.bytes || !checked.mimeType) {
+      updateCandidate(slot.id, { file: undefined, sourcePath: file.name, decision: "accept", error: checked?.error || "Choose a real JPG, PNG or WebP image" });
+      return;
+    }
+    updateCandidate(slot.id, { file, sourcePath: file.name, decision: "accept", error: undefined });
+    onNotify(`${slot.id} image is ready for review`);
+  };
+  const chooseImages = async (files: File[]) => {
+    if (!files.length) return;
+    const selected = files.slice(0, 100);
+    const entries = await Promise.all(selected.map(async (file) => ({ path: `images/${file.name}`, bytes: new Uint8Array(await file.arrayBuffer()) })));
+    const result = matchExternalIllustrationArchive(entries, slots);
+    const filesByName = new Map(selected.map((file) => [file.name.toLowerCase(), file]));
+    const matched = result.matches.flatMap((match) => {
+      if (!match.bytes || !match.sourcePath || match.error) return [];
+      const name = match.sourcePath.split("/").pop()?.toLowerCase() || "";
+      const file = filesByName.get(name);
+      return file ? [{ match, file }] : [];
+    });
+    setCandidates((current) => current.map((candidate) => {
+      const found = matched.find(({ match }) => match.slotId === candidate.slotId);
+      return found ? { ...candidate, file: found.file, sourcePath: found.file.name, decision: "accept", error: undefined } : candidate;
+    }));
+    const rejected = result.matches.filter((match) => match.sourcePath && match.error).map((match) => `${match.slotId}: ${match.error}`);
+    setUploadIssues([...result.issues, ...rejected]);
+    const firstUnmatched = slots.findIndex((slot) => !matched.some(({ match }) => match.slotId === slot.id) && slot.status !== "ready");
+    if (firstUnmatched >= 0) setActiveIndex(firstUnmatched);
+    onNotify(`${matched.length} of ${selected.length} selected images matched automatically`);
+  };
   const readyCount = slots.filter((slot) => slot.status === "ready").length;
+  const stagedCount = candidates.filter((candidate) => candidate.file && candidate.decision === "accept" && !candidate.error).length;
+  const hasChanges = candidates.some((candidate) => candidate.file || candidate.decision === "skip");
+  const activeSlot = slots[activeIndex];
+  const activeCandidate = activeSlot ? candidates.find((candidate) => candidate.slotId === activeSlot.id) : undefined;
+  const resolvedCount = slots.filter((slot) => slot.status === "ready" || candidates.some((candidate) => candidate.slotId === slot.id && candidate.file && candidate.decision === "accept" && !candidate.error)).length;
   return <main className="external-manuscript-page external-illustration-page">
     <button className="text-button" onClick={onBack}>← Back to Designer</button>
-    <header className="external-manuscript-hero"><div><p className="eyebrow">STAGE TWO · ILLUSTRATION PACKAGE</p><h1>The manuscript is safe. Create its pictures separately.</h1><p>The second prompt uses the approved chapters and strict art direction. It requests real raster illustrations—not Book Studio’s old diagram-like SVG scenes.</p></div><span>{readyCount}/{slots.length} images ready</span></header>
-    <section className="external-steps illustration-steps" aria-label="Two-stage external workflow"><div className="complete"><b>1</b><span>Manuscript prompt<small>Complete</small></span></div><div className="complete"><b>2</b><span>Manuscript import<small>{project.externalManuscript?.fileName}</small></span></div><div className="active"><b>3</b><span>Image prompt<small>Separate request</small></span></div><div><b>4</b><span>Generate externally<small>Actual raster files</small></span></div><div className={candidates.length ? "active" : ""}><b>5</b><span>Review ZIP<small>{candidates.length ? `${candidates.filter((item) => item.file).length} matched` : "Waiting"}</small></span></div><div className={readyCount ? "complete" : ""}><b>6</b><span>Design & export<small>{readyCount ? "Available" : "Pending"}</small></span></div></section>
-    <div className="external-manuscript-grid"><section className="external-action-card prompt-card"><p className="eyebrow">IMAGE PROMPT</p><h2>One prompt for the complete art package</h2><p>Give this prompt to ChatGPT or another image-capable service after the manuscript is approved. It requests one coherent cover and one detailed scene per real chapter.</p><button className="primary" onClick={downloadPrompt}>Download image prompt</button><button className="secondary" onClick={() => void copyPrompt()}>Copy image prompt</button><details><summary>Quality protections</summary><ul><li>No SVG, diagrams, infographics or abstract placeholder people</li><li>Exact filename for every chapter destination</li><li>Consistent characters, materials, palette and cultural details</li><li>Portrait A4 cover and print-quality 4:3 chapter scenes</li></ul></details></section><section className="external-action-card import-card"><p className="eyebrow">ILLUSTRATION ZIP</p><h2>Upload and review before placement</h2><label className="external-manuscript-upload"><input type="file" accept="application/zip,.zip" disabled={busy} onChange={(event) => event.target.files?.[0] && void readZip(event.target.files[0])}/><b>{busy ? "Checking every image…" : "Upload illustration ZIP"}</b><span>JPG, PNG or WebP · exact requested filenames · 25 MB ZIP maximum</span></label><p className="illustration-safety-note">Nothing is inserted automatically until you review this list. Missing files remain visible as “Illustration pending.”</p></section></div>
-    {issues.length > 0 && <div className="manuscript-global-issues">{issues.map((issue) => <span key={issue}>! {issue}</span>)}</div>}
-    {(candidates.length > 0 || project.externalIllustrations?.importedAt) && <section className="illustration-review"><header><div><p className="eyebrow">IMAGE REVIEW</p><h2>Confirm every destination</h2><p>Accept, replace or skip each image. A skipped or missing image never becomes generic generated artwork.</p></div></header><div className="illustration-review-grid">{slots.map((slot) => { const candidate = candidates.find((item) => item.slotId === slot.id); return <article key={slot.id} className={`${slot.status} ${candidate?.error ? "has-error" : ""}`}><div className="illustration-thumb">{candidate?.file ? <LocalImagePreview file={candidate.file} alt={slot.altText}/> : slot.imageUrl ? <img src={slot.imageUrl} alt={slot.altText}/> : <span>Illustration pending</span>}</div><div className="illustration-review-copy"><span>{slot.id} · {slot.role === "cover" ? "Front cover" : `Chapter ${slot.chapterId}`}</span><b>{slot.chapterTitle}</b><small>{candidate?.sourcePath || slot.sourcePath || slot.filename}</small><p>{slot.sceneBrief}</p>{candidate?.error && <em>{candidate.error}</em>}<div><label>Replace<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) updateCandidate(slot.id, { file, sourcePath: file.name, error: undefined, decision: "accept" }); }}/></label>{candidate && <button className={candidate.decision === "skip" ? "selected" : ""} onClick={() => updateCandidate(slot.id, { decision: candidate.decision === "skip" ? "accept" : "skip" })}>{candidate.decision === "skip" ? "Skipped" : "Skip"}</button>}</div></div></article>; })}</div><footer><button className="secondary" onClick={onReplaceManuscript}>Replace manuscript</button><button className="secondary" onClick={onOpenDesigner}>Continue without remaining images</button>{candidates.length > 0 && <button className="primary" disabled={busy} onClick={() => { setBusy(true); void onImport(candidates, issues).finally(() => setBusy(false)); }}>{busy ? "Uploading to the project…" : "Accept reviewed images"}</button>}</footer></section>}
-    {!candidates.length && !project.externalIllustrations?.importedAt && <div className="illustration-stage-footer"><button className="secondary" onClick={onReplaceManuscript}>Replace manuscript</button><button className="primary" onClick={onOpenDesigner}>Continue to Designer without images</button></div>}
+    <header className="external-manuscript-hero"><div><p className="eyebrow">STAGE TWO · SIMPLE IMAGE SESSION</p><h1>One prompt. Type NEXT. Upload everything once.</h1><p>No API and no repetitive chapter cards. The complete prompt controls the sequence while the external AI generates one high-quality image at a time.</p></div><span>{resolvedCount}/{slots.length} ready</span></header>
+    <section className="simple-image-steps" aria-label="Simple external image workflow"><div><b>1</b><span>Copy the complete prompt<small>Paste it once into ChatGPT or another image AI.</small></span></div><div><b>2</b><span>Download, then type NEXT<small>Repeat NEXT until the queue is finished.</small></span></div><div><b>3</b><span>Select all images once<small>Book Studio matches the filenames automatically.</small></span></div></section>
+    <section className="image-session-actions"><div><p className="eyebrow">ONE-TIME PROMPT</p><h2>Start the complete image session</h2><p>The AI reads every chapter scene now, creates the first image, then waits for <b>NEXT</b> before creating each following image.</p><button className="primary" onClick={() => void copyPrompt()}>Copy complete image prompt</button><button className="secondary" onClick={downloadPrompt}>Download prompt</button></div><label className="bulk-image-upload"><input type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={(event) => void chooseImages(Array.from(event.target.files || []))}/><span>↑</span><b>Select all downloaded images</b><small>Expected names: cover.jpg, CH-01-IMG-01.jpg, CH-02-IMG-01.jpg…</small></label></section>
+    {uploadIssues.length > 0 && <div className="bulk-image-issues">{uploadIssues.map((issue) => <span key={issue}>{issue}</span>)}</div>}
+    {activeSlot && <section className="active-image-slot"><div className="active-image-preview">{activeCandidate?.file ? <LocalImagePreview file={activeCandidate.file} alt={activeSlot.altText}/> : activeSlot.imageUrl ? <img src={activeSlot.imageUrl} alt={activeSlot.altText}/> : <span>Illustration pending</span>}</div><div className="active-image-copy"><p className="eyebrow">{activeIndex + 1} OF {slots.length} · {activeSlot.id}</p><h2>{activeSlot.chapterTitle}</h2><p>{activeSlot.sceneBrief}</p><div className="active-image-actions"><button disabled={activeIndex === 0} onClick={() => setActiveIndex((index) => Math.max(0, index - 1))}>← Previous</button><button onClick={() => void copySlotPrompt(activeSlot)}>Copy only this prompt</button><label>{activeCandidate?.file || activeSlot.imageUrl ? "Replace image" : "Upload this image"}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void chooseImage(activeSlot, file); }}/></label><button disabled={activeIndex === slots.length - 1} onClick={() => setActiveIndex((index) => Math.min(slots.length - 1, index + 1))}>Next →</button></div></div></section>}
+    <section className="compact-image-review"><header><div><p className="eyebrow">QUICK REVIEW</p><h2>{resolvedCount} of {slots.length} images ready</h2></div><span>Click a thumbnail only when you need to inspect or replace it.</span></header><div>{slots.map((slot, index) => { const candidate = candidates.find((item) => item.slotId === slot.id); const ready = Boolean(candidate?.file || slot.imageUrl); return <button key={slot.id} className={`${ready ? "ready" : "pending"} ${activeIndex === index ? "active" : ""}`} onClick={() => setActiveIndex(index)}><span>{candidate?.file ? <LocalImagePreview file={candidate.file} alt=""/> : slot.imageUrl ? <img src={slot.imageUrl} alt=""/> : <i>{index + 1}</i>}</span><b>{slot.id}</b><small>{ready ? "Ready" : "Missing"}</small></button>; })}</div><footer><button className="secondary" onClick={onReplaceManuscript}>Replace manuscript</button><button className="secondary" onClick={onOpenDesigner}>Continue with pending images</button>{hasChanges && <button className="primary" disabled={busy} onClick={() => { setBusy(true); void onImport(candidates, uploadIssues).finally(() => setBusy(false)); }}>{busy ? "Saving images…" : "Import ready images"}</button>}</footer></section>
   </main>;
 }
 

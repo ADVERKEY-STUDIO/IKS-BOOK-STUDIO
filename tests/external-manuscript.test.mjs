@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { buildExternalAiPrompt, parseExternalManuscript } from "../lib/external-manuscript.ts";
+import { buildExternalAiPrompt, buildExternalIllustrationPrompt, buildExternalIllustrationSlotPrompt, createExternalIllustrationSlots, matchExternalIllustrationArchive, parseExternalManuscript } from "../lib/external-manuscript.ts";
 
 const settings = {
   title: "A Child's Rasa Reader",
@@ -23,7 +23,8 @@ test("external prompt asks a provider to read the source and return structured M
   assert.match(prompt, /# CONCLUSION/);
   assert.match(prompt, /# GLOSSARY/);
   assert.match(prompt, /Do not return JSON/);
-  assert.match(prompt, /No map, Venn diagram or generic infographic/);
+  assert.match(prompt, /manuscript text only/);
+  assert.match(prompt, /Do not generate, embed or describe images/);
 });
 
 test("external manuscript parser preserves order and separates private illustration briefs", () => {
@@ -68,13 +69,64 @@ test("external manuscript parser reports missing publishing sections", () => {
   assert.ok(result.sections[0].issues.length >= 4);
 });
 
+test("approved manuscript creates one cover and one stable image slot per real chapter", () => {
+  const result = parseExternalManuscript(`# Book\n\n# INTRODUCTION\n${"welcome ".repeat(100)}\n\n# CHAPTER 01: First light\n## IN THIS CHAPTER\nA promise.\n## STORY\n${"A child watches a craftsperson prepare pigments in a sunlit courtyard. ".repeat(45)}\n## KEY TERMS\nPigment means colour material.\n## CHECK YOUR UNDERSTANDING\nWhat did you notice?\n## CHAPTER RECAP\nColour begins with careful work.\n\n# CONCLUSION\n${"together ".repeat(100)}`, settings.audience);
+  const slots = createExternalIllustrationSlots(result, settings.title);
+  assert.deepEqual(slots.map((slot) => slot.id), ["COVER", "CH-01-IMG-01"]);
+  assert.equal(slots[1].chapterId, 2);
+  assert.match(slots[1].sceneBrief, /craftsperson prepare pigments/);
+  assert.equal(slots[1].filename, "images/CH-01-IMG-01.jpg");
+});
+
+test("second-stage session prompt queues every scene while generating one image per NEXT", () => {
+  const slots = [{ id: "COVER", role: "cover", chapterTitle: "Front cover", filename: "images/cover.jpg", sceneBrief: "Cover", altText: "Cover", caption: "Cover", status: "pending" }, { id: "CH-01-IMG-01", role: "chapter", chapterId: 1, chapterTitle: "Seeing Rasa", filename: "images/CH-01-IMG-01.jpg", sceneBrief: "A dancer performs for attentive children", altText: "Children watching a dancer", caption: "Expression and attention", status: "pending" }];
+  const project = { ...settings, chapters: [{ id: 1, title: "Seeing Rasa", body: "A chapter about expression, gesture and an attentive audience." }], slots };
+  const prompt = buildExternalIllustrationPrompt(project);
+  assert.match(prompt, /COMPLETE IMAGE SESSION/);
+  assert.match(prompt, /Do NOT produce SVG/);
+  assert.match(prompt, /Do NOT imitate the simple diagram-like placeholder artwork/);
+  assert.match(prompt, /Generate item 1 now/);
+  assert.match(prompt, /Each NEXT advances by exactly one numbered item/);
+  assert.match(prompt, /Save\/download filename: CH-01-IMG-01\.jpg/);
+  assert.match(prompt, /A dancer performs for attentive children/);
+  assert.match(prompt, /Never create substitute files, thumbnails, icons, diagrams, contact sheets or a ZIP/);
+  const slotPrompt = buildExternalIllustrationSlotPrompt(project, slots[1]);
+  assert.match(slotPrompt, /Generate exactly ONE finished illustration/);
+  assert.match(slotPrompt, /A dancer performs for attentive children/);
+  assert.match(slotPrompt, /simple mountain-and-shape placeholder style/);
+  assert.match(slotPrompt, /Generate only CH-01-IMG-01 now/);
+});
+
+test("illustration archive matching verifies exact slots, safe paths and real raster signatures", () => {
+  const slots = [{ id: "COVER", role: "cover", chapterTitle: "Front cover", filename: "images/cover.jpg", sceneBrief: "Cover", altText: "Cover", caption: "Cover", status: "pending" }, { id: "CH-01-IMG-01", role: "chapter", chapterId: 1, chapterTitle: "Chapter", filename: "images/CH-01-IMG-01.jpg", sceneBrief: "Scene", altText: "Scene", caption: "Scene", status: "pending" }];
+  const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xdb, 1, 2]);
+  const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
+  const result = matchExternalIllustrationArchive([{ path: "images/cover.jpg", bytes: jpeg }, { path: "images/CH-01-IMG-01.png", bytes: png }, { path: "images/unused.svg", bytes: new Uint8Array([60, 115, 118, 103]) }, { path: "../unsafe.png", bytes: png }], slots);
+  assert.deepEqual(result.matches.map((match) => match.mimeType), ["image/jpeg", "image/png"]);
+  assert.ok(result.issues.some((issue) => /SVG rejected/.test(issue)));
+  assert.ok(result.issues.some((issue) => /Unsafe/.test(issue)));
+});
+
+test("illustration archive matching leaves missing and disguised files unresolved", () => {
+  const slots = [{ id: "COVER", role: "cover", chapterTitle: "Front cover", filename: "images/cover.jpg", sceneBrief: "Cover", altText: "Cover", caption: "Cover", status: "pending" }, { id: "CH-01-IMG-01", role: "chapter", chapterId: 1, chapterTitle: "Chapter", filename: "images/CH-01-IMG-01.jpg", sceneBrief: "Scene", altText: "Scene", caption: "Scene", status: "pending" }];
+  const result = matchExternalIllustrationArchive([{ path: "images/cover.jpg", bytes: new TextEncoder().encode("not really a jpeg") }], slots);
+  assert.match(result.matches[0].error, /contents are not a supported/);
+  assert.match(result.matches[1].error, /Missing images\/CH-01-IMG-01\.jpg/);
+});
+
 test("site exposes the external workflow, supported imports and DOCX extraction route", () => {
   const page = fs.readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
   const worker = fs.readFileSync(new URL("../worker/index.ts", import.meta.url), "utf8");
   assert.match(page, /Use ChatGPT, Claude or DeepSeek/);
   assert.match(page, /accept="\.md,\.markdown,\.txt,\.docx,\.zip"/);
   assert.match(page, /Use the simple external-AI workflow/);
-  assert.match(page, /Accept manuscript & open studio/);
+  assert.match(page, /Accept manuscript & create image prompt/);
+  assert.match(page, /One prompt\. Type NEXT\. Upload everything once/);
+  assert.match(page, /Copy complete image prompt/);
+  assert.match(page, /Select all downloaded images/);
+  assert.match(page, /multiple accept="image\/png,image\/jpeg,image\/webp"/);
+  assert.doesNotMatch(page, /Upload illustration ZIP/);
+  assert.match(page, /Continue with pending images/);
   assert.match(worker, /\/api\/manuscript\/extract/);
   assert.match(worker, /mammoth\.extractRawText/);
 });

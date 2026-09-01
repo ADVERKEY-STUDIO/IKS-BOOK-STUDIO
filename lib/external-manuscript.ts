@@ -48,6 +48,24 @@ export type ExternalIllustrationPromptProject = ExternalManuscriptSettings & {
   slots: ExternalIllustrationSlot[];
 };
 
+export type ExternalIllustrationArchiveEntry = {
+  path: string;
+  bytes: Uint8Array;
+};
+
+export type ExternalIllustrationArchiveMatch = {
+  slotId: string;
+  sourcePath?: string;
+  bytes?: Uint8Array;
+  mimeType?: "image/jpeg" | "image/png" | "image/webp";
+  error?: string;
+};
+
+export type ExternalIllustrationArchiveResult = {
+  matches: ExternalIllustrationArchiveMatch[];
+  issues: string[];
+};
+
 function cleanLine(value: string) {
   return value.replace(/\u00a0/g, " ").replace(/[ \t]+/g, " ").trim();
 }
@@ -168,6 +186,87 @@ export function parseExternalManuscript(value: string, audience: string): Extern
   return { title, sections, issues, words: sections.reduce((sum, section) => sum + section.wordCount, 0) };
 }
 
+function illustrationSceneBrief(section: ExternalManuscriptSection) {
+  if (section.illustrationBrief) return section.illustrationBrief;
+  const context = cleanLine(section.raw.replace(/[#*_>`~-]/g, " ")).slice(0, 700);
+  return `Create one specific narrative moment from “${section.title}”. Show real people, a believable place, purposeful action, relevant objects, a clear focal point and meaningful background details grounded in this chapter: ${context}`;
+}
+
+export function createExternalIllustrationSlots(result: ExternalManuscriptResult, fallbackTitle: string): ExternalIllustrationSlot[] {
+  return [
+    {
+      id: "COVER",
+      role: "cover",
+      chapterTitle: "Front cover",
+      filename: "images/cover.jpg",
+      sceneBrief: `A richly rendered portrait cover that introduces ${result.title || fallbackTitle} through a specific setting, human-scale action and culturally grounded details. No text inside the image.`,
+      altText: `Front-cover illustration for ${result.title || fallbackTitle}`,
+      caption: "Front cover",
+      status: "pending",
+    },
+    ...result.sections.flatMap((section, sectionIndex) => {
+      if (section.kind !== "chapter") return [];
+      const chapterOrdinal = result.sections.slice(0, sectionIndex + 1).filter((item) => item.kind === "chapter").length;
+      const slotId = `CH-${String(chapterOrdinal).padStart(2, "0")}-IMG-01`;
+      return [{
+        id: slotId,
+        role: "chapter" as const,
+        chapterId: sectionIndex + 1,
+        chapterTitle: section.title,
+        filename: `images/${slotId}.jpg`,
+        sceneBrief: illustrationSceneBrief(section),
+        altText: `Narrative illustration for ${section.title}`,
+        caption: section.illustrationBrief || `A scene from ${section.title}`,
+        status: "pending" as const,
+      }];
+    }),
+  ];
+}
+
+function normalizedArchivePath(value: string) {
+  const path = value.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (!path || path.startsWith("/") || path.includes("\0") || /(^|\/)\.\.(\/|$)/.test(path) || /^[a-z][a-z0-9+.-]*:/i.test(path)) return "";
+  return path.replace(/\/{2,}/g, "/");
+}
+
+function rasterMimeType(bytes: Uint8Array): ExternalIllustrationArchiveMatch["mimeType"] | undefined {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a) return "image/png";
+  if (bytes.length >= 12 && String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" && String.fromCharCode(...bytes.slice(8, 12)) === "WEBP") return "image/webp";
+  return undefined;
+}
+
+export function matchExternalIllustrationArchive(entries: ExternalIllustrationArchiveEntry[], slots: ExternalIllustrationSlot[]): ExternalIllustrationArchiveResult {
+  if (entries.length > 100) return { matches: slots.map((slot) => ({ slotId: slot.id, error: "Archive contains too many files" })), issues: ["The ZIP contains too many files (maximum 100)."] };
+  const unpackedBytes = entries.reduce((sum, entry) => sum + entry.bytes.byteLength, 0);
+  if (unpackedBytes > 100 * 1024 * 1024) return { matches: slots.map((slot) => ({ slotId: slot.id, error: "Archive exceeds safe unpacked size" })), issues: ["The unpacked ZIP is larger than the safe 100 MB limit."] };
+
+  const safeEntries = entries.flatMap((entry) => {
+    const path = normalizedArchivePath(entry.path);
+    return path && !path.startsWith("__MACOSX/") && !path.endsWith("/") ? [{ ...entry, path }] : [];
+  });
+  const issues: string[] = entries.length === safeEntries.length ? [] : ["Unsafe or system ZIP paths were ignored."];
+  const used = new Set<string>();
+  const matches = slots.map((slot): ExternalIllustrationArchiveMatch => {
+    const expectedStem = normalizedArchivePath(slot.filename).replace(/\.(?:jpe?g|png|webp)$/i, "").toLowerCase();
+    const candidates = safeEntries.filter((entry) => /\.(?:jpe?g|png|webp)$/i.test(entry.path) && entry.path.replace(/\.(?:jpe?g|png|webp)$/i, "").toLowerCase() === expectedStem);
+    if (!candidates.length) return { slotId: slot.id, error: `Missing ${slot.filename}` };
+    if (candidates.length > 1) return { slotId: slot.id, error: `More than one file matches ${slot.filename}` };
+    const entry = candidates[0];
+    used.add(entry.path);
+    if (entry.bytes.byteLength > 10 * 1024 * 1024) return { slotId: slot.id, sourcePath: entry.path, error: "Image is larger than 10 MB" };
+    const mimeType = rasterMimeType(entry.bytes);
+    if (!mimeType) return { slotId: slot.id, sourcePath: entry.path, error: "File extension says image, but its contents are not a supported JPG, PNG or WebP image" };
+    return { slotId: slot.id, sourcePath: entry.path, bytes: entry.bytes, mimeType };
+  });
+
+  for (const entry of safeEntries) {
+    if (/\.svg$/i.test(entry.path)) issues.push(`SVG rejected: ${entry.path}`);
+    else if (/\.(?:jpe?g|png|webp)$/i.test(entry.path) && !used.has(entry.path)) issues.push(`Unused file ignored: ${entry.path}`);
+  }
+  return { matches, issues };
+}
+
 export function buildExternalAiPrompt(settings: ExternalManuscriptSettings) {
   return `# IKS BOOK STUDIO — EXTERNAL AI MANUSCRIPT REQUEST
 
@@ -239,27 +338,20 @@ function plainReaderText(value: string) {
 }
 
 export function buildExternalIllustrationPrompt(project: ExternalIllustrationPromptProject) {
-  const chapterById = new Map(project.chapters.map((chapter) => [chapter.id, chapter]));
-  const requests = project.slots.map((slot) => {
-    if (slot.role === "cover") return `### ${slot.id} — FRONT COVER
-- Exact output filename: ${slot.filename}
-- Portrait composition: 2480 × 3508 px (A4 ratio), full bleed
-- Book title: ${project.title}
-- Direction: A richly rendered cover scene that introduces the book’s real subject, world and young reader without placing any words, title lettering or logos inside the image.`;
-    const chapter = chapterById.get(slot.chapterId || -1);
-    const context = plainReaderText(chapter?.body || chapter?.context || "").slice(0, 2600);
-    return `### ${slot.id} — ${slot.chapterTitle}
-- Exact output filename: ${slot.filename}
-- Landscape composition: 2400 × 1800 px (4:3)
-- Scene requirement: ${slot.sceneBrief}
-- Chapter context: ${context}
-- Caption meaning: ${slot.caption}
-- Alt-text intent: ${slot.altText}`;
+  const requests = project.slots.map((slot, index) => {
+    const chapter = project.chapters.find((item) => item.id === slot.chapterId);
+    const context = plainReaderText(chapter?.body || chapter?.context || "").slice(0, 1800);
+    const dimensions = slot.role === "cover" ? "portrait A4, 2480 × 3508 px, full bleed" : "landscape 4:3, 2400 × 1800 px";
+    return `## ${index + 1}. ${slot.id} — ${slot.role === "cover" ? "FRONT COVER" : slot.chapterTitle}
+- Save/download filename: ${slot.filename.split("/").pop()}
+- Format: ${dimensions}
+- Scene: ${slot.sceneBrief}
+${slot.role === "cover" ? `- Book subject: ${project.title}` : `- Chapter context: ${context}`}
+- Caption intent: ${slot.caption}`;
   }).join("\n\n");
+  return `# IKS BOOK STUDIO — COMPLETE IMAGE SESSION
 
-  return `# IKS BOOK STUDIO — SEPARATE ILLUSTRATION PACKAGE REQUEST
-
-The manuscript for “${project.title}” is complete and approved. Create the finished raster illustration package only. Do not rewrite or summarize the manuscript.
+The manuscript for “${project.title}” is complete and approved. This is one continuous image-generation session. Read the complete queue now, generate only item 1, and wait. Whenever the designer replies NEXT, generate only the next numbered item.
 
 ## BOOK ART BIBLE
 - Reader: ${project.audience} (${project.readingLevel})
@@ -273,16 +365,54 @@ The manuscript for “${project.title}” is complete and approved. Create the f
 ## ABSOLUTE QUALITY RULES
 - Produce detailed, publication-quality JPG, PNG or WebP raster illustrations.
 - Do NOT produce SVG, clip art, stick figures, flat diagrams, infographics, maps, charts, UI panels, random circles or boxes, abstract placeholder people, noisy texture collages, or schematic educational graphics.
+- Do NOT imitate the simple diagram-like placeholder artwork previously shown by Book Studio. Every requested file must be a fully rendered editorial illustration with believable depth, light, materials, faces, hands and environment.
 - Do NOT place text, captions, labels, page numbers, watermarks, logos, borders or mock book layouts inside an image.
 - Do NOT return image links or hotlinked web assets. Return the actual image files.
 - Preserve faces and hands carefully. Keep children age-appropriate and scenes emotionally safe.
 - Make every chapter image visually distinct while keeping one coherent book style.
 
-## REQUIRED FILES
-Create exactly these requested images and keep every filename unchanged:
+## IMAGE QUEUE
 
 ${requests}
 
-## DELIVERY
-Return one downloadable ZIP named ${project.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "book"}-illustrations.zip with the requested files inside an images/ folder. Include no manuscript files and no extra images. Before returning the ZIP, verify that every requested filename exists, every file opens correctly, and every image follows the art bible.`;
+## REQUIRED WORKFLOW
+- Silently read the complete queue and visual rules before generating anything.
+- Generate item 1 now. After returning its image, wait for the exact reply NEXT.
+- Each NEXT advances by exactly one numbered item. Never skip, combine or repeat items.
+- Return the actual full-resolution image itself, followed by one short line containing only its required filename.
+- Keep this conversation as the shared visual reference so recurring characters and style remain consistent.
+- Generate exactly ONE requested image at a time.
+- Never create substitute files, thumbnails, icons, diagrams, contact sheets or a ZIP containing fake placeholders.
+- Do not start another destination until the designer replies NEXT.
+- The designer will download the images and upload all of them to Book Studio together after the session.
+
+Begin now with item 1 only.`;
+}
+
+export function buildExternalIllustrationSlotPrompt(project: ExternalIllustrationPromptProject, slot: ExternalIllustrationSlot) {
+  const chapter = project.chapters.find((item) => item.id === slot.chapterId);
+  const context = plainReaderText(chapter?.body || chapter?.context || "").slice(0, 3200);
+  const dimensions = slot.role === "cover" ? "portrait A4 composition, 2480 × 3508 px, full bleed" : "landscape 4:3 composition, 2400 × 1800 px";
+  return `Generate exactly ONE finished illustration for the children’s book “${project.title}”. Use your image-generation tool now and return the actual full-resolution image—not code, SVG, a description, a mockup, a contact sheet or a ZIP.
+
+DESTINATION: ${slot.id} — ${slot.role === "cover" ? "FRONT COVER" : slot.chapterTitle}
+FORMAT: ${dimensions}
+STYLE: ${project.illustrationStyle}; ${project.aesthetic}; coherent with the same book’s previously approved images.
+READER: ${project.audience} (${project.readingLevel})
+SCENE: ${slot.sceneBrief}
+${slot.role === "cover" ? `BOOK SUBJECT: ${project.title}` : `CHAPTER CONTEXT: ${context}`}
+CAPTION INTENT: ${slot.caption}
+
+COMPOSITION REQUIREMENTS
+- Show one specific, believable moment with a clear focal subject, purposeful action, foreground, middle ground, background, natural lighting and culturally grounded material detail.
+- Render people, faces, hands, clothing, architecture and objects with publication-quality detail and believable depth.
+- Keep recurring characters, palette, materials and rendering style consistent with earlier approved images in this same conversation.
+- Leave useful breathing room for page design, but do not add a frame or book layout.
+
+STRICTLY FORBIDDEN
+- SVG, clip art, stick figures, flat diagrams, infographics, maps, charts, icons, random circles or boxes, abstract placeholder people, noisy texture collages, schematic educational graphics or the simple mountain-and-shape placeholder style.
+- Text, title lettering, captions, labels, page numbers, logos, watermarks, borders or UI inside the image.
+- Multiple alternatives, thumbnails, contact sheets, other chapters or fabricated files.
+
+Generate only ${slot.id} now. Return the image itself at the requested orientation and quality.`;
 }
