@@ -1973,7 +1973,7 @@ OUTPUT REQUIREMENTS
         return issues;
       });
       if (mode === "publication" && renderedBlockers.length) {
-        notify(`Publication PDF is locked until ${renderedBlockers.length} rendered-page issue${renderedBlockers.length === 1 ? " is" : "s are"} resolved.`);
+        notify(`Publication PDF is locked: ${renderedBlockers.slice(0, 3).join("; ")}${renderedBlockers.length > 3 ? `; plus ${renderedBlockers.length - 3} more` : ""}.`);
         return;
       }
       const unfinished = new Set(publication.blockers.map((blocker) => blocker.chapterId)).size + renderedBlockers.length;
@@ -1983,15 +1983,20 @@ OUTPUT REQUIREMENTS
       const raster = pdfRasterSettings(sheets.length, mode);
       pdf.setProperties({ title: project.title, subject: mode === "draft" ? "Draft book proof — not for publication" : "Publication-ready book", author: "IKS Book Studio", creator: "IKS Book Studio" });
       for (let index = 0; index < sheets.length; index += 1) {
-        const canvas = await html2canvas(sheets[index], { backgroundColor: "#fffdf8", scale: raster.scale, useCORS: true, logging: false, imageTimeout: 15000 });
         try {
-          const jpeg = await canvasToJpegBytes(canvas, raster.quality);
-          if (index > 0) pdf.addPage(physicalPage, "portrait");
-          pdf.addImage(jpeg, "JPEG", 0, 0, exportFormat.widthMm, exportFormat.heightMm, undefined, "FAST");
-          addSelectableTextLayer(pdf as unknown as SelectablePdf, sheets[index], exportFormat.widthMm, exportFormat.heightMm);
-        } finally {
-          canvas.width = 1;
-          canvas.height = 1;
+          const canvas = await html2canvas(sheets[index], { backgroundColor: "#fffdf8", scale: raster.scale, useCORS: true, logging: false, imageTimeout: 15000 });
+          try {
+            const jpeg = await canvasToJpegBytes(canvas, raster.quality);
+            if (index > 0) pdf.addPage(physicalPage, "portrait");
+            pdf.addImage(jpeg, "JPEG", 0, 0, exportFormat.widthMm, exportFormat.heightMm, undefined, "FAST");
+            addSelectableTextLayer(pdf as unknown as SelectablePdf, sheets[index], exportFormat.widthMm, exportFormat.heightMm);
+          } finally {
+            canvas.width = 1;
+            canvas.height = 1;
+          }
+        } catch (reason) {
+          const detail = reason instanceof Error ? reason.message : "page rendering failed";
+          throw new Error(`PDF export stopped at page ${index + 1} (${sheets[index].dataset.pageSlot || "unknown page"}): ${detail}`);
         }
         setPdfProgress(Math.round((index + 1) / sheets.length * 100));
         await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -1999,8 +2004,8 @@ OUTPUT REQUIREMENTS
       const safeTitle = project.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "book";
       pdf.save(`${safeTitle}-${exportFormat.id}${mode === "draft" ? "-draft-proof" : "-complete"}.pdf`);
       notify(mode === "draft" ? `${exportFormat.label} draft proof downloaded with ${unfinished} publication blocker${unfinished === 1 ? "" : "s"}` : `${exportFormat.label} publication PDF downloaded`);
-    } catch {
-      notify("The PDF could not be created. Preview remains open so you can inspect the pages.");
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "The PDF could not be created. Preview remains open so you can inspect the pages.");
     } finally {
       setExportBusy(false);
       setPdfProgress(0);

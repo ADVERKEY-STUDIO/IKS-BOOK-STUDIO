@@ -51,6 +51,8 @@ test("multi-page PDF export avoids base64 canvas accumulation", async () => {
   assert.match(page, /canvasToJpegBytes\(canvas, raster\.quality\)/);
   assert.match(page, /canvas\.width = 1/);
   assert.doesNotMatch(page, /pdf\.addImage\(canvas\.toDataURL/);
+  assert.match(page, /PDF export stopped at page \$\{index \+ 1\}/);
+  assert.match(page, /renderedBlockers\.slice\(0, 3\)\.join/);
 });
 
 test("chapter drafting keeps private fact-check references inside each detected range", async () => {
