@@ -9,7 +9,7 @@ import { BOOK_PACKAGE_FORMAT, expectedChapterId, expectedContextKey, expectedPag
 import { bookPersonaClass, bookPersonaDefinitions, bookPersonaPatch, inferBookPersona, materializePersona, personaById, type BookPersona } from "../lib/book-persona";
 import { outlineForMode, pdfChunkRanges, SAFE_OCR_CHUNK_BYTES, SAFE_OCR_CHUNK_PAGES, type OutlineMode, type SourceIntelligence, type SourceOutlineItem } from "../lib/source-intelligence";
 import { assignIllustrationsToReaderPages, buildExternalAiPrompt, buildExternalIllustrationPrompt, buildExternalIllustrationPromptPack, buildExternalIllustrationSlotPrompt, createExternalIllustrationSlots, matchExternalIllustrationArchive, parseExternalManuscript, upgradeExternalIllustrationSlots, type ExternalIllustrationSlot, type ExternalManuscriptResult } from "../lib/external-manuscript";
-import { assessPublication, chapterRequiresIllustration, hasPrivateProductionText, paginateContents, sanitizeReaderHtml, type ContentsEntry } from "../lib/publication";
+import { assessPublication, chapterRequiresIllustration, hasPrivateProductionText, paginateContents, pdfRasterSettings, sanitizeReaderHtml, type ContentsEntry } from "../lib/publication";
 
 type View = "dashboard" | "wizard" | "external" | "analysis" | "brief" | "editor";
 type EditorWorkspace = "designer" | "workflow";
@@ -309,6 +309,15 @@ function addSelectableTextLayer(pdf: SelectablePdf, sheet: HTMLElement) {
     const fallback = sheet.dataset.pdfText?.replace(/\s+/g, " ").trim();
     if (fallback) pdf.setFontSize(8).text(fallback, 12, 18, { maxWidth: 186, renderingMode: "invisible" });
   }
+}
+
+async function canvasToJpegBytes(canvas: HTMLCanvasElement, quality: number) {
+  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(
+    (result) => result ? resolve(result) : reject(new Error("The rendered PDF page could not be encoded")),
+    "image/jpeg",
+    quality,
+  ));
+  return new Uint8Array(await blob.arrayBuffer());
 }
 
 type ExternalIllustrationCandidate = {
@@ -1964,12 +1973,19 @@ OUTPUT REQUIREMENTS
       const unfinished = new Set(publication.blockers.map((blocker) => blocker.chapterId)).size + renderedBlockers.length;
       const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")]);
       const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4", compress: true });
+      const raster = pdfRasterSettings(sheets.length, mode);
       pdf.setProperties({ title: project.title, subject: mode === "draft" ? "Draft book proof — not for publication" : "Publication-ready book", author: "IKS Book Studio", creator: "IKS Book Studio" });
       for (let index = 0; index < sheets.length; index += 1) {
-        const canvas = await html2canvas(sheets[index], { backgroundColor: "#fffdf8", scale: mode === "draft" ? 1.7 : 2.5, useCORS: true, logging: false, imageTimeout: 15000 });
-        if (index > 0) pdf.addPage("a4", "portrait");
-        pdf.addImage(canvas.toDataURL("image/jpeg", mode === "draft" ? 0.84 : 0.92), "JPEG", 0, 0, 210, 297, undefined, "FAST");
-        addSelectableTextLayer(pdf as unknown as SelectablePdf, sheets[index]);
+        const canvas = await html2canvas(sheets[index], { backgroundColor: "#fffdf8", scale: raster.scale, useCORS: true, logging: false, imageTimeout: 15000 });
+        try {
+          const jpeg = await canvasToJpegBytes(canvas, raster.quality);
+          if (index > 0) pdf.addPage("a4", "portrait");
+          pdf.addImage(jpeg, "JPEG", 0, 0, 210, 297, undefined, "FAST");
+          addSelectableTextLayer(pdf as unknown as SelectablePdf, sheets[index]);
+        } finally {
+          canvas.width = 1;
+          canvas.height = 1;
+        }
         setPdfProgress(Math.round((index + 1) / sheets.length * 100));
         await new Promise((resolve) => window.setTimeout(resolve, 0));
       }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { assessPublication, paginateContents, sanitizeReaderHtml } from "../lib/publication.ts";
+import { assessPublication, paginateContents, pdfRasterSettings, sanitizeReaderHtml } from "../lib/publication.ts";
 
 test("long contents lists split into stable pages without losing chapters", () => {
   const chapters = Array.from({ length: 27 }, (_, index) => ({
@@ -19,6 +19,12 @@ test("long contents lists split into stable pages without losing chapters", () =
   assert.equal(pages[0][1].startPage, 4);
   assert.equal(pages[1].at(-1)?.startPage, 79);
   assert.equal(pages[1].at(-1)?.ordinal, 27);
+});
+
+test("long publication PDFs use a bounded raster memory profile", () => {
+  assert.deepEqual(pdfRasterSettings(83, "publication"), { scale: 1.7, quality: 0.84 });
+  assert.deepEqual(pdfRasterSettings(12, "publication"), { scale: 2.5, quality: 0.92 });
+  assert.deepEqual(pdfRasterSettings(83, "draft"), { scale: 1.45, quality: 0.78 });
 });
 
 test("publication readiness rejects missing visuals and private production text", () => {

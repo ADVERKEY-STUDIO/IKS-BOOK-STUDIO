@@ -44,6 +44,14 @@ test("a sparse final text page shares its unused space with the chapter illustra
   assert.match(css, /\.chapter-text-visual-sheet \.chapter-image img\{[^}]*max-height:315px;object-fit:cover/);
 });
 
+test("multi-page PDF export avoids base64 canvas accumulation", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /pdfRasterSettings\(sheets\.length, mode\)/);
+  assert.match(page, /canvasToJpegBytes\(canvas, raster\.quality\)/);
+  assert.match(page, /canvas\.width = 1/);
+  assert.doesNotMatch(page, /pdf\.addImage\(canvas\.toDataURL/);
+});
+
 test("chapter drafting keeps private fact-check references inside each detected range", async () => {
   const worker = await readFile(new URL("../worker/index.ts", import.meta.url), "utf8");
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");

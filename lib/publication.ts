@@ -27,6 +27,19 @@ export type PublicationBlocker = {
   message: string;
 };
 
+export function pdfRasterSettings(pageCount: number, mode: "draft" | "publication") {
+  const pages = Math.max(1, Math.floor(pageCount));
+  if (pages >= 60) return mode === "draft"
+    ? { scale: 1.45, quality: 0.78 }
+    : { scale: 1.7, quality: 0.84 };
+  if (pages >= 30) return mode === "draft"
+    ? { scale: 1.55, quality: 0.8 }
+    : { scale: 2, quality: 0.87 };
+  return mode === "draft"
+    ? { scale: 1.7, quality: 0.84 }
+    : { scale: 2.5, quality: 0.92 };
+}
+
 const privateProductionText = /\b(?:MANUSCRIPT FILE MANIFEST|PACKAGE MANIFEST|ILLUSTRATION PENDING|CHAPTER IN PROGRESS|DESIGNER HANDOFF|RESERVED FOR FINAL HUMAN DEVELOPMENT)\b|\b[\w-]+\.md\s*:\s*\d+\s+words?\b/i;
 const privateProductionHeading = /<h[1-6][^>]*>\s*(?:MANUSCRIPT FILE MANIFEST|PACKAGE MANIFEST|DELIVERY MANIFEST|MANUSCRIPT PACKAGE NOTES?)\s*<\/h[1-6]>/i;
 const readerProvenanceText = /\bthe subject\b|\b(?:the|this|your|uploaded|original) (?:source|document|adaptation)\b|\baccording to (?:the|this) source\b/i;
