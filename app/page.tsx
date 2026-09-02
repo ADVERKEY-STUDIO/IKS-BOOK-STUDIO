@@ -1388,7 +1388,6 @@ export default function Home() {
   const [projects, setProjects] = useState<Project[]>([seedProject]);
   const [activeChapter, setActiveChapter] = useState(1);
   const [wizardStep, setWizardStep] = useState(0);
-  const [toast, setToast] = useState("");
   const [showPreview, setShowPreview] = useState(false);
   const [editorWorkspace, setEditorWorkspace] = useState<EditorWorkspace>("workflow");
   const [showReviewQueue, setShowReviewQueue] = useState(false);
@@ -1410,6 +1409,10 @@ export default function Home() {
   const [comparison, setComparison] = useState<ChapterComparison | null>(null);
   const [bookPaused, setBookPaused] = useState(false);
   const pauseAfterCurrentRef = useRef(false);
+  const [editorDirty, setEditorDirty] = useState(false);
+  const editorDirtyRef = useRef(false);
+  const currentViewRef = useRef<View>("dashboard");
+  const currentWorkspaceRef = useRef<EditorWorkspace>("workflow");
   const editorRef = useRef<HTMLDivElement>(null);
   const designerStudioRef = useRef<DesignerStudioHandle>(null);
 
@@ -1443,13 +1446,75 @@ export default function Home() {
     }).catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    currentViewRef.current = view;
+    currentWorkspaceRef.current = editorWorkspace;
+  }, [view, editorWorkspace]);
+
+  useEffect(() => {
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (currentViewRef.current !== "editor" || !editorDirtyRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        if (view === "editor" && editorWorkspace === "workflow") void saveChapterBody();
+        else if (view !== "dashboard" && editorWorkspace !== "designer") void saveProject();
+      } else if (event.key === "Escape") {
+        if (aiRequest) setAiRequest(null);
+        else if (showComparison) setShowComparison(false);
+        else if (showPackageImport) setShowPackageImport(false);
+        else if (showReviewQueue) setShowReviewQueue(false);
+        else if (showOperations) setShowOperations(false);
+        else if (showVersions) setShowVersions(false);
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  });
+
   function requestHeaders() { return { "content-type": "application/json", ...ownerHeaders() }; }
 
   const active = project.chapters.find((chapter) => chapter.id === activeChapter) ?? project.chapters[0];
   const allocatedPages = useMemo(() => totalBookPages(project.chapters), [project.chapters]);
-  const notify = (message: string) => {
-    setToast(message);
-    window.setTimeout(() => setToast(""), 2300);
+  const [toast, setToast] = useState<{ text: string; kind: "success" | "warning" | "error" } | null>(null);
+  const notify = (message: string, kind: "success" | "warning" | "error" = "success") => {
+    setToast({ text: message, kind });
+    window.setTimeout(() => setToast(null), 2600);
+  };
+  const notifyError = (message: string) => notify(message, "error");
+  const notifyWarning = (message: string) => notify(message, "warning");
+  const markEditorDirty = (dirty: boolean) => {
+    if (editorDirtyRef.current === dirty) return;
+    editorDirtyRef.current = dirty;
+    setEditorDirty(dirty);
+  };
+  // Keep an explicit save of contentEditable edits before anything unmounts the editor.
+  const saveDraftOrConfirm = async () => {
+    if (currentViewRef.current !== "editor" || currentWorkspaceRef.current !== "workflow" || !editorDirtyRef.current) return true;
+    const saveFirst = window.confirm("This chapter has unsaved edits. OK saves them before continuing; Cancel discards them.");
+    if (saveFirst) {
+      await saveChapterBody();
+      return true;
+    }
+    markEditorDirty(false);
+    return true;
+  };
+  const leaveEditor = async (action: () => void) => {
+    if (await saveDraftOrConfirm()) action();
+  };
+  const selectChapter = async (id: number) => {
+    if (id === activeChapter) return;
+    if (!(await saveDraftOrConfirm())) return;
+    markEditorDirty(false);
+    setActiveChapter(id);
   };
   const patchProject = (patch: Partial<Project>) => setProject((current) => {
     let next = { ...current, ...patch };
@@ -1505,7 +1570,7 @@ export default function Home() {
       });
       notify(source.sourceIntelligence?.status === "ocr-required" ? `${file.name} uploaded. Choose an OCR method to detect its real structure.` : `${file.name} analysed successfully`);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Could not analyse this source");
+      notifyError(error instanceof Error ? error.message : "Could not analyse this source");
     } finally {
       setSourceBusy(false);
       setSourceProgress(0);
@@ -1544,7 +1609,7 @@ export default function Home() {
       setView("analysis");
       notify("Original chapters re-detected and adaptation pages recommended.");
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Could not refresh the source");
+      notifyError(error instanceof Error ? error.message : "Could not refresh the source");
     } finally {
       setSourceBusy(false);
       setSourceProgress(0);
@@ -1552,7 +1617,7 @@ export default function Home() {
   }
 
   async function runSourceOcr(engine: "cloudflare-ai" | "mistral-ocr") {
-    if (!project.sourceObjectKey) return notify("Upload the source first");
+    if (!project.sourceObjectKey) return notifyWarning("Upload the source first");
     setSourceBusy(true);
     const totalBatches = Math.max(1, project.sourceIntelligence?.ocrBatchesTotal || 1);
     let latest = { ...(project.sourceIntelligence as SourceIntelligence), status: "reading-contents" as const, progress: 25, message: `${engine === "mistral-ocr" ? "Accurate" : "Free"} OCR is preparing ${totalBatches} safe batch${totalBatches === 1 ? "" : "es"}…`, ocrEngine: engine, ocrBatchesTotal: totalBatches };
@@ -1577,7 +1642,7 @@ export default function Home() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "OCR could not detect the outline";
       patchProject({ sourceIntelligence: { ...latest, status: /quota|credit/i.test(message) ? "paused" : "ocr-required", message, lastError: message } });
-      notify(error instanceof Error ? error.message : "OCR failed");
+      notifyError(error instanceof Error ? error.message : "OCR failed");
     } finally { setSourceBusy(false); }
   }
 
@@ -1589,7 +1654,7 @@ export default function Home() {
   function acceptSourceOutline(mode: OutlineMode) {
     if (!project.sourceIntelligence) return;
     const selected = outlineForMode(project.sourceIntelligence.outline, mode).filter((item) => item.included);
-    if (!selected.length) return notify("Include at least one detected Part or chapter");
+    if (!selected.length) return notifyWarning("Include at least one detected Part or chapter");
     const plans: ChapterContextPlan[] = selected.map((item) => {
       const sourcePageCount = Math.max(1, item.sourceEndPage - item.sourceStartPage + 1);
       const seed = { title: item.title, sourceStartPage: item.sourceStartPage, sourceEndPage: item.sourceEndPage, sourcePageCount, sourceWordCount: sourcePageCount * 260, complexityScore: .55, complexity: "Concept-rich" as const, keyTerms: item.title.toLowerCase().match(/[\p{L}\p{N}]+/gu)?.filter((word) => word.length > 4).slice(0, 5) || [], context: `Verified source range pp. ${item.sourceStartPage}–${item.sourceEndPage}.`, recommendedPages: 4, pageReason: `Source-led adaptation of ${sourcePageCount} scanned pages. The chapter itself will be sent to Nemotron only when generated.` };
@@ -1760,7 +1825,7 @@ export default function Home() {
     try {
       await persistProject(next);
       notify("Book saved");
-    } catch (error) { notify(error instanceof Error ? error.message : "Save failed"); }
+    } catch (error) { notifyError(error instanceof Error ? error.message : "Save failed"); }
   }
 
   async function openProject(selected: Project) {
@@ -1808,7 +1873,7 @@ export default function Home() {
       await persistProject(next);
       notify(needsContextPlan ? `${titles.length} chapters replanned at their shortest clear length` : `${titles.length} original chapters detected`);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Could not re-check the original chapters");
+      notifyError(error instanceof Error ? error.message : "Could not re-check the original chapters");
     } finally {
       setSourceBusy(false);
     }
@@ -1818,7 +1883,7 @@ export default function Home() {
     const next = { ...project, chapters: fitChaptersToBookLimit(project.chapters), adaptationPlanConfirmed: true, adaptationPlanVersion: ADAPTATION_PLAN_VERSION, briefApproved: false };
     setProject(next);
     setView("brief");
-    try { await persistProject(next); } catch { notify("Page choices are kept here; save again when connected"); }
+    try { await persistProject(next); } catch { notifyError("Page choices are kept here; save again when connected"); }
   }
 
   async function saveChapterBody() {
@@ -1827,7 +1892,7 @@ export default function Home() {
     const edited = project.chapters.map((chapter) => chapter.id === active.id ? { ...chapter, body: html, status: "draft" as const, generationStatus: chapterGenerationState(chapter) === "Designer handoff" ? "Designer handoff" as const : "Needs review" as const, generationProfile: "", pedagogyQuality: undefined, importedPages: undefined, importValidated: false } : chapter);
     const next = { ...project, chapters: attachChapterVisuals(project, edited) };
     setProject(next);
-    try { await persistProject(next); notify("Chapter updated and saved"); } catch { notify("Chapter changed; save again when connected"); }
+    try { await persistProject(next); markEditorDirty(false); notify("Chapter updated and saved"); } catch { notifyError("Chapter changed; save again when connected"); }
   }
 
   async function aiAction(action: string) {
@@ -1896,7 +1961,7 @@ OUTPUT REQUIREMENTS
       const data = await response.json() as { version: { label: string; date: string; snapshot: Project } };
       setVersions((current) => [data.version, ...current]);
       notify("Version checkpoint created");
-    } catch { notify("Version could not be created"); }
+    } catch { notifyError("Version could not be created"); }
   }
 
   async function preserveGenerationVersion(snapshot: Project, chapter: Chapter) {
@@ -1940,7 +2005,7 @@ OUTPUT REQUIREMENTS
       anchor.click();
       URL.revokeObjectURL(href);
       notify("Editable DOCX downloaded");
-    } catch { notify("Could not create the DOCX"); }
+    } catch { notifyError("Could not create the DOCX"); }
     finally { setExportBusy(false); }
   }
 
@@ -1952,7 +2017,7 @@ OUTPUT REQUIREMENTS
     const publication = publicationStatus(project);
     if (mode === "publication" && !publication.ready) {
       setShowPreview(true);
-      notify(`Publication PDF is locked until ${publication.blockers.length} blocker${publication.blockers.length === 1 ? " is" : "s are"} resolved.`);
+      notifyWarning(`Publication PDF is locked until ${publication.blockers.length} blocker${publication.blockers.length === 1 ? " is" : "s are"} resolved.`);
       return;
     }
     setPdfExportMode(mode);
@@ -1973,7 +2038,7 @@ OUTPUT REQUIREMENTS
         return issues;
       });
       if (mode === "publication" && renderedBlockers.length) {
-        notify(`Publication PDF is locked: ${renderedBlockers.slice(0, 3).join("; ")}${renderedBlockers.length > 3 ? `; plus ${renderedBlockers.length - 3} more` : ""}.`);
+        notifyWarning(`Publication PDF is locked: ${renderedBlockers.slice(0, 3).join("; ")}${renderedBlockers.length > 3 ? `; plus ${renderedBlockers.length - 3} more` : ""}.`);
         return;
       }
       const unfinished = new Set(publication.blockers.map((blocker) => blocker.chapterId)).size + renderedBlockers.length;
@@ -2005,7 +2070,7 @@ OUTPUT REQUIREMENTS
       pdf.save(`${safeTitle}-${exportFormat.id}${mode === "draft" ? "-draft-proof" : "-complete"}.pdf`);
       notify(mode === "draft" ? `${exportFormat.label} draft proof downloaded with ${unfinished} publication blocker${unfinished === 1 ? "" : "s"}` : `${exportFormat.label} publication PDF downloaded`);
     } catch (reason) {
-      notify(reason instanceof Error ? reason.message : "The PDF could not be created. Preview remains open so you can inspect the pages.");
+      notifyError(reason instanceof Error ? reason.message : "The PDF could not be created. Preview remains open so you can inspect the pages.");
     } finally {
       setExportBusy(false);
       setPdfProgress(0);
@@ -2026,7 +2091,7 @@ OUTPUT REQUIREMENTS
 
   async function duplicateProject(source: Project) {
     const copy = normalizeProject({ ...source, id: makeId(), title: `${source.title} — Copy`, updatedAt: "Just now" });
-    try { await persistProject(copy); notify("Project duplicated"); } catch { notify("Could not duplicate project"); }
+    try { await persistProject(copy); notify("Project duplicated"); } catch { notifyError("Could not duplicate project"); }
   }
 
   async function deleteProject(source: Project) {
@@ -2036,11 +2101,11 @@ OUTPUT REQUIREMENTS
       const next = projects.filter((item) => item.id !== source.id);
       setProjects(next.length ? next : [seedProject]);
       notify("Project deleted");
-    } else notify("Could not delete project");
+    } else notifyError("Could not delete project");
   }
 
   function addChapter() {
-    if (project.chapters.length >= CHAPTER_PAGE_BUDGET) { notify("The 100-page safety ceiling cannot fit another chapter start"); return; }
+    if (project.chapters.length >= CHAPTER_PAGE_BUDGET) { notifyWarning("The 100-page safety ceiling cannot fit another chapter start"); return; }
     const id = Math.max(0, ...project.chapters.map((chapter) => chapter.id)) + 1;
     const nextChapter: Chapter = { id, title: `New chapter ${id}`, pages: 6, status: "planned", generationStatus: "Waiting", locked: false, sourceRefs: [], body: `<p class="chapter-kicker">CHAPTER ${id}</p><h1>New chapter ${id}</h1><p class="chapter-deck">Develop this chapter with a clear idea, a memorable example and a thoughtful ending.</p>` };
     patchProject({ chapters: fitChaptersToBookLimit(attachChapterVisuals(project, [...project.chapters, nextChapter])) });
@@ -2055,7 +2120,7 @@ OUTPUT REQUIREMENTS
     form.set("projectId", project.id);
     const response = await fetch("/api/image", { method: "POST", headers: ownerHeaders(), body: form });
     const data = await response.json() as { image?: { key: string; url: string }; error?: string };
-    if (!response.ok || !data.image) { notify(data.error || "Image upload failed"); return; }
+    if (!response.ok || !data.image) { notifyError(data.error || "Image upload failed"); return; }
     const updatedChapters = project.chapters.map((chapter) => chapter.id === active.id ? { ...chapter, imageKey: data.image?.key, imageUrl: data.image?.url, imageCaption: chapter.imageCaption || chapter.title, imageAlt: `Uploaded illustration for ${chapter.title}`, visualType: "uploaded" } : chapter);
     // Also clear any existing Designer overrides for this chapter so Preview and Designer regenerate from the new chapter image
     const filteredDesignerPages = (project.designerPages ?? []).filter((page) => page.chapterId !== active.id);
@@ -2307,7 +2372,7 @@ OUTPUT REQUIREMENTS
       return chapterWordCount(chapter) < 350;
     }).map((chapter) => chapter.id);
     const chapterIds = requestedChapterIds;
-    if (!chapterIds.length) { notify("Every available chapter has already completed this workflow"); return; }
+    if (!chapterIds.length) { notifyWarning("Every available chapter has already completed this workflow"); return; }
     setDraftBusy(true);
     let completed = 0;
     let workingProject = project;
@@ -2318,7 +2383,7 @@ OUTPUT REQUIREMENTS
     const runIds = new Map<number, string>();
     try {
       if (!project.sourceObjectKey) {
-        notify("Re-upload the original book to build a meaningfully taught chapter with the AI teaching engine.");
+        notifyWarning("Re-upload the original book to build a meaningfully taught chapter with the AI teaching engine.");
         return;
       }
       let cursor = 0;
@@ -2434,11 +2499,11 @@ OUTPUT REQUIREMENTS
       }
 
       if (quotaPause) {
-        notify(`${completed ? `${completed} chapter${completed === 1 ? "" : "s"} saved. ` : ""}Daily quota reached. Generation stopped—use Resume book after the quota resets.`);
+        notifyWarning(`${completed ? `${completed} chapter${completed === 1 ? "" : "s"} saved. ` : ""}Daily quota reached. Generation stopped—use Resume book after the quota resets.`);
       } else if (pauseAfterCurrentRef.current) {
         notify(`${completed ? `${completed} chapter${completed === 1 ? "" : "s"} saved. ` : ""}Book paused. Use Resume book when you are ready.`);
       } else if (failureReason) {
-        notify(completed ? `${completed} chapter${completed === 1 ? "" : "s"} saved. Resume starts from the first unfinished chapter: ${failureReason}` : failureReason);
+        notifyError(completed ? `${completed} chapter${completed === 1 ? "" : "s"} saved. Resume starts from the first unfinished chapter: ${failureReason}` : failureReason);
       } else {
         const usageNote = totalUsage.requests ? ` · ${totalUsage.totalTokens.toLocaleString()} tokens in ${totalUsage.requests} request${totalUsage.requests === 1 ? "" : "s"}` : "";
         const gate = workingProject.chapters.find((chapter) => chapter.id === 1)?.phase7Evaluation;
@@ -2446,7 +2511,7 @@ OUTPUT REQUIREMENTS
       }
     } catch (error) {
       const reason = error instanceof Error ? error.message : "Could not prepare the chapters";
-      notify(completed ? `${completed} chapter${completed === 1 ? "" : "s"} saved. Resume starts from the first unfinished chapter: ${reason}` : reason);
+      notifyError(completed ? `${completed} chapter${completed === 1 ? "" : "s"} saved. Resume starts from the first unfinished chapter: ${reason}` : reason);
     } finally {
       setDraftBusy(false);
     }
@@ -2464,7 +2529,7 @@ OUTPUT REQUIREMENTS
     } catch (error) {
       const message = error instanceof Error ? error.message : "Nemotron connection failed";
       setConnection({ state: "error", message });
-      notify(message);
+      notifyError(message);
     }
   }
 
@@ -2502,7 +2567,7 @@ OUTPUT REQUIREMENTS
       if (!response.ok) throw new Error("Version history could not be loaded");
       const data = await response.json() as { versions: { label: string; date: string; snapshot: Project }[] };
       const previous = data.versions[0];
-      if (!previous) { notify("No previous version is available yet"); return; }
+      if (!previous) { notifyWarning("No previous version is available yet"); return; }
       await fetch("/api/versions", { method: "POST", headers: requestHeaders(), body: JSON.stringify({ projectId: project.id, label: "Before restoring previous version", snapshot: project }) });
       const restored = normalizeProject(previous.snapshot);
       setProject(restored);
@@ -2511,7 +2576,7 @@ OUTPUT REQUIREMENTS
       setShowComparison(false);
       notify(`Restored: ${previous.label}`);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Previous version could not be restored");
+      notifyError(error instanceof Error ? error.message : "Previous version could not be restored");
     }
   }
 
@@ -2538,7 +2603,7 @@ OUTPUT REQUIREMENTS
       await persistProject(next);
       notify(`Chapter ${chapterToSend.id} sent to the designer and saved.`);
     } catch {
-      notify("The designer handoff could not be saved");
+      notifyError("The designer handoff could not be saved");
     }
   }
 
@@ -2572,13 +2637,16 @@ OUTPUT REQUIREMENTS
         if (target === "top") window.scrollTo({ top: 0, behavior: "smooth" });
       }));
     } catch (error) {
-      notify(error instanceof Error ? `Designer changes could not be saved: ${error.message}` : "Designer changes could not be saved");
+      notifyError(error instanceof Error ? `Designer changes could not be saved: ${error.message}` : "Designer changes could not be saved");
     }
   }
 
   function openWorkspacePreview() {
     if (editorWorkspace === "designer" && designerStudioRef.current) void designerStudioRef.current.previewWholeBook();
-    else openPreview();
+    else {
+      if (view === "editor" && editorWorkspace === "workflow" && editorDirtyRef.current && editorRef.current) void saveChapterBody();
+      openPreview();
+    }
   }
 
   if (view === "dashboard") return <Dashboard projects={projects} onNew={startNewBook} onOpen={openProject} onDuplicate={duplicateProject} onDelete={deleteProject} />;
@@ -2586,11 +2654,11 @@ OUTPUT REQUIREMENTS
   return (
     <div className="studio-shell">
       <header className="topbar">
-        <button className="brand" onClick={() => setView("dashboard")}><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></button>
+        <button className="brand" onClick={() => void leaveEditor(() => setView("dashboard"))}><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></button>
         <div className="current-project"><i /> <span><strong>{project.title}</strong><small>{project.source}</small></span></div>
         <div className="top-actions">
-          {view === "editor" && <><button className={editorWorkspace === "designer" ? "designer-nav-button active" : "designer-nav-button"} onClick={() => setEditorWorkspace("designer")}>{editorWorkspace === "workflow" ? "Return to Designer" : "Designer"}</button><button className="pdf-button" onClick={openWorkspacePreview}>Preview & PDF</button></>}
-          {(view === "editor" || view === "brief") && <details className="advanced-tools"><summary>Advanced</summary><div>{view === "editor" && <><button onClick={() => void openProductionWorkflow("top")}>Production workflow</button><button onClick={() => void openProductionWorkflow("chapters")}>Chapters</button><button onClick={() => setShowReviewQueue(true)}>Review queue · {project.chapters.filter((chapter) => !isPublishApproved(chapter)).length || "complete"}</button><button onClick={() => void openProductionWorkflow("illustrations")}>Illustrations</button>{project.creationMode === "external" && <button onClick={() => setView("external")}>External illustration package</button>}<button onClick={() => setView("brief")}>Book plan</button></>}<label className="advanced-upload">{sourceBusy ? "Reading source…" : "Replace source book"}<input type="file" accept=".pdf,.docx,.txt,.md" disabled={sourceBusy || draftBusy} onChange={(event) => event.target.files?.[0] && refreshSource(event.target.files[0])}/></label><button onClick={openVersions}>Version history</button><button onClick={() => setShowOperations(true)}>Request history</button><button onClick={saveProject}>Save project now</button><button onClick={exportDoc} disabled={exportBusy}>{exportBusy ? "Preparing DOCX…" : "Download DOCX"}</button><button className="package-import-button" onClick={() => setShowPackageImport(true)}>ChatGPT ZIP workflow</button><small>Generation, review, source, versions and export tools</small></div></details>}
+          {view === "editor" && <><button className={editorWorkspace === "designer" ? "designer-nav-button active" : "designer-nav-button"} onClick={() => void leaveEditor(() => setEditorWorkspace(editorWorkspace === "workflow" ? "designer" : "workflow"))}>{editorWorkspace === "workflow" ? "Return to Designer" : "Designer"}</button><button className="pdf-button" onClick={openWorkspacePreview}>Preview & PDF</button></>}
+          {(view === "editor" || view === "brief") && <details className="advanced-tools"><summary>Advanced</summary><div>{view === "editor" && <><button onClick={() => void openProductionWorkflow("top")}>Production workflow</button><button onClick={() => void openProductionWorkflow("chapters")}>Chapters</button><button onClick={() => setShowReviewQueue(true)}>Review queue · {project.chapters.filter((chapter) => !isPublishApproved(chapter)).length || "complete"}</button><button onClick={() => void openProductionWorkflow("illustrations")}>Illustrations</button>{project.creationMode === "external" && <button onClick={() => void leaveEditor(() => setView("external"))}>External illustration package</button>}<button onClick={() => void leaveEditor(() => setView("brief"))}>Book plan</button></>}<label className="advanced-upload">{sourceBusy ? "Reading source…" : "Replace source book"}<input type="file" accept=".pdf,.docx,.txt,.md" disabled={sourceBusy || draftBusy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void leaveEditor(() => void refreshSource(file)); }}/></label><button onClick={openVersions}>Version history</button><button onClick={() => setShowOperations(true)}>Request history</button><button onClick={saveProject}>Save project now</button><button onClick={exportDoc} disabled={exportBusy}>{exportBusy ? "Preparing DOCX…" : "Download DOCX"}</button><button className="package-import-button" onClick={() => setShowPackageImport(true)}>ChatGPT ZIP workflow</button><small>Generation, review, source, versions and export tools</small></div></details>}
         </div>
       </header>
 
@@ -2602,8 +2670,8 @@ OUTPUT REQUIREMENTS
         connection={connection}
         hasComparison={Boolean(comparison)}
         onTest={() => void testNemotronConnection()}
-        onSelectChapter={setActiveChapter}
-        onGenerateChapter={(chapterId) => { setActiveChapter(chapterId); void prepareDraft("active", { chapterId }); }}
+        onSelectChapter={selectChapter}
+        onGenerateChapter={(chapterId) => { void selectChapter(chapterId).then(() => void prepareDraft("active", { chapterId })); }}
         onPause={pauseAfterCurrentChapter}
         onResume={() => void prepareDraft("all")}
         onCompare={() => comparison ? setShowComparison(true) : notify("Improve a chapter first to compare both versions")}
@@ -2619,17 +2687,17 @@ OUTPUT REQUIREMENTS
       {view === "external" && <ExternalAiManuscript project={project} onBack={() => { if (project.externalManuscript) setView("editor"); else { setView("wizard"); setWizardStep(3); } }} onAccept={acceptExternalManuscript} onImportIllustrations={importExternalIllustrations} onOpenDesigner={() => { setEditorWorkspace("designer"); setView("editor"); }} onNotify={notify} />}
       {view === "analysis" && <Analysis project={project} sourceBusy={sourceBusy} onPatch={patchProject} onBack={() => { setView("wizard"); setWizardStep(3); }} onUseExternal={() => { patchProject({ creationMode: "external" }); setView("external"); }} onContinue={confirmAdaptationPlan} onRunOcr={runSourceOcr} onUpdateOutline={updateSourceOutline} onAcceptOutline={acceptSourceOutline} />}
       {view === "brief" && <BookBrief project={project} allocated={allocatedPages} draftBusy={draftBusy} onBack={() => setView("analysis")} onUpdateChapter={updateChapter} onPrepare={prepareDraft} onContinue={() => { patchProject({ briefApproved: true }); setActiveChapter(project.chapters[0]?.id ?? 1); setEditorWorkspace("workflow"); setView("editor"); }} />}
-      {view === "editor" && editorWorkspace === "workflow" && <Editor project={project} active={active} activeId={activeChapter} allocated={allocatedPages} draftBusy={draftBusy} onSelect={setActiveChapter} onSaveBody={saveChapterBody} editorRef={editorRef} onAi={aiAction} onRemember={rememberPreference} onAddChapter={addChapter} onUploadImage={uploadChapterImage} onPatchProject={patchProject} onUpdateChapter={updateChapter} />}
+      {view === "editor" && editorWorkspace === "workflow" && <Editor project={project} active={active} activeId={activeChapter} allocated={allocatedPages} draftBusy={draftBusy} onSelect={selectChapter} onSaveBody={saveChapterBody} editorRef={editorRef} onAi={aiAction} onRemember={rememberPreference} onAddChapter={addChapter} onUploadImage={uploadChapterImage} onPatchProject={patchProject} onUpdateChapter={updateChapter} onDirty={() => markEditorDirty(true)} dirty={editorDirty} />}
       {view === "editor" && editorWorkspace === "designer" && <DesignerStudio ref={designerStudioRef} embedded key={project.id} project={project} onClose={() => setEditorWorkspace("workflow")} onPreview={() => setShowPreview(true)} onCommit={async (next) => { setProject(next); await persistProject(next); }} />}
 
       {showPreview && <CanvaPreview project={project} exportBusy={exportBusy} pdfProgress={pdfProgress} pdfExportMode={pdfExportMode} onClose={() => setShowPreview(false)} onDownload={(mode) => void (mode === "draft" ? downloadPdf() : downloadPublicationPdf())} onUseFormat={async (selectedFormat) => { const next = { ...project, bookFormat: selectedFormat }; await persistProject(next); notify(`${bookFormat(selectedFormat).label} is now the saved book size`); }} onSaveCanvaPage={uploadCanvaPage} onSetCanvaActive={setCanvaPageActive} />}
-      {showReviewQueue && <ReviewQueue project={project} busy={draftBusy} onClose={() => setShowReviewQueue(false)} onOpen={(chapterId) => { setActiveChapter(chapterId); setEditorWorkspace("workflow"); setShowReviewQueue(false); }} onRepair={(chapterId) => { setActiveChapter(chapterId); setEditorWorkspace("workflow"); setShowReviewQueue(false); void prepareDraft("active", { chapterId }); }} onApprove={(chapterId) => void approveChapterManually(chapterId)} onDesigner={(chapterId) => void leaveChapterForDesigner(chapterId)} onRestore={() => void restorePreviousVersion()} />}
+      {showReviewQueue && <ReviewQueue project={project} busy={draftBusy} onClose={() => setShowReviewQueue(false)} onOpen={(chapterId) => { void selectChapter(chapterId).then(() => { setEditorWorkspace("workflow"); setShowReviewQueue(false); }); }} onRepair={(chapterId) => { void selectChapter(chapterId).then(() => { setEditorWorkspace("workflow"); setShowReviewQueue(false); void prepareDraft("active", { chapterId }); }); }} onApprove={(chapterId) => void approveChapterManually(chapterId)} onDesigner={(chapterId) => void leaveChapterForDesigner(chapterId)} onRestore={() => void restorePreviousVersion()} />}
       {showOperations && <OperationsHistory project={project} onClose={() => setShowOperations(false)} />}
-      {showVersions && <Versions versions={versions} onCreate={createVersion} onRestore={(snapshot) => { setProject(normalizeProject(snapshot)); setShowVersions(false); notify("Version restored"); }} onClose={() => setShowVersions(false)} />}
+      {showVersions && <Versions versions={versions} onCreate={createVersion} onRestore={(snapshot) => void leaveEditor(() => { setProject(normalizeProject(snapshot)); setShowVersions(false); notify("Version restored"); markEditorDirty(false); })} onClose={() => setShowVersions(false)} />}
       {showPackageImport && <BookPackageImporter project={project} busy={packageBusy} onClose={() => setShowPackageImport(false)} onDownloadRequest={downloadChatGptBookRequest} onImport={importBookPackage} />}
       {showComparison && comparison && <ChapterComparison original={comparison.original} improved={project.chapters.find((chapter) => chapter.id === comparison.chapterId) || comparison.original} onAccept={acceptImprovement} onKeep={() => void keepOriginal()} onClose={() => setShowComparison(false)} />}
       {aiRequest && <AiRoundTrip request={aiRequest} onChange={(result) => setAiRequest({ ...aiRequest, result })} onClose={() => setAiRequest(null)} onApply={applyAiResult} />}
-      {toast && <div className="toast">✓ {toast}</div>}
+      {toast && <div className={`toast ${toast.kind}`} role="status">{toast.kind === "success" ? "✓ " : ""}{toast.text}</div>}
     </div>
   );
 }
@@ -2704,21 +2772,37 @@ function reviewReasons(chapter: Chapter) {
   return [...new Set(reasons)].slice(0, 6);
 }
 
+function useEscapeKey(active: boolean, onClose: () => void) {
+  useEffect(() => {
+    if (!active) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [active, onClose]);
+}
+
 function ReviewQueue({ project, busy, onClose, onOpen, onRepair, onApprove, onDesigner, onRestore }: {
   project: Project; busy: boolean; onClose: () => void; onOpen: (chapterId: number) => void; onRepair: (chapterId: number) => void; onApprove: (chapterId: number) => void; onDesigner: (chapterId: number) => void; onRestore: () => void;
 }) {
+  useEscapeKey(true, onClose);
   const chapters = project.chapters.filter((chapter) => !isPublishApproved(chapter));
-  return <div className="modal-backdrop"><section className="review-queue-modal"><header><div><p className="eyebrow">QUALITY REVIEW</p><h2>Review Queue</h2><p>{chapters.length ? `${chapters.length} chapter${chapters.length === 1 ? " needs" : "s need"} a decision before final export.` : "Every chapter is cleared for final export."}</p></div><button onClick={onClose}>×</button></header><div className="review-queue-list">{chapters.map((chapter) => { const latest = latestGenerationRun(chapter); const attempts = latest?.usage.requests || chapter.repairAttempts || 0; return <article key={chapter.id}><div className="review-chapter-number">{String(chapter.id).padStart(2, "0")}</div><div><h3>{chapter.title}</h3><div className="review-reason-tags">{reviewReasons(chapter).map((reason) => <span key={reason}>{reason}</span>)}</div><small>{attempts} of 3 passes in current run · {chapter.generationUsage?.requests || 0} lifetime requests · saved automatically</small></div><div className="review-card-actions"><button className="primary" onClick={() => onRepair(chapter.id)} disabled={busy || attempts >= 3}>{attempts >= 3 ? "3-pass limit reached" : "Repair with feedback"}</button><button onClick={() => onApprove(chapter.id)} disabled={busy}>Approve manually</button><button onClick={() => onOpen(chapter.id)}>Open in editor</button><button onClick={() => onDesigner(chapter.id)} disabled={busy}>Send to designer</button><button onClick={onRestore} disabled={busy}>Restore previous</button></div></article>; })}{!chapters.length && <div className="review-empty"><b>✓ Publishing review complete</b><span>You can now download the final PDF.</span></div>}</div></section></div>;
+  return <div className="modal-backdrop"><section className="review-queue-modal" role="dialog" aria-modal="true" aria-label="Quality review queue"><header><div><p className="eyebrow">QUALITY REVIEW</p><h2>Review Queue</h2><p>{chapters.length ? `${chapters.length} chapter${chapters.length === 1 ? " needs" : "s need"} a decision before final export.` : "Every chapter is cleared for final export."}</p></div><button onClick={onClose} aria-label="Close review queue">×</button></header><div className="review-queue-list">{chapters.map((chapter) => { const latest = latestGenerationRun(chapter); const attempts = latest?.usage.requests || chapter.repairAttempts || 0; return <article key={chapter.id}><div className="review-chapter-number">{String(chapter.id).padStart(2, "0")}</div><div><h3>{chapter.title}</h3><div className="review-reason-tags">{reviewReasons(chapter).map((reason) => <span key={reason}>{reason}</span>)}</div><small>{attempts} of 3 passes in current run · {chapter.generationUsage?.requests || 0} lifetime requests · saved automatically</small></div><div className="review-card-actions"><button className="primary" onClick={() => onRepair(chapter.id)} disabled={busy || attempts >= 3}>{attempts >= 3 ? "3-pass limit reached" : "Repair with feedback"}</button><button onClick={() => onApprove(chapter.id)} disabled={busy}>Approve manually</button><button onClick={() => onOpen(chapter.id)}>Open in editor</button><button onClick={() => onDesigner(chapter.id)} disabled={busy}>Send to designer</button><button onClick={onRestore} disabled={busy}>Restore previous</button></div></article>; })}{!chapters.length && <div className="review-empty"><b>✓ Publishing review complete</b><span>You can now download the final PDF.</span></div>}</div></section></div>;
 }
 
 function OperationsHistory({ project, onClose }: { project: Project; onClose: () => void }) {
+  useEscapeKey(true, onClose);
   const rows = project.chapters.flatMap((chapter) => chapter.generationRuns?.length ? chapter.generationRuns.map((run, index) => ({ chapter, run, index })) : chapter.generationUsage?.requests ? [{ chapter, run: { id: `legacy-${chapter.id}`, startedAt: chapter.generationUsage.updatedAt || "Earlier session", completedAt: chapter.generationUsage.updatedAt, status: chapterGenerationState(chapter) === "Completed" ? "passed" as const : "needs-review" as const, usage: chapter.generationUsage } satisfies GenerationRun, index: 0 }] : []);
   const totals = generationTotals(project.chapters);
-  return <div className="modal-backdrop"><section className="operations-modal"><header><div><p className="eyebrow">APPEND-ONLY OPERATIONS LOG</p><h2>Request History</h2><p>Refreshing, resuming and regenerating never reset these lifetime totals.</p></div><button onClick={onClose}>×</button></header><div className="operations-summary"><span><b>{totals.requests}</b> requests</span><span><b>{totals.inputTokens.toLocaleString()}</b> input tokens</span><span><b>{totals.outputTokens.toLocaleString()}</b> output tokens</span><span><b>{totals.totalTokens.toLocaleString()}</b> total tokens</span></div><div className="operations-table-wrap"><table><thead><tr><th>Chapter</th><th>Run</th><th>Date</th><th>Result</th><th>Passes</th><th>Input</th><th>Output</th><th>Duration</th><th>Feedback / error</th></tr></thead><tbody>{rows.map(({ chapter, run, index }) => <tr key={`${chapter.id}-${run.id}`}><td>{chapter.id}. {chapter.title}</td><td>{index + 1}</td><td>{run.startedAt === "Earlier session" ? run.startedAt : new Date(run.startedAt).toLocaleString()}</td><td><span className={`operation-status ${run.status}`}>{run.status.replace("-", " ")}</span></td><td>{run.usage.requests}</td><td>{run.usage.inputTokens.toLocaleString()}</td><td>{run.usage.outputTokens.toLocaleString()}</td><td>{run.durationMs ? `${Math.round(run.durationMs / 100) / 10}s` : "—"}</td><td>{run.error || run.feedback?.join(" · ") || "Initial generation"}</td></tr>)}</tbody></table>{!rows.length && <p className="empty">No Nemotron requests have been made for this project yet.</p>}</div></section></div>;
+  return <div className="modal-backdrop"><section className="operations-modal" role="dialog" aria-modal="true" aria-label="Request history"><header><div><p className="eyebrow">APPEND-ONLY OPERATIONS LOG</p><h2>Request History</h2><p>Refreshing, resuming and regenerating never reset these lifetime totals.</p></div><button onClick={onClose} aria-label="Close request history">×</button></header><div className="operations-summary"><span><b>{totals.requests}</b> requests</span><span><b>{totals.inputTokens.toLocaleString()}</b> input tokens</span><span><b>{totals.outputTokens.toLocaleString()}</b> output tokens</span><span><b>{totals.totalTokens.toLocaleString()}</b> total tokens</span></div><div className="operations-table-wrap"><table><thead><tr><th>Chapter</th><th>Run</th><th>Date</th><th>Result</th><th>Passes</th><th>Input</th><th>Output</th><th>Duration</th><th>Feedback / error</th></tr></thead><tbody>{rows.map(({ chapter, run, index }) => <tr key={`${chapter.id}-${run.id}`}><td>{chapter.id}. {chapter.title}</td><td>{index + 1}</td><td>{run.startedAt === "Earlier session" ? run.startedAt : new Date(run.startedAt).toLocaleString()}</td><td><span className={`operation-status ${run.status}`}>{run.status.replace("-", " ")}</span></td><td>{run.usage.requests}</td><td>{run.usage.inputTokens.toLocaleString()}</td><td>{run.usage.outputTokens.toLocaleString()}</td><td>{run.durationMs ? `${Math.round(run.durationMs / 100) / 10}s` : "—"}</td><td>{run.error || run.feedback?.join(" · ") || "Initial generation"}</td></tr>)}</tbody></table>{!rows.length && <p className="empty">No Nemotron requests have been made for this project yet.</p>}</div></section></div>;
 }
 
 function ChapterComparison({ original, improved, onAccept, onKeep, onClose }: { original: Chapter; improved: Chapter; onAccept: () => void; onKeep: () => void; onClose: () => void }) {
-  return <div className="modal-backdrop"><section className="comparison-modal"><header><div><p className="eyebrow">CHAPTER DECISION</p><h2>Compare original and improved</h2><p>{improved.title}</p></div><button onClick={onClose}>×</button></header><div className="comparison-grid"><article><span>ORIGINAL</span><div className="book-copy" dangerouslySetInnerHTML={{ __html: authorialReaderHtml(original.body) }}/></article><article className="improved"><span>IMPROVED</span><div className="book-copy" dangerouslySetInnerHTML={{ __html: authorialReaderHtml(improved.body) }}/></article></div><footer><button className="secondary" onClick={onKeep}>Keep original</button><button className="primary" onClick={onAccept}>Accept improvement</button></footer></section></div>;
+  useEscapeKey(true, onClose);
+  return <div className="modal-backdrop"><section className="comparison-modal" role="dialog" aria-modal="true" aria-label="Compare original and improved"><header><div><p className="eyebrow">CHAPTER DECISION</p><h2>Compare original and improved</h2><p>{improved.title}</p></div><button onClick={onClose} aria-label="Close comparison">×</button></header><div className="comparison-grid"><article><span>ORIGINAL</span><div className="book-copy" dangerouslySetInnerHTML={{ __html: authorialReaderHtml(original.body) }}/></article><article className="improved"><span>IMPROVED</span><div className="book-copy" dangerouslySetInnerHTML={{ __html: authorialReaderHtml(improved.body) }}/></article></div><footer><button className="secondary" onClick={onKeep}>Keep original</button><button className="primary" onClick={onAccept}>Accept improvement</button></footer></section></div>;
 }
 
 function ThemeSwitcher(){
@@ -3105,7 +3189,7 @@ function BookBrief({ project, allocated, draftBusy, onBack, onUpdateChapter, onP
   </main>;
 }
 
-function Editor({ project, active, activeId, allocated, draftBusy, onSelect, editorRef, onSaveBody, onAi, onRemember, onAddChapter, onUploadImage, onPatchProject, onUpdateChapter }: { project: Project; active?: Chapter; activeId: number; allocated: number; draftBusy: boolean; onSelect: (id: number) => void; editorRef: React.RefObject<HTMLDivElement | null>; onSaveBody: () => void; onAi: (action: string) => void; onRemember: (scope: "book" | "designer") => void; onAddChapter: () => void; onUploadImage: (file: File) => void; onPatchProject: (patch: Partial<Project>) => void; onUpdateChapter: (id: number, patch: Partial<Chapter>) => void }) {
+function Editor({ project, active, activeId, allocated, draftBusy, onSelect, editorRef, onSaveBody, onAi, onRemember, onAddChapter, onUploadImage, onPatchProject, onUpdateChapter, onDirty, dirty }: { project: Project; active?: Chapter; activeId: number; allocated: number; draftBusy: boolean; onSelect: (id: number) => void; editorRef: React.RefObject<HTMLDivElement | null>; onSaveBody: () => void; onAi: (action: string) => void; onRemember: (scope: "book" | "designer") => void; onAddChapter: () => void; onUploadImage: (file: File) => void; onPatchProject: (patch: Partial<Project>) => void; onUpdateChapter: (id: number, patch: Partial<Chapter>) => void; onDirty: () => void; dirty: boolean }) {
   const [tab, setTab] = useState<"ai" | "design" | "sources">("ai");
   useEffect(() => {
     document.documentElement.dataset.pageWatermark = normalizedTitle(pageWatermark(project.pageWatermark).value).replace(/[^a-z]+/g, "-");
@@ -3117,7 +3201,7 @@ function Editor({ project, active, activeId, allocated, draftBusy, onSelect, edi
   const borderClass = normalizedTitle(project.bookBorder).replace(/[^a-z]+/g, "-");
   return <main className="editor-layout">
     <aside className="chapters"><header><p className="eyebrow">BOOK STRUCTURE</p><button onClick={onAddChapter} aria-label="Add chapter">＋</button></header><div className="front-matter"><span>FM</span><div><b>Front matter</b><small>Cover · Contents · Preface</small></div></div>{project.chapters.map((chapter) => { const state = chapterGenerationState(chapter); return <button className={chapter.id === activeId ? "chapter active" : "chapter"} onClick={() => onSelect(chapter.id)} key={chapter.id}><span>{String(chapter.id).padStart(2, "0")}</span><div><b>{chapter.title}</b><small className={`chapter-generation-state generation-${normalizedTitle(state).replace(/[^a-z]+/g, "-")}`}>{state}{chapter.generationUsage?.totalTokens ? ` · ${chapter.generationUsage.totalTokens.toLocaleString()} tokens` : ""}</small></div></button>; })}<div className="page-budget"><span><b>{allocated}</b> planned pages</span><small>Natural length · 100-page safety ceiling</small></div></aside>
-    <section className="canvas"><nav className="editor-tools"><div><button onClick={() => document.execCommand("bold")}><b>B</b></button><button onClick={() => document.execCommand("italic")}><i>I</i></button><button onClick={() => document.execCommand("formatBlock", false, "h2")}>H2</button><button onClick={() => document.execCommand("insertUnorderedList")}>• List</button></div><label className="editor-typography-select">Typography<select value={project.fontTheme} onChange={(event) => onPatchProject(typographyPatch(event.target.value))}>{typographyThemes.map((theme) => <option key={theme.value}>{theme.value}</option>)}</select></label><div className="chapter-meter"><span>{active.pages} target pages</span><i><b style={{ width: active.status === "planned" ? "18%" : "67%" }}/></i><span className="always-editable">Always editable</span></div></nav><div className="page-stage"><article className={`paper ${bookPersonaClass(project.bookPersona)} font-${fontClass} world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")} page-aesthetic-${pageClass} book-border-${borderClass} age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}${active.imageUrl ? " has-chapter-image" : ""}`}><header><span>{project.title}</span><span>{project.audience}</span></header><div className="ornament">✦</div><div key={active.id} ref={editorRef} className="book-copy" contentEditable suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: authorialReaderHtml(active.body) }}/>{active.imageUrl && <figure className="chapter-image"><img src={active.imageUrl} alt={active.imageAlt || active.imageCaption || active.title}/><figcaption>{active.imageCaption || active.title}</figcaption></figure>}<footer><span>{project.title}</span><span>{active.id}</span></footer></article></div><button className="save-float" onClick={onSaveBody}>✓ Save chapter</button></section>
+    <section className="canvas"><nav className="editor-tools"><div><button onClick={() => document.execCommand("bold")}><b>B</b></button><button onClick={() => document.execCommand("italic")}><i>I</i></button><button onClick={() => document.execCommand("formatBlock", false, "h2")}>H2</button><button onClick={() => document.execCommand("insertUnorderedList")}>• List</button></div><label className="editor-typography-select">Typography<select value={project.fontTheme} onChange={(event) => onPatchProject(typographyPatch(event.target.value))}>{typographyThemes.map((theme) => <option key={theme.value}>{theme.value}</option>)}</select></label><div className="chapter-meter"><span>{active.pages} target pages</span><i><b style={{ width: active.status === "planned" ? "18%" : "67%" }}/></i><span className="always-editable">Always editable</span></div></nav><div className="page-stage"><article className={`paper ${bookPersonaClass(project.bookPersona)} font-${fontClass} world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")} page-aesthetic-${pageClass} book-border-${borderClass} age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}${active.imageUrl ? " has-chapter-image" : ""}`}><header><span>{project.title}</span><span>{project.audience}</span></header><div className="ornament">✦</div><div key={active.id} ref={editorRef} className="book-copy" contentEditable suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: authorialReaderHtml(active.body) }} onInput={onDirty}/>{active.imageUrl && <figure className="chapter-image"><img src={active.imageUrl} alt={active.imageAlt || active.imageCaption || active.title}/><figcaption>{active.imageCaption || active.title}</figcaption></figure>}<footer><span>{project.title}</span><span>{active.id}</span></footer></article></div><button className="save-float" onClick={onSaveBody}>{dirty ? "Save chapter · unsaved changes" : "✓ Save chapter"}</button></section>
     <aside className="assistant"><nav><button className={tab === "ai" ? "active" : ""} onClick={() => setTab("ai")}>✦<span>AI EDIT</span></button><button className={tab === "design" ? "active" : ""} onClick={() => setTab("design")}>◈<span>DESIGN</span></button><button className={tab === "sources" ? "active" : ""} onClick={() => setTab("sources")}>⌕<span>SOURCES</span></button></nav><div className="assistant-body">
       {tab === "ai" && <><div className="assistant-title"><span>✦</span><div><b>Automatic quality editor</b><small>The website checks and repairs each chapter before saving it.</small></div></div><div className="request-control-card"><b>QUALITY FEEDBACK LOOP</b><span>Usually 1 Nemotron pass · maximum 3 only when meaningful content fails</span><small>Mechanical formatting is local · quota errors stop immediately · no fourth automatic request</small></div><div className={`generation-status-card generation-${normalizedTitle(chapterGenerationState(active)).replace(/[^a-z]+/g, "-")}`}><b>{chapterGenerationState(active)}</b><span>{active.generationUsage?.totalTokens ? `Total project history for this chapter: ${active.generationUsage.totalTokens.toLocaleString()} tokens · ${active.generationUsage.requests} request${active.generationUsage.requests === 1 ? "" : "s"}` : "No Nemotron usage recorded yet"}</span>{active.generationError && <small>{active.generationError}</small>}</div>{active.importValidated ? <div className="package-lock-report"><b>✓ STRUCTURED PACKAGE VERIFIED</b><p>{active.importedPages?.length || active.pages} page IDs are locked to Chapter {active.id}. Its text and images were imported without automatic redistribution.</p>{active.importedPages && <ol>{active.importedPages.map((page) => <li key={page.pageId}><span>{page.pageId}</span><b>{page.purpose}</b><i>{page.imageUrl ? "image linked" : "text"}</i></li>)}</ol>}</div> : active.pedagogyQuality ? <div className={`pedagogy-report ${active.pedagogyQuality.status === "passed" ? "" : "needs-review"}`}><header><div><b>{active.pedagogyQuality.status === "passed" ? "✓ READY FOR CHILDREN" : "HUMAN REVIEW REQUIRED"}</b><span>{pedagogyAverage(active.pedagogyQuality)}/100</span></div><p>{active.pedagogyQuality.summary}</p></header><div className="score-grid">{Object.entries(active.pedagogyQuality.scores).map(([name, score]) => <span key={name}><b>{score}</b>{qualityScoreLabels[name] || name}</span>)}</div><div className="quality-checks">{active.pedagogyQuality.checks.map((check) => <p key={check}>{active.pedagogyQuality?.status === "passed" ? "✓" : "•"} {check}</p>)}</div></div> : <div className="pedagogy-pending"><b>Waiting for the automated workflow</b><p>Use Build this book above. Drafting, local checks and up to two targeted feedback repairs happen automatically.</p></div>}<p className="selection-tip">This chapter has <b>{chapterWordCount(active).toLocaleString()} words</b>. Every edit keeps the voice direct and authorial for the selected age.</p><div className="ai-list">{["Simplify language", "Shorten selection", "Expand with examples", "Make age-appropriate", "Improve storytelling", "Check factual accuracy", "Suggest an illustration"].map((action) => <button onClick={() => onAi(action)} key={action}><span>✦</span>{action}<i>→</i></button>)}</div><div className="memory-box"><p className="eyebrow">EDITORIAL MEMORY</p><p>{project.editorialPreferences.length ? project.editorialPreferences.join(" · ") : "No saved preferences yet"}</p><button onClick={() => onRemember("book")}>＋ Remember for this book</button><button onClick={() => onRemember("designer")}>＋ Remember for future books</button></div></>}
       {tab === "design" && <><div className="assistant-title"><span>◈</span><div><b>Book design</b><small>Every chapter receives a context-read narrative scene—not a diagram.</small></div></div><div className="design-controls"><div className="visual-status"><b>{active.visualType === "uploaded" ? "✓ Finished chapter illustration" : "Scene direction ready"}</b><span>{active.visualType === "uploaded" ? "Your uploaded image will be used in the book" : "Built from this chapter’s people, place, objects and central action"}</span></div><button className="primary full scene-prompt-button" onClick={() => onAi("Suggest an illustration")}>✦ Create this chapter illustration</button><small className="scene-workflow-help">The studio prepares a complete narrative-scene prompt. Generate it in ChatGPT, then upload the finished image below.</small><label>Illustration world<select value={project.aesthetic} onChange={(e) => onPatchProject(designWorldPatch(e.target.value))}>{childDesignWorlds.map((world) => <option key={world.value}>{world.value}</option>)}</select></label><label>Page aesthetic<select value={project.pageAesthetic} onChange={(e) => onPatchProject(pageAestheticPatch(e.target.value))}>{pageAesthetics.map((aesthetic) => <option key={aesthetic.value}>{aesthetic.value}</option>)}</select></label><label>Book border<select value={project.bookBorder} onChange={(e) => onPatchProject(bookBorderPatch(e.target.value))}>{bookBorders.map((border) => <option key={border.value}>{border.value}</option>)}</select></label><label>Page watermark<select value={project.pageWatermark} onChange={(e) => onPatchProject(pageWatermarkPatch(e.target.value))}>{pageWatermarks.map((watermark) => <option key={watermark.value}>{watermark.value}</option>)}</select></label><div className="design-summary"><b>{project.pageAesthetic} · {project.bookBorder} · {project.pageWatermark}</b><span>{project.illustrationStyle} · {project.fontTheme} · {project.imageFrequency}</span></div><label className="image-upload">Upload finished chapter scene<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && onUploadImage(e.target.files[0])}/></label>{active.imageUrl && <label>Image caption<input value={active.imageCaption || ""} onChange={(e) => onUpdateChapter(active.id, { imageCaption: e.target.value })}/></label>}</div></>}
@@ -3127,6 +3211,7 @@ function Editor({ project, active, activeId, allocated, draftBusy, onSelect, edi
 }
 
 function BookPackageImporter({ project, busy, onClose, onDownloadRequest, onImport }: { project: Project; busy: boolean; onClose: () => void; onDownloadRequest: () => Promise<void>; onImport: (bookPackage: BookPackage, images: File[]) => Promise<void> }) {
+  useEscapeKey(true, onClose);
   const [bookPackage, setBookPackage] = useState<BookPackage | null>(null);
   const [validation, setValidation] = useState<BookPackageValidation | null>(null);
   const [images, setImages] = useState<File[]>([]);
@@ -3187,10 +3272,11 @@ function BookPackageImporter({ project, busy, onClose, onDownloadRequest, onImpo
     catch (reason) { setError(reason instanceof Error ? reason.message : "The package could not be imported."); }
   }
 
-  return <div className="modal-backdrop"><section className="package-import-modal simple-book-flow"><header><div><p className="eyebrow">CHATGPT BOOK WORKFLOW</p><h2>Two files. No JSON work.</h2><p>Download one request for ChatGPT, then bring back one completed ZIP. The website keeps every page and image inside its correct chapter.</p></div><button onClick={onClose} disabled={busy || requestBusy}>×</button></header><div className="simple-flow-line" aria-label="Book workflow"><span className="active">1&nbsp; Website request</span><i>→</i><span>2&nbsp; ChatGPT creates book</span><i>→</i><span>3&nbsp; Upload finished book</span></div><div className="package-import-grid two-step"><section><span className="package-step">01</span><h3>Download the ChatGPT request</h3><p>It already contains the source book, age, language, design settings, chapter map and instructions. Upload this one ZIP to your personal ChatGPT.</p><button className="primary full" disabled={requestBusy || !project.sourceObjectKey} onClick={() => void downloadRequest()}>{requestBusy ? "Preparing source and settings…" : requestDownloaded ? "✓ Download again" : "↓ Download ChatGPT Book Request"}</button>{!project.sourceObjectKey && <small className="step-help">Upload the source book first.</small>}<div className="chatgpt-words"><b>Then tell ChatGPT:</b><span>“Show me the book plan. Do not create the final book until I approve it.”</span><span>After checking it, reply: “PLAN APPROVED. Create the complete book ZIP.”</span></div></section><section><span className="package-step">02</span><h3>Upload the completed book</h3><p>Choose only the single <b>Completed-Children-Book.zip</b> returned by ChatGPT. You do not select JSON or images separately.</p><label className="package-drop completed-drop">{validation ? "Choose a different completed ZIP" : "⇧ Choose Completed Book ZIP"}<input type="file" accept="application/zip,.zip" disabled={busy || requestBusy} onChange={(event) => event.target.files?.[0] && void readCompletedZip(event.target.files[0])}/></label><small className="step-help">The ZIP must contain book.json and the actual images.</small></section></div>{validation && <div className={`package-validation ${validation.errors.length || missingImages.length ? "invalid" : "valid"}`}><header><b>{validation.errors.length || missingImages.length ? "The finished book needs repair" : "Finished book verified"}</b><span>{validation.chapterCount} chapters · {validation.pageCount} content pages · {validation.imageNames.length} images</span></header>{validation.errors.map((message) => <p key={message}>× {message}</p>)}{!validation.errors.length && missingImages.map((name) => <p key={name}>× Missing actual image: {name}</p>)}{!validation.errors.length && !missingImages.length && <p>✓ No placeholders. Every page and image has one verified chapter destination.</p>}</div>}{error && <p className="package-error">{error}</p>}<footer><div><b>Nothing is guessed or moved</b><span>A broken or incomplete ZIP is rejected before it can replace your current book.</span></div><button className="secondary" onClick={onClose} disabled={busy || requestBusy}>Cancel</button><button className="primary" disabled={!canImport} onClick={() => void apply()}>{busy ? "Creating the finished book…" : "Accept completed book →"}</button></footer></section></div>;
+  return <div className="modal-backdrop"><section className="package-import-modal simple-book-flow" role="dialog" aria-modal="true" aria-label="ChatGPT book workflow"><header><div><p className="eyebrow">CHATGPT BOOK WORKFLOW</p><h2>Two files. No JSON work.</h2><p>Download one request for ChatGPT, then bring back one completed ZIP. The website keeps every page and image inside its correct chapter.</p></div><button onClick={onClose} disabled={busy || requestBusy} aria-label="Close book workflow">×</button></header><div className="simple-flow-line" aria-label="Book workflow"><span className="active">1&nbsp; Website request</span><i>→</i><span>2&nbsp; ChatGPT creates book</span><i>→</i><span>3&nbsp; Upload finished book</span></div><div className="package-import-grid two-step"><section><span className="package-step">01</span><h3>Download the ChatGPT request</h3><p>It already contains the source book, age, language, design settings, chapter map and instructions. Upload this one ZIP to your personal ChatGPT.</p><button className="primary full" disabled={requestBusy || !project.sourceObjectKey} onClick={() => void downloadRequest()}>{requestBusy ? "Preparing source and settings…" : requestDownloaded ? "✓ Download again" : "↓ Download ChatGPT Book Request"}</button>{!project.sourceObjectKey && <small className="step-help">Upload the source book first.</small>}<div className="chatgpt-words"><b>Then tell ChatGPT:</b><span>“Show me the book plan. Do not create the final book until I approve it.”</span><span>After checking it, reply: “PLAN APPROVED. Create the complete book ZIP.”</span></div></section><section><span className="package-step">02</span><h3>Upload the completed book</h3><p>Choose only the single <b>Completed-Children-Book.zip</b> returned by ChatGPT. You do not select JSON or images separately.</p><label className="package-drop completed-drop">{validation ? "Choose a different completed ZIP" : "⇧ Choose Completed Book ZIP"}<input type="file" accept="application/zip,.zip" disabled={busy || requestBusy} onChange={(event) => event.target.files?.[0] && void readCompletedZip(event.target.files[0])}/></label><small className="step-help">The ZIP must contain book.json and the actual images.</small></section></div>{validation && <div className={`package-validation ${validation.errors.length || missingImages.length ? "invalid" : "valid"}`}><header><b>{validation.errors.length || missingImages.length ? "The finished book needs repair" : "Finished book verified"}</b><span>{validation.chapterCount} chapters · {validation.pageCount} content pages · {validation.imageNames.length} images</span></header>{validation.errors.map((message) => <p key={message}>× {message}</p>)}{!validation.errors.length && missingImages.map((name) => <p key={name}>× Missing actual image: {name}</p>)}{!validation.errors.length && !missingImages.length && <p>✓ No placeholders. Every page and image has one verified chapter destination.</p>}</div>}{error && <p className="package-error">{error}</p>}<footer><div><b>Nothing is guessed or moved</b><span>A broken or incomplete ZIP is rejected before it can replace your current book.</span></div><button className="secondary" onClick={onClose} disabled={busy || requestBusy}>Cancel</button><button className="primary" disabled={!canImport} onClick={() => void apply()}>{busy ? "Creating the finished book…" : "Accept completed book →"}</button></footer></section></div>;
 }
 
 function AiRoundTrip({ request, onChange, onClose, onApply }: { request: { action: string; prompt: string; selection: string; result: string }; onChange: (value: string) => void; onClose: () => void; onApply: () => void }) {
+  useEscapeKey(true, onClose);
   const illustrationRequest = request.action === "Suggest an illustration" || request.action === "Create chapter illustration";
   const openChatGPT = async () => {
     try { await navigator.clipboard.writeText(request.prompt); } catch { /* clipboard permission can be unavailable */ }
@@ -3199,7 +3285,7 @@ function AiRoundTrip({ request, onChange, onClose, onApply }: { request: { actio
   const copyPrompt = async () => {
     try { await navigator.clipboard.writeText(request.prompt); } catch { /* clipboard permission can be unavailable */ }
   };
-  return <div className="modal-backdrop"><section className={`ai-modal${illustrationRequest ? " illustration-prompt-modal" : ""}`}><header><div><p className="eyebrow">{illustrationRequest ? "CHAPTER-CONTEXT IMAGE PROMPT" : "CHATGPT EDIT"}</p><h2>{request.action}</h2></div><button onClick={onClose}>×</button></header>{illustrationRequest ? <><p className="illustration-prompt-help">This prompt already contains the selected chapter’s meaning, concepts, reader age, visual world, accuracy rules and print requirements. Generate the image, then upload it from the Design tab.</p><label className="illustration-prompt-label">Complete prompt<textarea readOnly value={request.prompt}/></label><footer><button className="secondary" onClick={() => void copyPrompt()}>Copy prompt</button><button className="primary" onClick={() => void openChatGPT()}>Generate in ChatGPT ↗</button><button className="secondary" onClick={onClose}>Close</button></footer></> : <><ol><li><button className="primary" onClick={openChatGPT}>Open this edit in ChatGPT ↗</button><small>The instruction is also copied automatically.</small></li><li><label>Paste ChatGPT’s revised text here<textarea value={request.result} onChange={(e) => onChange(e.target.value)} placeholder="Paste the approved revision…"/></label></li></ol><footer><button className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={!request.result.trim()} onClick={onApply}>Apply and save revision</button></footer></>}</section></div>;
+  return <div className="modal-backdrop"><section className={`ai-modal${illustrationRequest ? " illustration-prompt-modal" : ""}`} role="dialog" aria-modal="true" aria-label={request.action}><header><div><p className="eyebrow">{illustrationRequest ? "CHAPTER-CONTEXT IMAGE PROMPT" : "CHATGPT EDIT"}</p><h2>{request.action}</h2></div><button onClick={onClose} aria-label="Close prompt">×</button></header>{illustrationRequest ? <><p className="illustration-prompt-help">This prompt already contains the selected chapter’s meaning, concepts, reader age, visual world, accuracy rules and print requirements. Generate the image, then upload it from the Design tab.</p><label className="illustration-prompt-label">Complete prompt<textarea readOnly value={request.prompt}/></label><footer><button className="secondary" onClick={() => void copyPrompt()}>Copy prompt</button><button className="primary" onClick={() => void openChatGPT()}>Generate in ChatGPT ↗</button><button className="secondary" onClick={onClose}>Close</button></footer></> : <><ol><li><button className="primary" onClick={openChatGPT}>Open this edit in ChatGPT ↗</button><small>The instruction is also copied automatically.</small></li><li><label>Paste ChatGPT’s revised text here<textarea value={request.result} onChange={(e) => onChange(e.target.value)} placeholder="Paste the approved revision…"/></label></li></ol><footer><button className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={!request.result.trim()} onClick={onApply}>Apply and save revision</button></footer></>}</section></div>;
 }
 
 function paginateReaderHtml(html: string, audience: string, formatId: BookFormatId = LEGACY_BOOK_FORMAT) {
@@ -4946,6 +5032,11 @@ function CanvaPreview({ project: savedProject, exportBusy, pdfProgress, pdfExpor
   const [canvaTarget, setCanvaTarget] = useState<Omit<CanvaPageOverride, "active" | "current" | "history"> | null>(null);
   const [canvaFile, setCanvaFile] = useState<File | null>(null);
   const [canvaFilePreview, setCanvaFilePreview] = useState("");
+  useEscapeKey(true, () => {
+    if (canvaTarget) setCanvaTarget(null);
+    else if (formatChooserOpen) setFormatChooserOpen(false);
+    else onClose();
+  });
   const [studioPagePreview, setStudioPagePreview] = useState("");
   const [canvaBusy, setCanvaBusy] = useState(false);
   const [formatBusy, setFormatBusy] = useState(false);
