@@ -52,7 +52,10 @@ test("multi-page PDF export avoids base64 canvas accumulation", async () => {
   assert.match(page, /canvas\.width = 1/);
   assert.doesNotMatch(page, /pdf\.addImage\(canvas\.toDataURL/);
   assert.match(page, /PDF export stopped at page \$\{index \+ 1\}/);
-  assert.match(page, /renderedBlockers\.slice\(0, 3\)\.join/);
+  assert.match(page, /onclone: prepareRasterClone/);
+  assert.match(page, /html2canvas 1\.x cannot parse CSS Color 4 values/);
+  assert.match(page, /const unfinished = [^;]+ \+ renderedBlockers\.length/);
+  assert.doesNotMatch(page, /Publication PDF is locked:.*renderedBlockers/);
 });
 
 test("chapter drafting keeps private fact-check references inside each detected range", async () => {

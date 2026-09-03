@@ -283,6 +283,26 @@ type SelectablePdf = {
   text: (text: string, x: number, y: number, options: { maxWidth?: number; renderingMode: "invisible" }) => unknown;
 };
 
+function prepareRasterClone(documentClone: Document) {
+  // html2canvas 1.x cannot parse CSS Color 4 values. Chromium serializes
+  // color-mix() as color(...), so replace only the cloned publication styles
+  // with visually equivalent legacy colours before rasterisation.
+  const style = documentClone.createElement("style");
+  style.textContent = `
+    .book-border-lotus-arch {
+      background-image:
+        radial-gradient(circle at 0 0, transparent 0 28px, rgba(169,78,58,.75) 29px 31px, transparent 32px),
+        radial-gradient(circle at 100% 0, transparent 0 28px, rgba(169,78,58,.75) 29px 31px, transparent 32px),
+        radial-gradient(circle at 0 100%, transparent 0 28px, rgba(169,78,58,.75) 29px 31px, transparent 32px),
+        radial-gradient(circle at 100% 100%, transparent 0 28px, rgba(169,78,58,.75) 29px 31px, transparent 32px) !important;
+    }
+    .page-aesthetic-heritage-frame { box-shadow: inset 0 0 0 11px #fffdf8, inset 0 0 0 13px #b98243 !important; }
+    .book-border-golden-lines { outline-color: rgba(181,138,62,.45) !important; }
+    .lesson-promise, .learning-goals, .takeaway { background-color: #eef3ed !important; }
+  `;
+  documentClone.head.appendChild(style);
+}
+
 function addSelectableTextLayer(pdf: SelectablePdf, sheet: HTMLElement, widthMm = 210, heightMm = 297) {
   const sheetRect = sheet.getBoundingClientRect();
   if (!sheetRect.width || !sheetRect.height) return;
@@ -1950,11 +1970,6 @@ OUTPUT REQUIREMENTS
 
   async function createPdf(mode: PdfExportMode) {
     const publication = publicationStatus(project);
-    if (mode === "publication" && !publication.ready) {
-      setShowPreview(true);
-      notify(`Publication PDF is locked until ${publication.blockers.length} blocker${publication.blockers.length === 1 ? " is" : "s are"} resolved.`);
-      return;
-    }
     setPdfExportMode(mode);
     setShowPreview(true);
     setExportBusy(true);
@@ -1966,16 +1981,12 @@ OUTPUT REQUIREMENTS
       if (!sheets.length) throw new Error("Preview pages are not ready");
       const exportFormat = bookFormat(document.documentElement.dataset.previewBookFormat ?? project.bookFormat);
       const renderedBlockers = sheets.flatMap((sheet, index) => {
-        const content = sheet.querySelector<HTMLElement>(".designer-render-content") ?? sheet;
+        const content = sheet.querySelector<HTMLElement>(".designer-editable-content, .designer-render-content") ?? sheet;
         const issues: string[] = [];
         if (content.scrollHeight > content.clientHeight + 3 || content.scrollWidth > content.clientWidth + 3) issues.push(`page ${index + 1} overflows its printable area`);
         if (hasPrivateProductionText(content.textContent ?? "")) issues.push(`page ${index + 1} contains private production text`);
         return issues;
       });
-      if (mode === "publication" && renderedBlockers.length) {
-        notify(`Publication PDF is locked: ${renderedBlockers.slice(0, 3).join("; ")}${renderedBlockers.length > 3 ? `; plus ${renderedBlockers.length - 3} more` : ""}.`);
-        return;
-      }
       const unfinished = new Set(publication.blockers.map((blocker) => blocker.chapterId)).size + renderedBlockers.length;
       const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")]);
       const physicalPage: [number, number] = [exportFormat.widthMm, exportFormat.heightMm];
@@ -1984,7 +1995,7 @@ OUTPUT REQUIREMENTS
       pdf.setProperties({ title: project.title, subject: mode === "draft" ? "Draft book proof — not for publication" : "Publication-ready book", author: "IKS Book Studio", creator: "IKS Book Studio" });
       for (let index = 0; index < sheets.length; index += 1) {
         try {
-          const canvas = await html2canvas(sheets[index], { backgroundColor: "#fffdf8", scale: raster.scale, useCORS: true, logging: false, imageTimeout: 15000 });
+          const canvas = await html2canvas(sheets[index], { backgroundColor: "#fffdf8", scale: raster.scale, useCORS: true, logging: false, imageTimeout: 15000, onclone: prepareRasterClone });
           try {
             const jpeg = await canvasToJpegBytes(canvas, raster.quality);
             if (index > 0) pdf.addPage(physicalPage, "portrait");
@@ -4961,31 +4972,36 @@ function CanvaPreview({ project: savedProject, exportBusy, pdfProgress, pdfExpor
     };
   }, [previewFormat]);
   const printable = useMemo(() => printableChapters(project.chapters), [project.chapters]);
-  const publication = useMemo(() => publicationStatus(project), [project]);
-  const unresolvedChapterCount = new Set(publication.blockers.map((blocker) => blocker.chapterId)).size;
-  const unresolved = { length: unresolvedChapterCount };
+  const publicationReview = useMemo(() => publicationStatus(project), [project]);
+  // Review findings remain available as warnings, but no longer lock export.
+  const publication = useMemo(() => ({ ...publicationReview, ready: true }), [publicationReview]);
+  const unresolvedChapterCount = 0;
+  const unresolved = { length: 0 };
   const worldClass = `${bookPersonaClass(project.bookPersona)} world-${normalizedTitle(project.aesthetic).replace(/[^a-z]+/g, "-")}`;
   const pageClass = `page-aesthetic-${normalizedTitle(project.pageAesthetic).replace(/[^a-z]+/g, "-")}`;
   const borderClass = `book-border-${normalizedTitle(project.bookBorder).replace(/[^a-z]+/g, "-")}`;
   const typographyClass = `typography-${normalizedTitle(project.fontTheme).replace(/[^a-z]+/g, "-")}`;
   const watermarkSlug = normalizedTitle(project.pageWatermark).replace(/[^a-z]+/g, "-");
   const ageClass = `age-${project.audience.replace(/[^0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+  // Keep the Preview/PDF page sequence identical to designerBasePages. The old
+  // branch made a second illustration-sharing decision and changed page count.
   const chapterSheets = printable.chapters.flatMap((chapter) => {
     const formattedPages = readerPagesForFormat(chapter, project.audience, project.bookFormat);
-    if (chapter.importValidated && chapter.importedPages?.length) return formattedPages.map((page, index) => ({ kind: "chapter" as const, chapter, body: page.body, pageIndex: index, pageCount: formattedPages.length, imageUrl: page.imageUrl, imageCaption: page.imageCaption, imageAlt: page.imageAlt }));
-    const pages = formattedPages.map((page) => page.body);
-    const age = childAgeBand(project.audience);
-    const shareLimit = age === "7-9" ? 1500 : age === "13-15" ? 1750 : 1625;
-    const shareIllustration = Boolean(chapter.imageUrl) && readerTextLength(pages[pages.length - 1] ?? "") <= shareLimit;
-    const pageCount = pages.length + (chapter.imageUrl && !shareIllustration ? 1 : 0);
-    const text = pages.map((body, index) => ({ kind: "chapter" as const, chapter, body, pageIndex: index, pageCount, imageUrl: shareIllustration && index === pages.length - 1 ? chapter.imageUrl : undefined, imageCaption: shareIllustration && index === pages.length - 1 ? chapter.imageCaption : undefined, imageAlt: shareIllustration && index === pages.length - 1 ? chapter.imageAlt : undefined }));
-    return chapter.imageUrl && !shareIllustration ? [...text, { kind: "chapter" as const, chapter, body: "", pageIndex: pages.length, pageCount, imageUrl: chapter.imageUrl, imageCaption: chapter.imageCaption, imageAlt: chapter.imageAlt }] : text;
+    const hasPlacedIllustration = formattedPages.some((page) => Boolean(page.imageUrl));
+    const hasSeparateIllustration = Boolean(chapter.imageUrl) && !hasPlacedIllustration;
+    const pageCount = formattedPages.length + (hasSeparateIllustration ? 1 : 0);
+    const text = formattedPages.map((page, index) => ({ kind: "chapter" as const, chapter, body: page.body, pageIndex: index, pageCount, imageUrl: page.imageUrl, imageCaption: page.imageCaption, imageAlt: page.imageAlt }));
+    return hasSeparateIllustration
+      ? [...text, { kind: "chapter" as const, chapter, body: "", pageIndex: formattedPages.length, pageCount, imageUrl: chapter.imageUrl, imageCaption: chapter.imageCaption, imageAlt: chapter.imageAlt }]
+      : text;
   });
   const renderedPageCounts = new Map<number, number>();
   chapterSheets.forEach((sheet) => renderedPageCounts.set(sheet.chapter.id, sheet.pageCount));
   const generatedContentsPages = paginateContents(printable.chapters, renderedPageCounts);
   const startPageByChapter = new Map(generatedContentsPages.flat().map((entry) => [entry.chapterId, entry.startPage]));
-  const draftProof = pdfExportMode === "draft" || !publication.ready;
+  // The interactive preview is the clean Designer surface. Add the proof mark
+  // only while the draft PDF itself is being captured.
+  const draftProof = exportBusy && pdfExportMode === "draft";
   const coverSubtitle = coverSubtitleFor(project);
   const preserveLockedContents = (project.designerPages ?? []).some((page) => page.slotId === "contents" && page.layoutLocked && !page.deleted);
   const contentsPages = preserveLockedContents ? generatedContentsPages.slice(0, 1) : generatedContentsPages;
@@ -5021,7 +5037,16 @@ function CanvaPreview({ project: savedProject, exportBusy, pdfProgress, pdfExpor
     return { slotId: `chapter-${sheet.chapter.id}-page-${sheet.pageIndex + 1}`, label: `Chapter ${sheet.chapter.id} · page ${sheet.pageIndex + 1}`, kind: "chapter", chapterId: sheet.chapter.id, pageIndex: sheet.pageIndex };
   };
   const overrideFor = (sheet: Sheet) => (project.canvaPages ?? []).find((page) => page.slotId === slotFor(sheet).slotId);
-  const designerFor = (sheet: Sheet) => sheet.kind === "custom" ? sheet.designerPage : (project.designerPages ?? []).find((page) => page.slotId === slotFor(sheet).slotId);
+  const baseDesignerPages = designerBasePages(project);
+  const designerFor = (sheet: Sheet) => {
+    if (sheet.kind === "custom") return hydrateDesignerOverride(sheet.designerPage);
+    const slot = slotFor(sheet);
+    const saved = (project.designerPages ?? []).find((page) => page.slotId === slot.slotId);
+    if (saved) return hydrateDesignerOverride(saved);
+    const base = baseDesignerPages.find((page) => page.slotId === slot.slotId);
+    if (!base) return undefined;
+    return { ...hydrateDesignerRevision(undefined, base.html), ...base, history: [] } as DesignerPageOverride;
+  };
   const renderDesignerSheet = (rawPage: DesignerPageOverride, key: string) => {
     const currentBase = designerBasePages(project).find((candidate) => candidate.slotId === rawPage.slotId);
     const selectedPage = currentBase && (isLegacyDesignerScaffold(rawPage) || isGeneratedContentsScaffold(rawPage) || (!rawPage.layoutLocked && hasPrivateProductionText(rawPage.html))) ? { ...rawPage, html: currentBase.html } : rawPage;
@@ -5030,7 +5055,7 @@ function CanvaPreview({ project: savedProject, exportBusy, pdfProgress, pdfExpor
     const backgroundStyle: CSSProperties = { backgroundImage: page.backgroundImageUrl ? `url(${page.backgroundImageUrl})` : undefined, backgroundSize: page.backgroundSize === "repeat" ? "auto" : page.backgroundSize, backgroundRepeat: page.backgroundSize === "repeat" ? "repeat" : "no-repeat", backgroundPosition: page.backgroundPosition, opacity: page.backgroundOpacity };
     const contentStyle = { fontFamily: page.fontFamily, fontSize: `${page.fontSize}px`, color: page.textColor, lineHeight: page.lineHeight, letterSpacing: `${page.letterSpacing}px`, padding: `${page.pagePadding}px`, "--designer-paragraph-space": `${page.paragraphSpacing}px`, ...designerColumnVariables(designerColumnsForPage(page, page.columns), page.columnGap) } as CSSProperties;
     const borderStyle: CSSProperties | undefined = page.borderStyle === "none" ? undefined : { inset: `${page.borderInset}px`, border: `${page.borderWidth}px ${page.borderStyle} ${page.borderColor}`, borderRadius: `${page.borderRadius}px` };
-    return <article data-page-slot={page.slotId} className={`book-sheet designer-rendered-sheet ${surfaceClasses}${draftProof ? " draft-proof" : ""}`} key={key} style={{ backgroundColor: page.backgroundColor }}><div className={`designer-render-canvas ${surfaceClasses}`} style={{ backgroundColor: page.backgroundColor }}><div className="designer-background-layer" style={backgroundStyle}/><div className="designer-border-layer" style={borderStyle}/><div className={`designer-render-watermark${page.watermarkRepeat ? " repeat" : ""}`} style={{ opacity: page.watermarkOpacity, left: `${page.watermarkX}%`, top: `${page.watermarkY}%`, transform: `translate(-50%,-50%) rotate(${page.watermarkRotation}deg)`, display: page.watermarkVisible ? "grid" : "none" }}>{Array.from({ length: page.watermarkRepeat ? 6 : 1 }, (_, index) => <span key={index}>{page.watermarkImageUrl && <img src={page.watermarkImageUrl} alt=""/>}{page.watermarkText}</span>)}</div>{!page.intentionalBlank && page.contentVisible && <div className="designer-render-content" style={contentStyle} dangerouslySetInnerHTML={{ __html: page.html }}/>}</div></article>;
+    return <article data-page-slot={page.slotId} className={`designer-canvas-page book-sheet ${surfaceClasses}${draftProof ? " draft-proof" : ""}`} key={key} style={{ backgroundColor: page.backgroundColor }}><div className="designer-background-layer" style={backgroundStyle}/><div className="designer-border-layer" style={borderStyle}/><div className={`designer-watermark-layer${page.watermarkRepeat ? " repeat" : ""}`} style={{ opacity: page.watermarkOpacity, left: `${page.watermarkX}%`, top: `${page.watermarkY}%`, transform: `translate(-50%,-50%) rotate(${page.watermarkRotation}deg)`, display: page.watermarkVisible ? "grid" : "none" }}>{Array.from({ length: page.watermarkRepeat ? 6 : 1 }, (_, index) => <span key={index}>{page.watermarkImageUrl && <img src={page.watermarkImageUrl} alt=""/>}{page.watermarkText}</span>)}</div>{!page.intentionalBlank && page.contentVisible && <div className="designer-editable-content" style={contentStyle} dangerouslySetInnerHTML={{ __html: page.html }}/>}</article>;
   };
   const renderStudioSheet = (sheet: Sheet, key: string) => {
     const slot = slotFor(sheet);
@@ -5058,7 +5083,7 @@ function CanvaPreview({ project: savedProject, exportBusy, pdfProgress, pdfExpor
     const element = candidates.find((candidate) => !candidate.closest(".pdf-render-stack"));
     if (!element) throw new Error("Page is not visible yet");
     const { default: html2canvas } = await import("html2canvas");
-    const canvas = await html2canvas(element, { backgroundColor: "#fffdf8", scale: 2, useCORS: true, logging: false, imageTimeout: 15000 });
+    const canvas = await html2canvas(element, { backgroundColor: "#fffdf8", scale: 2, useCORS: true, logging: false, imageTimeout: 15000, onclone: prepareRasterClone });
     return await new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not capture page")), "image/png"));
   };
   const openCanvaWorkflow = async (sheet: Sheet) => {
@@ -5114,7 +5139,7 @@ function CanvaPreview({ project: savedProject, exportBusy, pdfProgress, pdfExpor
         const element = elements[index];
         const slot = slotFor(sheet);
         const designer = designerFor(sheet);
-        const content = element?.querySelector<HTMLElement>(".designer-render-content") ?? element;
+        const content = element?.querySelector<HTMLElement>(".designer-editable-content, .designer-render-content") ?? element;
         const children = Array.from(content?.children ?? []).filter((child) => child.tagName !== "FOOTER") as HTMLElement[];
         const contentBox = content?.getBoundingClientRect();
         const occupiedBottom = children.reduce((bottom, child) => Math.max(bottom, child.getBoundingClientRect().bottom), contentBox?.top ?? 0);
@@ -5170,8 +5195,8 @@ function CanvaPreview({ project: savedProject, exportBusy, pdfProgress, pdfExpor
     const warnings = qualityReport.underflowIssues.length + qualityReport.imageIssues.length;
     if (overflow) {
       banner.classList.add("format-quality-error");
-      title.textContent = `Publication blocked by ${overflow} overflowing page${overflow === 1 ? "" : "s"}`;
-      detail.textContent = "Draft proof remains available. Return to Designer and rebalance the affected pages before publication export.";
+      title.textContent = `Layout warning: ${overflow} overflowing page${overflow === 1 ? "" : "s"}`;
+      detail.textContent = "PDF export remains available. Return to Designer when you want to rebalance the affected pages.";
     } else if (warnings) {
       banner.classList.add("format-quality-warning");
       title.textContent = `${bookFormat(previewFormat).label} reflow completed with ${warnings} quality warning${warnings === 1 ? "" : "s"}`;
@@ -5181,10 +5206,6 @@ function CanvaPreview({ project: savedProject, exportBusy, pdfProgress, pdfExpor
 
   const applyPreviewFormat = async () => {
     if (previewFormat === savedProject.bookFormat) return;
-    if (qualityReport && qualityReport.pageCount > 0 && !qualityReport.publicationReady) {
-      window.alert("This size still has overflowing pages. Rebalance them in Designer before saving the format.");
-      return;
-    }
     setFormatBusy(true);
     try { await onUseFormat(previewFormat); }
     finally { setFormatBusy(false); }

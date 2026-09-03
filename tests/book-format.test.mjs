@@ -22,7 +22,7 @@ test("publishing formats use exact physical dimensions and safe defaults", () =>
   assert.ok(bookFormatCapacityRatio("a5") < bookFormatCapacityRatio("7x10"));
 });
 
-test("quality assessment blocks overflow but only warns about sparse middle pages and images", () => {
+test("quality assessment reports layout issues without blocking export", () => {
   const report = assessBookFormatPreview("7x10", [
     { slotId: "cover", label: "Cover", kind: "cover", fillRatio: .2, overflowX: false, overflowY: false },
     { slotId: "chapter-1-page-1", label: "Opening", kind: "chapter", chapterId: 1, pageIndex: 0, chapterPageCount: 4, fillRatio: .3, overflowX: false, overflowY: false },
@@ -34,7 +34,7 @@ test("quality assessment blocks overflow but only warns about sparse middle page
   assert.equal(report.underflowIssues.length, 1);
   assert.equal(report.overflowIssues.length, 1);
   assert.equal(report.imageIssues.length, 2);
-  assert.equal(report.publicationReady, false);
+  assert.equal(report.publicationReady, true);
 });
 
 test("Designer, Preview and PDF share the selected format while legacy books remain A4", async () => {

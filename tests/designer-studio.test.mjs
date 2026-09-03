@@ -264,16 +264,23 @@ test("whole-book preflight reports fill problems with page navigation", () => {
 test("Preview and PDF consume saved designer pages and custom ordering", () => {
   assert.match(page, /project\.designerPageOrder \?\? \[\]/);
   assert.match(page, /renderDesignerSheet/);
-  assert.match(page, /designer-rendered-sheet/);
+  assert.match(page, /designer-canvas-page book-sheet \$\{surfaceClasses\}/);
+  assert.match(page, /className="designer-editable-content"/);
   assert.match(page, /pdf-render-stack/);
   assert.match(page, /override\?\.active[\s\S]*designerFor\(sheet\)/);
 });
 
-test("Designer preview and PDF preserve the shared 794×1123 A4 layout", () => {
-  assert.match(page, /designer-render-canvas/);
-  assert.match(css, /\.designer-render-canvas\{[^}]*width:794px[^}]*height:1123px[^}]*transform:none/);
+test("Designer, preview and PDF use the same publication surface and responsive scale", () => {
+  assert.doesNotMatch(page, /className={`designer-render-canvas/);
+  assert.match(css, /\.designer-flow-page,\.designer-flow-page>\.designer-canvas-page\{width:var\(--book-page-width,794px\)/);
   assert.match(page, /previewWholeBook/);
   assert.match(page, /await saveWholeBook\(\);[\s\S]*onPreview\(\)/);
+});
+
+test("publication export stays available while quality issues remain visible", () => {
+  assert.doesNotMatch(page, /mode === "publication" && !publication\.ready/);
+  assert.match(page, /publication = useMemo\(\(\) => \(\{ \.\.\.publicationReview, ready: true \}\)/);
+  assert.match(page, /Layout warning: \$\{overflow\} overflowing page/);
 });
 
 test("Designer uses the final publication template and saves individual pages", () => {

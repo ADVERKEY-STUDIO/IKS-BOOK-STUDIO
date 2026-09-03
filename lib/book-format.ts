@@ -124,6 +124,8 @@ export function assessBookFormatPreview(
     underflowIssues,
     imageIssues,
     contentsEntries,
-    publicationReady: overflowIssues.length === 0,
+    // Layout defects remain visible quality warnings, but must not trap the
+    // author in the editor. The publication PDF remains available for review.
+    publicationReady: true,
   };
 }

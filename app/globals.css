@@ -665,6 +665,10 @@ html[data-book-alignment="justify"] .preview-body p, html[data-book-alignment="j
 .pdf-render-stack{width:var(--book-page-width,794px)}
 .continuous-sheet-frame>.continuous-sheet-scale{width:var(--book-page-width,794px);height:var(--book-page-height,1123px)}
 
+/* A saved Designer page is already a complete publication surface. Legacy
+   Preview spacing must not add a second set of page margins around it. */
+.preview-v2 .designer-canvas-page.book-sheet{display:block;padding:0!important}
+
 .book-format-panel{display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:8px;padding:10px 18px;border-bottom:1px solid var(--studio-line);background:#f8f3ea}
 .book-format-card{display:grid;grid-template-columns:1fr auto;gap:3px 8px;min-height:60px;padding:10px 12px;border:1px solid #d7cdbd;background:#fffdf9;text-align:left}
 .book-format-card.active{border:2px solid var(--studio-terra);padding:9px 11px;background:#fff8ec}
