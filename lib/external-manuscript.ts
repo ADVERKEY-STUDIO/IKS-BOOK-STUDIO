@@ -1,4 +1,5 @@
 import { authorialReaderHtml, readerFacingChapterTitle } from "./child-summary.ts";
+import { readerSafeImageCaption } from "./publication.ts";
 
 export type ExternalManuscriptSettings = {
   title: string;
@@ -253,7 +254,9 @@ export function createExternalIllustrationSlots(result: ExternalManuscriptResult
           filename: `images/${slotId}.jpg`,
           sceneBrief: illustrationSceneBrief(section, imageIndex + 1, imageCount),
           altText: `Narrative illustration ${imageIndex + 1} for ${section.title}`,
-          caption: imageIndex === 0 && section.illustrationBrief ? section.illustrationBrief : `${section.title} · ${placement.replace(/-/g, " ")}`,
+          // The supplied illustration brief is private production input. Keep
+          // it in sceneBrief and give the printed book a short reader caption.
+          caption: section.title,
           imageIndex: imageIndex + 1,
           placement,
           status: "pending" as const,
@@ -268,7 +271,13 @@ export function upgradeExternalIllustrationSlots(
   existingSlots: ExternalIllustrationSlot[],
 ) {
   const cover = existingSlots.find((slot) => slot.role === "cover");
-  const upgraded: ExternalIllustrationSlot[] = cover ? [{ ...cover, imageIndex: cover.imageIndex || 1, placement: "cover" }] : [];
+  const upgraded: ExternalIllustrationSlot[] = cover ? [{
+    ...cover,
+    caption: readerSafeImageCaption(cover.caption, "Front cover"),
+    altText: readerSafeImageCaption(cover.altText, "Front-cover illustration"),
+    imageIndex: cover.imageIndex || 1,
+    placement: "cover",
+  }] : [];
   for (const chapter of chapters) {
     if (/^(?:glossary|appendix|activities|references|bibliography|index)\b/i.test(chapter.title.trim())) continue;
     const existing = existingSlots.filter((slot) => slot.role === "chapter" && slot.chapterId === chapter.id).sort((left, right) => (left.imageIndex || 1) - (right.imageIndex || 1));
@@ -283,7 +292,14 @@ export function upgradeExternalIllustrationSlots(
       const id = `${prefix}-IMG-${String(imageIndex + 1).padStart(2, "0")}`;
       const placement = placements[imageIndex] as ExternalIllustrationSlot["placement"];
       const start = Math.max(0, Math.round((plain.length - 700) * (imageIndex / Math.max(1, imageCount - 1))));
-      upgraded.push(prior ? { ...prior, id, imageIndex: imageIndex + 1, placement } : {
+      upgraded.push(prior ? {
+        ...prior,
+        caption: readerSafeImageCaption(prior.caption, chapter.title),
+        altText: readerSafeImageCaption(prior.altText, `Illustration for ${chapter.title}`),
+        id,
+        imageIndex: imageIndex + 1,
+        placement,
+      } : {
         id,
         role: "chapter",
         chapterId: chapter.id,
@@ -291,7 +307,7 @@ export function upgradeExternalIllustrationSlots(
         filename: `images/${id}.jpg`,
         sceneBrief: `Create image ${imageIndex + 1} of ${imageCount} for “${chapter.title}”, showing a distinct text-grounded narrative moment for the ${placement.replace(/-/g, " ")} position: ${plain.slice(start, start + 700)}`,
         altText: `Narrative illustration ${imageIndex + 1} for ${chapter.title}`,
-        caption: `${chapter.title} · ${placement.replace(/-/g, " ")}`,
+        caption: chapter.title,
         imageIndex: imageIndex + 1,
         placement,
         status: "pending",
@@ -321,8 +337,8 @@ export function assignIllustrationsToReaderPages(textPages: string[], slots: Ext
       illustrationSlotId: slot.id,
       imageKey: slot.imageKey,
       imageUrl: slot.imageUrl,
-      imageCaption: slot.caption,
-      imageAlt: slot.altText,
+      imageCaption: readerSafeImageCaption(slot.caption, slot.chapterTitle),
+      imageAlt: readerSafeImageCaption(slot.altText, `Illustration for ${slot.chapterTitle}`),
     }));
   });
 }

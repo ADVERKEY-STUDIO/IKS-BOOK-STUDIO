@@ -75,7 +75,7 @@ test("wrapped-image controls reserve readable text space without rewriting saved
   assert.match(page, /SAFE_WRAPPED_IMAGE_WIDTH = 260/);
   const hydration = page.slice(page.indexOf("function hydrateDesignerRevision"), page.indexOf("const designerStyleKeys"));
   assert.doesNotMatch(hydration, /repairUnsafeDesignerImageHtml/);
-  assert.match(hydration, /html: revision\?\.html \?\? html/);
+  assert.match(hydration, /html: sanitizeReaderImageHtml\(revision\?\.html \?\? html\)/);
   assert.match(page, /frame\.style\.maxWidth = "42%"/);
   assert.match(page, /Block — recommended/);
   assert.match(page, /Image left · text right/);
@@ -267,6 +267,18 @@ test("whole-book preflight reports fill problems with page navigation", () => {
   assert.match(page, />Go to page</);
   assert.match(css, /\.page-fill-badge\.empty/);
   assert.match(css, /\.page-fill-badge\.overflow/);
+});
+
+test("manual canvas scrolling selects the dominant visible page", () => {
+  const activeDesigner = page.slice(page.indexOf("const DesignerStudio ="), page.indexOf("function LegacyDesignerStudio"));
+  assert.match(activeDesigner, /syncSelectionFromCanvas/);
+  assert.match(activeDesigner, /querySelectorAll<HTMLElement>\("\.designer-flow-page\[data-designer-slot-id\]"\)/);
+  assert.match(activeDesigner, /overlap > best\.overlap/);
+  assert.match(activeDesigner, /onScroll=\{handleCanvasScroll\}/);
+  assert.match(activeDesigner, /data-designer-slot-id=\{page\.slotId\}/);
+  assert.match(activeDesigner, /programmaticRevealRef/);
+  assert.match(activeDesigner, /canvas\.scrollTo\(/);
+  assert.doesNotMatch(activeDesigner, /scrollIntoView\(/);
 });
 
 test("Preview and PDF consume saved designer pages and custom ordering", () => {

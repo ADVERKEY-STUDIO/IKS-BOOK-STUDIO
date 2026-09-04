@@ -105,6 +105,20 @@ test("approved manuscript creates one cover and one stable image slot per narrat
   assert.equal(slots[2].filename, "images/CH-02-IMG-01.jpg");
 });
 
+test("private scene briefs stay in generation prompts and never become printed metadata", () => {
+  const result = parseExternalManuscript(`# Book\n# INTRODUCTION\n${"Welcome to the reader. ".repeat(100)}\n## ILLUSTRATION BRIEF\n[PRIVATE — Show a teacher and three children beside a potter. This section will never print.]\n# CHAPTER 01: Clay and care\n${"The children learn from a potter. ".repeat(120)}\n# CONCLUSION\n${"They reflect together. ".repeat(100)}`, settings.audience);
+  const slots = createExternalIllustrationSlots(result, "Book");
+  const introduction = slots.find((slot) => slot.chapterTitle.toLowerCase() === "introduction");
+  assert.ok(introduction);
+  assert.match(introduction.sceneBrief, /PRIVATE.*potter/i);
+  assert.equal(introduction.caption, "INTRODUCTION");
+  assert.doesNotMatch(`${introduction.caption} ${introduction.altText}`, /PRIVATE|ILLUSTRATION BRIEF/i);
+
+  const placed = assignIllustrationsToReaderPages(["<p>Reader text.</p>"], [{ ...introduction, status: "ready", imageUrl: "/intro.jpg" }]);
+  assert.equal(placed[0].imageCaption, "INTRODUCTION");
+  assert.doesNotMatch(`${placed[0].imageCaption} ${placed[0].imageAlt}`, /PRIVATE|ILLUSTRATION BRIEF/i);
+});
+
 test("long chapters still receive one dependable illustration slot", () => {
   const longChapter = {
     title: "Book",
@@ -144,6 +158,14 @@ test("older one-image chapter plans upgrade without losing an approved image", (
   const upgraded = upgradeExternalIllustrationSlots([{ id: 2, title: "Long chapter", body: "<p>" + "Substantial narrative explanation. ".repeat(250) + "</p>", wordCount: 1000 }], existing);
   assert.deepEqual(upgraded.map((slot) => slot.id), ["COVER", "CH-01-IMG-01"]);
   assert.equal(upgraded[1].imageUrl, "/approved.jpg");
+});
+
+test("older illustration plans replace leaked private caption and alt metadata", () => {
+  const existing = [{ id: "CH-01-IMG-01", role: "chapter", chapterId: 1, chapterTitle: "Clay and care", filename: "images/CH-01-IMG-01.jpg", sceneBrief: "[PRIVATE — scene direction]", altText: "Illustration brief: do not print", caption: "[PRIVATE — scene direction]", status: "ready", imageUrl: "/approved.jpg", imageKey: "approved" }];
+  const upgraded = upgradeExternalIllustrationSlots([{ id: 1, title: "Clay and care", body: "<p>Reader prose.</p>", wordCount: 500 }], existing);
+  assert.equal(upgraded[0].caption, "Clay and care");
+  assert.equal(upgraded[0].altText, "Illustration for Clay and care");
+  assert.match(upgraded[0].sceneBrief, /PRIVATE/);
 });
 
 test("second-stage manifest requires sequential, quality-checked image operations", () => {

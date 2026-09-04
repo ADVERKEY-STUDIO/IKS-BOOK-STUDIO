@@ -156,6 +156,44 @@ test("saving and reopening a safely wrapped image preserves a small designer nud
   assert.deepEqual(previewPages(project, true).find((page) => page.slotId === saved.slotId), designer);
 });
 
+test("opening an old saved page removes only its private caption and keeps image geometry", () => {
+  const project = projectFixture("7x10");
+  const privateCaption = "[PRIVATE — In a courtyard, arrange the children beside a potter. This section will never print.]";
+  const figureStyle = "position:relative;left:-12px;top:5px;width:413px;height:277px;margin:17px 0";
+  const imageStyle = "width:100%;height:100%;object-fit:cover;object-position:left 42%;border-radius:9px";
+  const unsafeHtml = `<header class="print-chapter-header"><span>CHAPTER 1</span><span>PAGE 1</span></header><div class="preview-body"><p>Text before.</p><figure id="private-art" class="chapter-image" style="${figureStyle}"><img src="/art.png" alt="Reader scene" style="${imageStyle}"><figcaption>${privateCaption}</figcaption></figure><p>Text after.</p></div><footer class="sheet-number">1</footer>`;
+  const expectedHtml = unsafeHtml.replace(`<figcaption>${privateCaption}</figcaption>`, "");
+  savePage(project, "chapter-1-page-1", { html: unsafeHtml });
+  project.designerPages[0].history = [{ ...defaultDesignerRevision(unsafeHtml), html: unsafeHtml }];
+
+  const hydrated = hydrateDesignerOverride(project.designerPages[0]);
+  assert.equal(hydrated.html, expectedHtml, "hydration may remove only the private caption");
+  assert.equal(hydrated.history[0].html, expectedHtml, "revision history must not restore the leak");
+  project.designerPages = [hydrated];
+
+  for (const pages of [designerPages(project), previewPages(project), previewPages(project, true)]) {
+    const savedPage = pages.find((candidate) => candidate.slotId === "chapter-1-page-1");
+    assert.equal(savedPage.html, expectedHtml);
+    assert.match(savedPage.html, new RegExp(`style="${figureStyle}"`));
+    assert.match(savedPage.html, new RegExp(`style="${imageStyle}"`));
+    assert.doesNotMatch(savedPage.html, /\[PRIVATE|<figcaption/i);
+    assert.match(savedPage.html, /Text before/);
+    assert.match(savedPage.html, /Text after/);
+  }
+});
+
+test("generated chapter artwork shares a prose page instead of creating an image-only page", () => {
+  const project = projectFixture("a4", 1);
+  project.chapters[0].imageUrl = "/chapter-art.png";
+  project.chapters[0].imageAlt = "Children learning beside a potter";
+  project.chapters[0].imageCaption = "Clay and care";
+  const pages = designerBasePages(project).filter((page) => page.chapterId === 1);
+  assert.equal(pages.length, 1);
+  assert.match(pages[0].html, /Paragraph 1/);
+  assert.match(pages[0].html, /chapter-art\.png/);
+  assert.doesNotMatch(pages[0].html, /designer-full-figure/);
+});
+
 test("Preview preserves an edited contents illustration and text instead of regenerating that page", () => {
   const project = projectFixture();
   const base = designerBasePages(project).find((page) => page.slotId === "contents");

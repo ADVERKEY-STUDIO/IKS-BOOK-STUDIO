@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { assessPublication, paginateContents, pdfRasterSettings, sanitizeReaderHtml } from "../lib/publication.ts";
+import { assessPublication, hasPrivateProductionText, paginateContents, pdfRasterSettings, readerSafeImageCaption, sanitizeReaderHtml, sanitizeReaderImageHtml } from "../lib/publication.ts";
 
 test("long contents lists split into stable pages without losing chapters", () => {
   const chapters = Array.from({ length: 27 }, (_, index) => ({
@@ -89,4 +89,31 @@ test("reader rendering removes explicitly tagged internal blocks", () => {
   assert.match(cleaned, /Customer text/);
   assert.match(cleaned, /Closing text/);
   assert.doesNotMatch(cleaned, /Build notes|Do not print|files\.md|manifest-page/);
+});
+
+test("private illustration directions cannot become reader captions or alt text", () => {
+  const privateCaption = "[PRIVATE — Put three children beside a potter. This section will never print.]";
+  const html = `<figure id="art" style="position:relative;left:-12px;width:413px"><img src="/art.png" alt="${privateCaption}" style="object-position:left 42%"><figcaption>${privateCaption}</figcaption></figure>`;
+  const cleaned = sanitizeReaderImageHtml(html);
+  assert.equal(cleaned, '<figure id="art" style="position:relative;left:-12px;width:413px"><img src="/art.png" alt="Book illustration" style="object-position:left 42%"></figure>');
+  assert.equal(readerSafeImageCaption(privateCaption, "A village craft lesson"), "A village craft lesson");
+  assert.equal(readerSafeImageCaption("A quiet private moment of prayer."), "A quiet private moment of prayer.");
+  assert.equal(hasPrivateProductionText("[ PRIVATE — internal direction]"), true);
+  assert.equal(hasPrivateProductionText("[PRIVATE PAGE 4]"), true);
+  assert.equal(hasPrivateProductionText("[PRIVATE MATERIAL CONTINUES]"), true);
+  assert.equal(hasPrivateProductionText("A private—yet meaningful—moment."), false);
+});
+
+test("publication readiness scans image metadata as well as body text", () => {
+  const result = assessPublication([{
+    id: 1,
+    title: "A chapter with leaked metadata",
+    body: "<p>Clean reader prose.</p>",
+    imageUrl: "/art.png",
+    imageCaption: "[PRIVATE — production direction]",
+    importedPages: [{ body: "<p>Clean page.</p>", imageUrl: "/art.png", imageAlt: "Illustration brief: internal only" }],
+    importValidated: true,
+  }]);
+  assert.equal(result.ready, false);
+  assert.ok(result.blockers.some((blocker) => blocker.code === "private-production-text"));
 });

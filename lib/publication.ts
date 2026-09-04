@@ -3,8 +3,10 @@ export type PublicationChapter = {
   title: string;
   pages?: number;
   body?: string;
-  importedPages?: Array<{ body?: string; imageUrl?: string }>;
+  importedPages?: Array<{ body?: string; imageUrl?: string; imageCaption?: string; imageAlt?: string }>;
   imageUrl?: string;
+  imageCaption?: string;
+  imageAlt?: string;
   visualType?: string;
   importValidated?: boolean;
   manualApproved?: boolean;
@@ -40,7 +42,7 @@ export function pdfRasterSettings(pageCount: number, mode: "draft" | "publicatio
     : { scale: 2.5, quality: 0.92 };
 }
 
-const privateProductionText = /\b(?:MANUSCRIPT FILE MANIFEST|PACKAGE MANIFEST|ILLUSTRATION PENDING|CHAPTER IN PROGRESS|DESIGNER HANDOFF|RESERVED FOR FINAL HUMAN DEVELOPMENT)\b|\b[\w-]+\.md\s*:\s*\d+\s+words?\b/i;
+const privateProductionText = /(?:^\s*PRIVATE\s*[—–:-]|[([]\s*PRIVATE(?:\s+(?:PAGE\s+\d+|MATERIAL\s+CONTINUES)|\s*[\]—–:-]))|\b(?:MANUSCRIPT FILE MANIFEST|PACKAGE MANIFEST|ILLUSTRATION BRIEF|ILLUSTRATION PENDING|SOURCE COVERAGE NOTES?|CHAPTER IN PROGRESS|DESIGNER HANDOFF|RESERVED FOR FINAL HUMAN DEVELOPMENT)\b|\b[\w-]+\.md\s*:\s*\d+\s+words?\b/i;
 const privateProductionHeading = /<h[1-6][^>]*>\s*(?:MANUSCRIPT FILE MANIFEST|PACKAGE MANIFEST|DELIVERY MANIFEST|MANUSCRIPT PACKAGE NOTES?)\s*<\/h[1-6]>/i;
 const readerProvenanceText = /\bthe subject\b|\b(?:the|this|your|uploaded|original) (?:source|document|adaptation)\b|\baccording to (?:the|this) source\b/i;
 
@@ -54,7 +56,36 @@ export function sanitizeReaderHtml(value: string) {
     .replace(/<([a-z][\w-]*)\b[^>]*\bdata-publication=["'](?:internal|manifest)["'][^>]*>[\s\S]*?<\/\1\s*>/gi, "")
     .replace(/<([a-z][\w-]*)\b[^>]*\bclass=["'][^"']*\b(?:manifest-page|internal-only|production-only)\b[^"']*["'][^>]*>[\s\S]*?<\/\1\s*>/gi, "");
   const match = privateProductionHeading.exec(withoutTaggedBlocks);
-  return (match ? withoutTaggedBlocks.slice(0, match.index) : withoutTaggedBlocks).trim();
+  return sanitizeReaderImageHtml(match ? withoutTaggedBlocks.slice(0, match.index) : withoutTaggedBlocks).trim();
+}
+
+function readerPlainText(value: string) {
+  return value
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&(lbrack|#0*91|#x0*5b);/gi, "[")
+    .replace(/&(rbrack|#0*93|#x0*5d);/gi, "]")
+    .replace(/&(?:nbsp|ensp|emsp);/gi, " ")
+    .replace(/&(?:mdash|#0*8212|#x0*2014);/gi, "—")
+    .replace(/&(?:ndash|#0*8211|#x0*2013);/gi, "–")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** A scene-generation brief is production data, never a printed caption. */
+export function readerSafeImageCaption(value: string | null | undefined, fallback = "") {
+  const caption = readerPlainText(value ?? "");
+  if (caption && !privateProductionText.test(caption)) return caption;
+  const safeFallback = readerPlainText(fallback);
+  return safeFallback && !privateProductionText.test(safeFallback) ? safeFallback : "";
+}
+
+/** Remove private captions and alt text from old saved page HTML without
+ * touching image position, dimensions, wrapping, or any other authored HTML. */
+export function sanitizeReaderImageHtml(value: string) {
+  if (!value || !/(?:figcaption|\balt\s*=)/i.test(value)) return value;
+  return value
+    .replace(/<figcaption\b[^>]*>([\s\S]*?)<\/figcaption\s*>/gi, (tag, caption: string) => readerSafeImageCaption(caption) ? tag : "")
+    .replace(/\salt=(['"])([\s\S]*?)\1/gi, (attribute, quote: string, alt: string) => readerSafeImageCaption(alt) ? attribute : ` alt=${quote}Book illustration${quote}`);
 }
 
 export function paginateContents(
@@ -97,7 +128,12 @@ export function assessPublication(chapters: PublicationChapter[]) {
       chapterTitle: chapter.title,
       message: `${chapter.title} still needs its required illustration.`,
     });
-    const readerText = [chapter.body ?? "", ...(chapter.importedPages ?? []).map((page) => page.body ?? "")].join(" ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ");
+    const readerText = [
+      chapter.body ?? "",
+      chapter.imageCaption ?? "",
+      chapter.imageAlt ?? "",
+      ...(chapter.importedPages ?? []).flatMap((page) => [page.body ?? "", page.imageCaption ?? "", page.imageAlt ?? ""]),
+    ].join(" ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ");
     if (privateProductionText.test(readerText)) blockers.push({
       code: "private-production-text",
       chapterId: chapter.id,
@@ -115,5 +151,5 @@ export function assessPublication(chapters: PublicationChapter[]) {
 }
 
 export function hasPrivateProductionText(value: string) {
-  return privateProductionText.test(value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " "));
+  return privateProductionText.test(readerPlainText(value));
 }
