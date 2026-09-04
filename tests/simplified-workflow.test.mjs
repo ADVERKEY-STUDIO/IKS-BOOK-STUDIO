@@ -69,7 +69,7 @@ test("failed chapters can be handed to a designer while keeping draft-proof expo
   assert.match(page, /Download draft proof/);
 });
 
-test("draft proof remains available but publication PDF is gated while chapters are unfinished", () => {
+test("draft and publication exports remain available alongside layout review", () => {
   assert.match(page, /function openPreview\(\)/);
   assert.match(page, /Download draft proof/);
   assert.match(page, /Download publication PDF/);
@@ -77,7 +77,8 @@ test("draft proof remains available but publication PDF is gated while chapters 
   assert.match(page, /DRAFT PROOF/);
   assert.match(page, /draft-proof/);
   assert.match(page, /renderingMode:\s*"invisible"/);
-  assert.match(page, /Publication PDF is locked/);
+  assert.match(page, /publication = useMemo\(\(\) => \(\{ \.\.\.publicationReview, ready: true \}\)/);
+  assert.match(page, /Checking page layout/);
 });
 
 test("preview supports the complete book, a complete chapter, and a single page", () => {
@@ -97,6 +98,6 @@ test("publishing workflow exposes review, operations and real PDF controls", () 
   assert.doesNotMatch(page, /Proof mode|Final-book mode/);
   assert.match(page, /generationRuns\?: GenerationRun\[\]/);
   assert.match(page, /Current generation run|current run/i);
-  assert.match(page, /html2canvas/);
+  assert.match(page, /renderBookPageCanvas/);
   assert.match(page, /jsPDF/);
 });

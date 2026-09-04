@@ -33,7 +33,7 @@ test("format-aware pagination fills continuation sheets without crowding paragra
   assert.match(page, /availableText < 260/);
   assert.match(css, /\.preview-body p\{margin:0 0 2\.4mm\}/);
   assert.match(css, /\.preview-body h2\{[^}]*margin:5mm 0 2mm/);
-  assert.match(css, /\.preview-v2 \.preview-body p\{margin:0 0 \.68em;line-height:1\.56\}/);
+  assert.match(css, /\.book-publication \.preview-body p\{margin:0 0 \.68em;line-height:1\.56\}/);
 });
 
 test("a sparse final text page shares its unused space with the chapter illustration", async () => {
@@ -52,8 +52,8 @@ test("multi-page PDF export avoids base64 canvas accumulation", async () => {
   assert.match(page, /canvas\.width = 1/);
   assert.doesNotMatch(page, /pdf\.addImage\(canvas\.toDataURL/);
   assert.match(page, /PDF export stopped at page \$\{index \+ 1\}/);
-  assert.match(page, /onclone: prepareRasterClone/);
-  assert.match(page, /html2canvas 1\.x cannot parse CSS Color 4 values/);
+  assert.match(page, /renderBookPageCanvas\(sheets\[index\], \{ backgroundColor: "#fffdf8", scale: raster\.scale \}\)/);
+  assert.doesNotMatch(page, /function prepareRasterClone/);
   assert.match(page, /const unfinished = [^;]+ \+ renderedBlockers\.length/);
   assert.doesNotMatch(page, /Publication PDF is locked:.*renderedBlockers/);
 });

@@ -44,10 +44,10 @@ test("Designer, Preview and PDF share the selected format while legacy books rem
   ]);
   assert.match(page, /bookFormat: DEFAULT_NEW_BOOK_FORMAT/);
   assert.match(page, /isBookFormatId\(cleanSaved\.bookFormat\) \? cleanSaved\.bookFormat : LEGACY_BOOK_FORMAT/);
-  assert.match(page, /designerBasePages\(candidate\)/);
+  assert.match(page, /resolveBookPages\(candidate\)/);
   assert.match(page, /readerPagesForFormat\(chapter, project\.audience, project\.bookFormat\)/);
   assert.match(page, /format: physicalPage/);
   assert.match(page, /pdf\.addImage\(jpeg, "JPEG", 0, 0, exportFormat\.widthMm, exportFormat\.heightMm/);
-  assert.match(css, /\.preview-v2 \.book-sheet,.designer-canvas-page\{width:var\(--book-page-width/);
+  assert.match(css, /\.book-publication \.book-sheet,.designer-canvas-page\{width:var\(--book-page-width/);
   assert.match(css, /\.designer-render-canvas\{width:var\(--book-page-width/);
 });

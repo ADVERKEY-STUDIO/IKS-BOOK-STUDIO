@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+const layout = await readFile(new URL("../lib/book-layout.ts", import.meta.url), "utf8");
 
 test("Designer Studio is a separate persisted final-production layer", () => {
   assert.match(page, /designerPages\?: DesignerPageOverride\[\]/);
@@ -70,10 +71,11 @@ test("image inspector keeps a stable selection and resizes both image types cont
   assert.match(css, /\.designer-size-control/);
 });
 
-test("wrapped images can never collapse book text into a narrow vertical column", () => {
+test("wrapped-image controls reserve readable text space without rewriting saved geometry", () => {
   assert.match(page, /SAFE_WRAPPED_IMAGE_WIDTH = 260/);
-  assert.match(page, /repairUnsafeDesignerImageHtml/);
-  assert.match(page, /html: repairUnsafeDesignerImageHtml/);
+  const hydration = page.slice(page.indexOf("function hydrateDesignerRevision"), page.indexOf("const designerStyleKeys"));
+  assert.doesNotMatch(hydration, /repairUnsafeDesignerImageHtml/);
+  assert.match(hydration, /html: revision\?\.html \?\? html/);
   assert.match(page, /frame\.style\.maxWidth = "42%"/);
   assert.match(page, /Block — recommended/);
   assert.match(page, /Image left · text right/);
@@ -81,7 +83,8 @@ test("wrapped images can never collapse book text into a narrow vertical column"
   assert.match(page, /Height follows the image’s original proportions automatically/);
   assert.match(page, /A wrapped image leaves too little room for readable text/);
   assert.match(css, /img\[data-designer-wrap=left\]/);
-  assert.match(css, /max-width:42%!important;height:auto!important/);
+  assert.match(css, /img\[data-designer-wrap=left\][^{]*\{max-width:100%;height:auto;position:relative\}/);
+  assert.doesNotMatch(css, /width:min\(260px,42%\)!important/);
 });
 
 test("page columns flow only inside chapter text and fixed pages self-repair to one column", () => {
@@ -105,7 +108,7 @@ test("free images hide editing chrome outside selection and can be deleted", () 
   assert.match(css, /\.designer-free-image:not\(\.designer-object-selected\)>\.free-image-dragbar/);
   assert.match(css, /\.designer-render-content \.designer-free-image>\.free-image-dragbar/);
   assert.match(css, /\.designer-render-content \.designer-free-image>img/);
-  assert.match(css, /\.designer-editable-content \.designer-free-image\.designer-object-selected>img\{width:100%!important;height:100%!important;max-height:none!important;padding-top:0!important\}/);
+  assert.match(css, /\.designer-editable-content \.designer-free-image>img\{width:100%!important;height:100%!important;max-height:none!important;padding-top:0!important\}/);
 });
 
 test("designer and Preview preserve free-image geometry and keep actions outside the scaled page", () => {
@@ -169,7 +172,10 @@ test("live Designer pages are uncontrolled so ordinary rerenders cannot reset th
   assert.match(activeDesigner, /anchorTextOffset/);
   assert.match(activeDesigner, /focusTextOffset/);
   assert.match(activeDesigner, /restoreSelection\(bookmark, true\)/);
-  assert.match(activeDesigner, /ref=\{\(node\) => connectBookEditor\(page\.slotId, revision\.html, node\)\}/);
+  assert.match(activeDesigner, /renderBookPage\(project, \{ \.\.\.page, \.\.\.revision \}, page\.slotId, \{/);
+  assert.match(activeDesigner, /editorProps:\s*\{\s*ref: \(node\) => connectBookEditor\(page\.slotId, revision\.html, node\)/);
+  assert.match(activeDesigner, /contentEditable: true, suppressContentEditableWarning: true/);
+  assert.match(page, /options\.editorProps \?\? \{ dangerouslySetInnerHTML: \{ __html: page\.html \} \}/);
   assert.doesNotMatch(activeDesigner, /dangerouslySetInnerHTML/);
   assert.match(page, /<DesignerStudio ref=\{designerStudioRef\} embedded key=\{project\.id\}/);
 });
@@ -240,22 +246,24 @@ test("Designer Studio exposes the complete book as one editable flowing workspac
 
 test("whole-book layout balancing is local, scoped and preserves locked pages", () => {
   assert.match(page, /balanceLayout = async \(scope: "chapter" \| "book"\)/);
-  assert.match(page, /measureChapterPages\(chapter, flowingText, firstStyle\)/);
-  assert.match(page, /content\.scrollHeight <= content\.clientHeight \+ 1/);
-  assert.match(page, /splitForRemainingSpace/);
+  assert.match(page, /measureChapterPages\(chapter, combined, revisions\.map/);
+  assert.match(page, /const measured = measureBookContent\(content\)/);
+  assert.match(page, /return !measured\.overflowX && !measured\.overflowY/);
+  assert.match(page, /paginateFlowBlocks\(blocks, fits\)/);
+  assert.match(layout, /splitFlowBlock\(block, \(head\) => fits\(\[\.\.\.current, head\], index\), doc\)/);
   assert.match(page, /flowBodyFromRenderedPage/);
   assert.match(page, /layoutLocked/);
   assert.match(page, /Lock this page during reflow/);
   assert.match(page, /Balance this chapter/);
   assert.match(page, /Balance layout/);
-  assert.match(page, /without using AI tokens/);
+  assert.match(page, /balanced locally/);
 });
 
 test("whole-book preflight reports fill problems with page navigation", () => {
   assert.match(page, /designerPageFill/);
   assert.match(page, /runBookPreflight/);
   assert.match(page, /Only \$\{fill\.ratio\}% filled/);
-  assert.match(page, /content may be clipped/);
+  assert.match(page, /Content crosses the page boundary or overlaps its footer/);
   assert.match(page, />Go to page</);
   assert.match(css, /\.page-fill-badge\.empty/);
   assert.match(css, /\.page-fill-badge\.overflow/);
@@ -263,11 +271,15 @@ test("whole-book preflight reports fill problems with page navigation", () => {
 
 test("Preview and PDF consume saved designer pages and custom ordering", () => {
   assert.match(page, /project\.designerPageOrder \?\? \[\]/);
-  assert.match(page, /renderDesignerSheet/);
-  assert.match(page, /designer-canvas-page book-sheet \$\{surfaceClasses\}/);
+  const preview = page.slice(page.indexOf("function CanvaPreview("));
+  assert.match(preview, /resolveBookPages\(project\)\.filter\(\(page\) => !page\.deleted\)/);
+  assert.match(preview, /renderBookPage\(project, sheet, key, \{ draftProof \}\)/);
+  assert.doesNotMatch(preview, /designerBasePages\(|readerPagesForFormat\(|sanitizeReaderHtml\(/);
   assert.match(page, /className="designer-editable-content"/);
   assert.match(page, /pdf-render-stack/);
-  assert.match(page, /override\?\.active[\s\S]*designerFor\(sheet\)/);
+  const surface = page.slice(page.indexOf("function renderBookPage("), page.indexOf("function designerStyleFrom("));
+  assert.match(surface, /candidate\.slotId === page\.slotId && candidate\.active/);
+  assert.match(surface, /canva \? <img src=\{canva\.current\.imageUrl\}/);
 });
 
 test("Designer, preview and PDF use the same publication surface and responsive scale", () => {
@@ -280,14 +292,16 @@ test("Designer, preview and PDF use the same publication surface and responsive 
 test("publication export stays available while quality issues remain visible", () => {
   assert.doesNotMatch(page, /mode === "publication" && !publication\.ready/);
   assert.match(page, /publication = useMemo\(\(\) => \(\{ \.\.\.publicationReview, ready: true \}\)/);
-  assert.match(page, /Layout warning: \$\{overflow\} overflowing page/);
+  assert.match(page, /qualityReport\?\.overflowIssues\.length/);
+  assert.match(page, /Some content crosses a page boundary or overlaps a footer/);
 });
 
 test("Designer uses the final publication template and saves individual pages", () => {
   assert.match(page, /function designerBookClasses/);
   assert.match(page, /function designerPageClasses/);
-  assert.match(page, /designer-canvas-page book-sheet \$\{bookClasses\} \$\{pageClasses\}/);
-  assert.match(page, /surfaceClasses = `\$\{designerBookClasses\(project\)\} \$\{designerPageClasses\(project, page\)\}\$\{page\.backgroundImageUrl/);
+  assert.match(page, /designer-canvas-page book-sheet \$\{designerBookClasses\(project\)\} \$\{designerPageClasses\(project, page\)\}/);
+  assert.match(page, /page\.backgroundImageUrl \? " has-background"/);
+  assert.match(page, /style=\{bookContentStyle\(page, page\)\}/);
   assert.match(page, /savePageById = async/);
   assert.match(page, /page-save-button/);
   assert.match(page, /Save page/);

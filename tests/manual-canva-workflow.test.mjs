@@ -12,14 +12,14 @@ test("manual Canva workflow downloads, compares, accepts and restores physical p
   assert.match(source, /Use Canva version/);
   assert.match(source, /Keep studio version/);
   assert.match(source, /Restore studio version/);
-  assert.match(source, /html2canvas/);
+  assert.match(source, /renderBookPageCanvas/);
   assert.match(source, /data-page-slot/);
 });
 
 test("accepted Canva pages persist separately from chapter prose and enter the PDF renderer", () => {
   assert.match(source, /canvaPages\?: CanvaPageOverride\[\]/);
   assert.match(source, /fetch\("\/api\/image"/);
-  assert.match(source, /className="book-sheet canva-custom-sheet"/);
+  assert.match(source, /canva \? " canva-custom-sheet"/);
   assert.match(source, /pdf-render-stack/);
   assert.match(source, /current: version/);
   assert.match(source, /history: existing/);
