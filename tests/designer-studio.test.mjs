@@ -174,7 +174,7 @@ test("live Designer pages are uncontrolled so ordinary rerenders cannot reset th
   assert.match(activeDesigner, /restoreSelection\(bookmark, true\)/);
   assert.match(activeDesigner, /renderBookPage\(project, \{ \.\.\.page, \.\.\.revision \}, page\.slotId, \{/);
   assert.match(activeDesigner, /editorProps:\s*\{\s*ref: \(node\) => connectBookEditor\(page\.slotId, revision\.html, node\)/);
-  assert.match(activeDesigner, /contentEditable: true, suppressContentEditableWarning: true/);
+  assert.match(activeDesigner, /contentEditable: !busy, suppressContentEditableWarning: true/);
   assert.match(page, /options\.editorProps \?\? \{ dangerouslySetInnerHTML: \{ __html: page\.html \} \}/);
   assert.doesNotMatch(activeDesigner, /dangerouslySetInnerHTML/);
   assert.match(page, /<DesignerStudio ref=\{designerStudioRef\} embedded key=\{project\.id\}/);
@@ -249,7 +249,7 @@ test("whole-book layout balancing is local, scoped and preserves locked pages", 
   assert.match(page, /measureChapterPages\(chapter, combined, revisions\.map/);
   assert.match(page, /const measured = measureBookContent\(content\)/);
   assert.match(page, /return !measured\.overflowX && !measured\.overflowY/);
-  assert.match(page, /paginateFlowBlocks\(blocks, fits\)/);
+  assert.match(page, /paginateFlowBlocks\(blocks, fits, document,/);
   assert.match(layout, /splitFlowBlock\(block, \(head\) => fits\(\[\.\.\.current, head\], index\), doc\)/);
   assert.match(page, /flowBodyFromRenderedPage/);
   assert.match(page, /layoutLocked/);
@@ -301,10 +301,10 @@ test("Designer, preview and PDF use the same publication surface and responsive 
   assert.match(page, /await saveWholeBook\(\);[\s\S]*onPreview\(\)/);
 });
 
-test("publication export stays available while quality issues remain visible", () => {
+test("publication export requires approval and measured structural checks", () => {
   assert.doesNotMatch(page, /mode === "publication" && !publication\.ready/);
-  assert.match(page, /publication = useMemo\(\(\) => \(\{ \.\.\.publicationReview, ready: true \}\)/);
-  assert.match(page, /qualityReport\?\.overflowIssues\.length/);
+  assert.match(page, /const publication = publicationReview/);
+  assert.match(page, /qualityReport\.overflowIssues/);
   assert.match(page, /Some content crosses a page boundary or overlaps a footer/);
 });
 

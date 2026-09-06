@@ -671,3 +671,28 @@ html[data-theme="scholar"] .paper{padding-left:84px !important;padding-right:84p
 @media(max-width:900px){.book-format-panel{grid-template-columns:repeat(4,155px);overflow-x:auto}.book-format-summary{align-items:flex-start;flex-direction:column}}
 .book-format-chooser{width:min(1080px,94vw);max-height:90vh;overflow:auto;background:#f7f1e7;border:1px solid #d7cdbd;box-shadow:0 30px 90px #071d1870}.book-format-chooser>header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;padding:25px 28px;background:var(--studio-night);color:#fff}.book-format-chooser h2{margin:4px 0 7px;font:30px/1.1 Georgia,serif}.book-format-chooser header p:last-child{max-width:680px;margin:0;color:#b9cbc5;font:10px/1.5 Georgia,serif}.book-format-chooser header>button{border:1px solid #ffffff55;background:transparent;color:#fff;padding:8px 12px;font-size:18px}.book-format-chooser-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;padding:24px}.book-format-chooser-grid>button{display:flex;min-height:210px;flex-direction:column;align-items:flex-start;border:1px solid #d8cebd;background:#fffdf9;padding:18px;text-align:left}.book-format-chooser-grid>button.active{border:3px solid var(--studio-terra);padding:16px;background:#fff8eb;box-shadow:0 10px 28px #63351e18}.book-format-chooser-grid b{color:var(--studio-forest);font:24px/1 Georgia,serif}.book-format-chooser-grid span{margin-top:6px;color:#8a4c35;font-size:9px;font-weight:800}.book-format-chooser-grid p{color:#6f6a62;font:10px/1.5 Georgia,serif}.book-format-chooser-grid strong{margin-top:auto;color:var(--studio-forest);font-size:11px}.book-format-chooser-grid small{margin-top:7px;color:#8f887d;font-size:8px}.book-format-chooser-summary{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:20px 24px;border-top:1px solid #d8cebd;background:#fff}.book-format-chooser-summary>div:first-child{display:grid;gap:5px}.book-format-chooser-summary b{color:var(--studio-forest);font:18px Georgia,serif}.book-format-chooser-summary span{color:#6f6a62;font-size:9px}.book-format-chooser-summary>div:last-child{display:flex;gap:8px}.book-format-chooser-summary button{min-height:40px}.book-format-chooser-summary button:disabled{opacity:.45}
 @media(max-width:850px){.book-format-chooser-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.book-format-chooser-summary{align-items:flex-start;flex-direction:column}}@media(max-width:520px){.book-format-chooser-grid{grid-template-columns:1fr}.book-format-chooser-summary>div:last-child{width:100%;flex-direction:column}}
+
+/* Publication body controls have the same authority on every rendering surface. */
+.book-publication .book-sheet.chapter-preview .designer-editable-content .preview-body,
+.book-publication .book-sheet.chapter-preview .designer-render-content .preview-body {
+  font-size: var(--book-body-size, 15px) !important;
+  font-family: var(--book-body-family, Georgia, serif) !important;
+  line-height: var(--book-body-leading, 1.55) !important;
+}
+.book-publication .book-sheet .preview-body p,
+.book-publication .book-sheet .preview-body li { font-size: inherit; line-height: inherit; }
+.book-publication .book-sheet .preview-body p { margin-bottom: var(--designer-paragraph-space, 11px); }
+.book-publication .book-sheet .preview-body table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.book-publication .book-sheet .preview-body td,
+.book-publication .book-sheet .preview-body th { overflow-wrap: anywhere; padding: 5px; border: 1px solid #c9c4b8; }
+.book-publication .book-sheet .chapter-image { break-inside: avoid; }
+.book-publication .book-sheet.book-border-no-border,
+.book-publication .book-sheet.book-border-none { border: 0 !important; border-image: none !important; outline: none !important; }
+.book-publication .book-sheet.book-border-no-border::before,
+.book-publication .book-sheet.book-border-no-border::after,
+.book-publication .book-sheet.book-border-none::before,
+.book-publication .book-sheet.book-border-none::after { display: none !important; }
+.book-preflight-results { padding: 10px 20px; background: #fff9ed; max-height: 190px; overflow: auto; }
+.book-preflight-results button { display: block; text-align: left; margin: 6px 0; color: #783b22; }
+.book-publication .book-sheet .preview-body p:not([style*="font-family"]),
+.book-publication .book-sheet .preview-body li:not([style*="font-family"]) { font-family: inherit !important; }

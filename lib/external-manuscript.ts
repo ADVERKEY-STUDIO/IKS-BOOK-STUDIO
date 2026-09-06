@@ -184,15 +184,22 @@ export function parseExternalManuscript(value: string, audience: string): Extern
   const title = cleanLine(titleMatch?.[1] || "Imported book");
   const boundary = /^#{1,2}\s*((?:INTRODUCTION|CHAPTER\s*(?:\d+|[IVXLCDM]+)\s*[:.\-–—]?[^\n]*|CONCLUSION[^\n]*|GLOSSARY[^\n]*|APPENDIX[^\n]*|ACTIVITIES[^\n]*|REFERENCES[^\n]*))\s*$/gim;
   const matches = [...normalized.matchAll(boundary)];
+  // A Part label immediately before a chapter belongs to that chapter,
+  // even when separate Markdown files were joined for import.
+  const dividers = matches.map((match) => {
+    const prefix = normalized.slice(0, match.index);
+    const found = /(?:^|\n)([ *#]*PART\s+(?:[IVXLCDM]+|\d+)\b[^\n]*)\s*$/i.exec(prefix);
+    return found ? { start: found.index, text: cleanLine(found[1].replace(/^[ *#]+|[ *]+$/g, "")) } : undefined;
+  });
   let removedPrivateMetadata = false;
   const sections: ExternalManuscriptSection[] = matches.map((match, index) => {
     const label = cleanLine(match[1]);
     const kind = sectionKind(label);
     const start = (match.index || 0) + match[0].length;
-    const end = matches[index + 1]?.index ?? normalized.length;
+    const end = dividers[index + 1]?.start ?? matches[index + 1]?.index ?? normalized.length;
     const privateSplit = separatePrivateSections(normalized.slice(start, end));
     removedPrivateMetadata ||= privateSplit.removedPrivateMetadata;
-    const readerHtml = authorialReaderHtml(manuscriptMarkdownToHtml(privateSplit.reader));
+    const readerHtml = (dividers[index] ? `<h2 class="book-part-heading">${escapeHtml(dividers[index]!.text)}</h2>` : "") + authorialReaderHtml(manuscriptMarkdownToHtml(privateSplit.reader));
     const wordCount = words(readerHtml.replace(/<[^>]+>/g, " ")).length;
     const issues: string[] = [];
     if (wordCount < (kind === "chapter" ? minimumWords(audience) : 90)) issues.push(`${kind === "chapter" ? "Chapter" : "Section"} is short (${wordCount} words).`);

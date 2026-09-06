@@ -7,11 +7,11 @@ import { resolve } from "node:path";
 const repoRoot = process.env.IKS_REPO_ROOT ?? process.cwd();
 const repoRequire = createRequire(resolve(repoRoot, "package.json"));
 const ts = repoRequire("typescript");
-const { chromium } = repoRequire(process.env.IKS_PLAYWRIGHT_MODULE || "playwright");
+const engine = repoRequire(process.env.IKS_PLAYWRIGHT_MODULE || "playwright")[process.env.IKS_BROWSER || "chromium"];
 const source = ts.transpileModule(readFileSync(resolve(repoRoot, "lib/book-layout.ts"), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
-const browser = await chromium.launch({ headless: true });
+const browser = await engine.launch({ headless: true });
 after(async () => { await browser.close(); });
 const page = await browser.newPage();
 await page.setContent("<!doctype html><html><body></body></html>");
@@ -173,4 +173,44 @@ test("an oversized unsplittable figure is preserved exactly so preflight can fla
   }), figure);
   assert.equal(result.split, null);
   assert.deepEqual(result.pages, [figure]);
+});
+
+test("table pagination repeats headers, preserves every row, and rejects content loss", async () => {
+  const result = await page.evaluate(() => {
+    const table = '<table id="terms"><thead><tr><th>Term</th><th>Meaning</th></tr></thead><tbody>' + Array.from({length:12}, (_,i)=>`<tr id="term-${i}"><td>धर्म ${i}</td><td>Meaning ${i}</td></tr>`).join('') + '</tbody></table>';
+    const pages = bookLayout.paginateFlowBlocks([table], blocks => {
+      const root=document.createElement('div');root.innerHTML=blocks.join('');return root.querySelectorAll('tbody tr').length<=5;
+    });
+    bookLayout.assertFlowPreserved(table, pages.join(''));
+    let caught=false;try {bookLayout.assertFlowPreserved(table, pages.slice(1).join(''));} catch {caught=true;}
+    return {pages:pages.length, caught, rows:pages.map(html=>{const root=document.createElement('div');root.innerHTML=html;return root.querySelectorAll('tbody tr').length;})};
+  });
+  assert.equal(result.pages,3);assert.equal(result.caught,true);assert.equal(result.rows.reduce((a,b)=>a+b),12);
+});
+
+test("a short exercise tail is redistributed without losing words or numbering", async () => {
+  const result = await page.evaluate(() => {
+    const html='<ol start="4">'+Array.from({length:11},(_,i)=>`<li>Question ${i} asks the reader to compare two examples carefully.</li>`).join('')+'</ol>';
+    const pages=bookLayout.paginateFlowBlocks([html], blocks=>{const root=document.createElement('div');root.innerHTML=blocks.join('');return root.querySelectorAll('li').length<=10;});
+    bookLayout.assertFlowPreserved(html,pages.join(''));
+    return pages.map(html=>{const root=document.createElement('div');root.innerHTML=html;return {count:root.querySelectorAll('li').length,start:root.querySelector('ol').start};});
+  });
+  assert.deepEqual(result,[{count:5,start:4},{count:6,start:9}]);
+});
+
+test("rendered preflight catches footer collision, a broken image and a stranded heading", async () => {
+  const issues=await page.evaluate(()=>{
+    const root=document.createElement('div');root.style.cssText='position:relative;width:400px;height:300px;padding:30px;box-sizing:border-box';
+    root.innerHTML='<div class="preview-body"><img src="data:image/png;base64,broken"><p style="height:270px">Story</p><h3>Exercise</h3></div><footer style="position:absolute;bottom:10px">Footer</footer>';
+    document.body.append(root);const issues=bookLayout.inspectBookPage(root);root.remove();return issues;
+  });
+  assert.equal(issues.length,3);
+});
+
+test("carrying a paragraph with an image also carries its heading", async () => {
+  const pages=await page.evaluate(()=>bookLayout.paginateFlowBlocks(['<p>Opening</p>','<h3>New idea</h3>','<p>Related paragraph</p>','<figure><img src="art.png"><figcaption>Scene</figcaption></figure>'], blocks=>{
+    const weights={'<p>Opening</p>':50,'<h3>New idea</h3>':10,'<p>Related paragraph</p>':20};
+    return blocks.reduce((sum,block)=>sum+(weights[block]??60),0)<=100;
+  }));
+  assert.equal(pages.length,2);assert.equal(pages[0],'<p>Opening</p>');assert.match(pages[1],/^<h3>New idea<\/h3><p>Related paragraph/);
 });

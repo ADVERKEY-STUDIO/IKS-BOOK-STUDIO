@@ -75,6 +75,7 @@ export type BookPageMetric = {
   layoutLocked?: boolean;
   illustrationOnly?: boolean;
   images?: BookImageMetric[];
+  structuralIssues?: string[];
 };
 
 export type BookFormatIssue = {
@@ -90,6 +91,7 @@ export type BookFormatPreviewResult = {
   overflowIssues: BookFormatIssue[];
   underflowIssues: BookFormatIssue[];
   imageIssues: BookFormatIssue[];
+  structuralIssues: BookFormatIssue[];
   contentsEntries: number;
   publicationReady: boolean;
 };
@@ -107,16 +109,18 @@ export function assessBookFormatPreview(
       if (page.kind !== "chapter" || page.intentionalBlank || page.layoutLocked || page.illustrationOnly) return false;
       const index = page.pageIndex ?? 0;
       const count = page.chapterPageCount ?? 1;
-      return count > 2 && index > 0 && index < count - 1 && page.fillRatio < .55;
+      return count > 1 && index > 0 && page.fillRatio < (index === count - 1 ? .3 : .55);
     })
-    .map((page) => ({ slotId: page.slotId, label: page.label, message: `${page.label} is unusually sparse for a middle chapter page.` }));
+    .map((page) => ({ slotId: page.slotId, label: page.label, message: `${page.label} has unusually large unused space. Review or balance this section.` }));
   const imageIssues = pages.flatMap((page) => (page.images ?? []).flatMap((image) => {
     const issues: BookFormatIssue[] = [];
     if (!image.alt.trim()) issues.push({ slotId: page.slotId, label: page.label, message: `${page.label} has an image without alternative text.` });
     if (image.effectiveDpi > 0 && image.effectiveDpi < 240) issues.push({ slotId: page.slotId, label: page.label, message: `${page.label} has an image below 240 DPI at this print size.` });
     return issues;
   }));
+  const structuralIssues = pages.flatMap((page) => (page.structuralIssues ?? []).map((message) => ({ slotId: page.slotId, label: page.label, message })));
   return {
+    structuralIssues,
     format: bookFormat(formatId),
     pageCount: pages.length,
     pages,
@@ -124,8 +128,6 @@ export function assessBookFormatPreview(
     underflowIssues,
     imageIssues,
     contentsEntries,
-    // Layout defects remain visible quality warnings, but must not trap the
-    // author in the editor. The publication PDF remains available for review.
-    publicationReady: true,
+    publicationReady: pages.length > 0 && !overflowIssues.length && !structuralIssues.length,
   };
 }

@@ -82,6 +82,23 @@ export function splitFlowBlock(html: string, accepts: (head: string) => boolean,
   const holder = doc.createElement("div"); holder.innerHTML = html;
   const element = holder.firstElementChild as HTMLElement | null;
   if (!element || element.querySelector("img,figure,table,[style*='position:']")) return null;
+  if (element.matches("table")) {
+    // Rowspans need a dedicated table editor; never split through a merged cell.
+    if (element.querySelector("[rowspan]")) return null;
+    const rows = Array.from(element.querySelectorAll(":scope > tbody > tr,:scope > tr"));
+    for (let count = rows.length - 1; count >= 1; count--) {
+      const head = element.cloneNode(true) as HTMLElement;
+      const tail = element.cloneNode(true) as HTMLElement;
+      head.querySelectorAll(":scope > tbody > tr,:scope > tr").forEach((row, index) => { if (index >= count) row.remove(); });
+      tail.querySelectorAll(":scope > tbody > tr,:scope > tr").forEach((row, index) => { if (index < count) row.remove(); });
+      head.querySelectorAll("tfoot").forEach((node) => node.remove());
+      tail.querySelectorAll("caption").forEach((node) => node.remove());
+      tail.removeAttribute("id");
+      tail.querySelectorAll("thead").forEach((node) => { node.setAttribute("data-repeated-header", "true"); node.removeAttribute("id"); node.querySelectorAll("[id]").forEach((child) => child.removeAttribute("id")); });
+      if (accepts(head.outerHTML)) return [head.outerHTML, tail.outerHTML];
+    }
+    return null;
+  }
   if (element.matches("ul,ol")) {
     const items = Array.from(element.children);
     for (let count = items.length - 1; count >= 1; count--) {
@@ -131,14 +148,14 @@ export function splitFlowBlock(html: string, accepts: (head: string) => boolean,
 
 /** Pagination uses the browser's actual page measurements, never character
  * estimates. A figure remains at its story position with its caption. */
-export function paginateFlowBlocks(blocks: string[], fits: (blocks: string[], pageIndex: number) => boolean, doc: Document = document) {
+export function paginateFlowBlocks(blocks: string[], fits: (blocks: string[], pageIndex: number) => boolean, doc: Document = document, occupation?: (blocks: string[], pageIndex: number) => number) {
   const pages: string[][] = []; const pending = [...blocks]; let current: string[] = [];
   const image = (block: string) => /<(?:figure|img)\b/i.test(block);
   const paragraph = (block: string) => /^<(?:p|blockquote)\b/i.test(block);
   while (pending.length) {
     const block = pending.shift()!;
     const index = pages.length;
-    const keepNext = /^<h[1-6]\b/i.test(block) || image(block);
+    const keepNext = /^<h[1-6]\b/i.test(block) || (image(block) && !current.some(paragraph));
     if (current.length && keepNext && pending[0] && !fits([...current, block, pending[0]], index) && fits([block, pending[0]], index + 1)) {
       pages.push(current); current = []; pending.unshift(block); continue;
     }
@@ -146,15 +163,83 @@ export function paginateFlowBlocks(blocks: string[], fits: (blocks: string[], pa
     // Carry a nearby paragraph with a figure instead of creating image-only
     // pages when that pair fits on the next page.
     const previous = current.at(-1);
-    if (image(block) && previous && paragraph(previous) && fits([previous, block], index + 1)) {
-      current.pop(); if (current.length) pages.push(current); current = [previous, block]; continue;
+    if (image(block) && previous && paragraph(previous)) {
+      const count = /^<h[1-6]\b/i.test(current.at(-2) ?? "") ? 2 : 1;
+      const carried = [...current.slice(-count), block];
+      if (fits(carried, index + 1)) {
+        current.splice(-count); if (current.length) pages.push(current); current = carried; continue;
+      }
     }
     const parts = splitFlowBlock(block, (head) => fits([...current, head], index), doc);
     if (parts) { pages.push([...current, parts[0]]); current = []; pending.unshift(parts[1]); continue; }
-    if (current.length) { pages.push(current); current = []; pending.unshift(block); continue; }
+    if (current.length) {
+      const heading = current.at(-1)!;
+      if (current.length > 1 && /^<h[1-6]\b/i.test(heading)) { current.pop(); pages.push(current); current = [heading]; pending.unshift(block); continue; }
+      pages.push(current); current = []; pending.unshift(block); continue;
+    }
     // Keep an unsplittable oversized block intact for preflight to identify.
     current.push(block);
   }
   if (current.length) pages.push(current);
+  // Reconsider the final boundary. A one-item exercise or glossary tail
+  // should share the last two pages with preceding content when it fits.
+  for (let index = 0; index < pages.length - 1; index++) {
+    const weight = (blocks: string[]) => {
+      const root = doc.createElement("div"); root.innerHTML = blocks.join("");
+      return (root.textContent?.length ?? 0) + root.querySelectorAll("img").length * 600;
+    };
+    const left = pages[index], right = pages[index + 1];
+    const sparse = occupation
+      ? (index > 0 && occupation(left, index) < .55) || (index + 1 === pages.length - 1 && occupation(right, index + 1) < .3)
+      : index === pages.length - 2 && weight(right) < weight(left) * .5;
+    if (sparse) {
+      const all = [...left, ...right];
+      const imbalance = (a: string[], b: string[]) => occupation ? Math.abs(occupation(a, index) - occupation(b, index + 1)) : Math.abs(weight(a) - weight(b));
+      let best = [left, right]; let score = imbalance(left, right);
+      const consider = (a: string[], b: string[]) => {
+        if (!a.length || !b.length || /^<h[1-6]\b/i.test(a.at(-1)!)) return;
+        const nextScore = imbalance(a, b);
+        if (nextScore < score && fits(a, index) && fits(b, index + 1)) { best = [a, b]; score = nextScore; }
+      };
+      for (let boundary = 0; boundary < all.length; boundary++) {
+        consider(all.slice(0, boundary), all.slice(boundary));
+        const target = weight(all) / 2 - weight(all.slice(0, boundary));
+        if (target > 0) {
+          const parts = splitFlowBlock(all[boundary], (head) => weight([head]) <= target && fits([...all.slice(0, boundary), head], index), doc);
+          if (parts) consider([...all.slice(0, boundary), parts[0]], [parts[1], ...all.slice(boundary + 1)]);
+        }
+      }
+      pages.splice(index, 2, ...best);
+    }
+  }
   return pages.map((blocks) => blocks.join(""));
+}
+
+/** Compare the ordered reader content before committing a reflow. Repeated
+ * table headers are presentation chrome; all other text and assets must survive. */
+export function flowManifest(html: string, doc: Document = document) {
+  const root = doc.createElement("div"); root.innerHTML = html;
+  root.querySelectorAll("[data-repeated-header]").forEach((node) => node.remove());
+  const assets = Array.from(root.querySelectorAll("img")).map((node) => [node.getAttribute("src"), node.getAttribute("alt")]);
+  // Splitting a paragraph changes block boundaries, not its characters.
+  const text = (root.textContent ?? "").replace(/\s+/gu, " ").trim();
+  return JSON.stringify({ text, assets });
+}
+
+export function assertFlowPreserved(before: string, after: string, doc: Document = document) {
+  if (flowManifest(before, doc) !== flowManifest(after, doc)) {
+    throw new Error("Content verification failed: text or illustrations changed during pagination. The original pages have been preserved.");
+  }
+}
+
+/** Issues that must be checked against the rendered page, including locked pages. */
+export function inspectBookPage(content: HTMLElement): string[] {
+  const issues: string[] = [];
+  const geometry = measureBookContent(content);
+  if (geometry.overflowX || geometry.overflowY) issues.push("Content crosses the printable area or overlaps the footer.");
+  if (Array.from(content.querySelectorAll("img")).some((image) => !image.complete || !image.naturalWidth)) issues.push("An illustration has not loaded.");
+  const flow = content.querySelector(":scope > .preview-body") ?? content;
+  const last = flow.lastElementChild;
+  if (last?.matches("h1,h2,h3,h4,h5,h6")) issues.push("A heading is stranded without its following text.");
+  return issues;
 }

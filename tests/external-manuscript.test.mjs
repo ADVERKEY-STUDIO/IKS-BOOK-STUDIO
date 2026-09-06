@@ -222,3 +222,9 @@ test("site exposes the external workflow, supported imports and DOCX extraction 
   assert.match(worker, /\/api\/manuscript\/extract/);
   assert.match(worker, /mammoth\.extractRawText/);
 });
+
+test("a Part heading at a file boundary belongs to the following chapter", () => {
+  const parsed = parseExternalManuscript('# My book\n# INTRODUCTION\nOpening text.\n\n**PART I — BASIC IDEAS**\n\n# CHAPTER 01: First idea\nA story follows here.', 'Ages 10–12');
+  assert.doesNotMatch(parsed.sections[0].html, /PART I/);
+  assert.match(parsed.sections[1].html, /^<h2 class="book-part-heading">PART I — BASIC IDEAS<\/h2>/);
+});

@@ -29,43 +29,51 @@ export async function renderBookPageCanvas(sheet: HTMLElement, options: { scale:
   };
   const pseudoRules: string[] = []; const families = new Set<string>();
   let nodeId = 0;
-  const cssText = async (style: CSSStyleDeclaration) => {
+  const cssText = (style: CSSStyleDeclaration) => {
     const declarations: string[] = [];
     // Set prefixed aliases before their standard longhands. In Chromium,
     // -webkit-border-image otherwise resets border-image-slice to "fill".
     for (const property of Array.from(style).reverse()) {
       if (property.startsWith("--")) continue;
       const value = style.getPropertyValue(property);
-      declarations.push(`${property}:${value.includes("url(") ? await embedCss(value) : value};`);
+      declarations.push(`${property}:${value};`);
     }
     return declarations.join("");
   };
-  const cloneNode = async (source: Node): Promise<Node | null> => {
+  const cloneNode = (source: Node): Node | null => {
     if (!(source instanceof Element)) return source.cloneNode(false);
     if (source.matches("script,.free-image-dragbar,.free-image-handle,.free-image-nudge")) return null;
     const clone = source.cloneNode(false) as HTMLElement;
     const computed = getComputedStyle(source);
     families.add(computed.fontFamily.toLowerCase());
-    clone.setAttribute("style", await cssText(computed));
+    clone.setAttribute("style", cssText(computed));
     clone.removeAttribute("contenteditable");
     for (const attribute of Array.from(clone.attributes)) if (/^on/i.test(attribute.name)) clone.removeAttribute(attribute.name);
     const id = String(++nodeId); clone.setAttribute("data-book-raster-node", id);
     for (const pseudo of ["::before", "::after"]) {
       const style = getComputedStyle(source, pseudo);
       if (style.content !== "none" && style.content !== "normal" && style.display !== "none") {
-        pseudoRules.push(`[data-book-raster-node="${id}"]${pseudo}{${await cssText(style)}}`);
+        pseudoRules.push(`[data-book-raster-node="${id}"]${pseudo}{${cssText(style)}}`);
       }
     }
     if (source instanceof HTMLImageElement) {
-      clone.setAttribute("src", await embed(source.currentSrc || source.src));
+      clone.setAttribute("src", source.currentSrc || source.src);
       clone.removeAttribute("srcset"); clone.removeAttribute("loading");
     }
     for (const child of Array.from(source.childNodes)) {
-      const copied = await cloneNode(child); if (copied) clone.append(copied);
+      const copied = cloneNode(child); if (copied) clone.append(copied);
     }
     return clone;
   };
-  const clone = await cloneNode(sheet) as HTMLElement;
+  // Freeze all computed styles synchronously. A React refresh during a fetch
+  // may replace the live innerHTML, detaching captions and footers.
+  const clone = cloneNode(sheet) as HTMLElement;
+  for (const node of [clone, ...Array.from(clone.querySelectorAll<HTMLElement>("*"))]) {
+    const style = node.getAttribute("style");
+    if (style?.includes("url(")) node.setAttribute("style", await embedCss(style));
+    if (node instanceof HTMLImageElement) node.src = await embed(node.src);
+  }
+  for (let i = 0; i < pseudoRules.length; i++) pseudoRules[i] = await embedCss(pseudoRules[i]);
   // Screen zoom, scroll position and the editor's surrounding chrome do not
   // change the physical page. Child positions and transforms remain intact.
   Object.assign(clone.style, { position: "relative", inset: "auto", left: "0", top: "0", margin: "0", transform: "none", width: `${width}px`, height: `${height}px` });

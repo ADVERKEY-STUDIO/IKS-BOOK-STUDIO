@@ -3,7 +3,7 @@
 import { ChangeEvent, CSSProperties, forwardRef, MouseEvent as ReactMouseEvent, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { strToU8, unzipSync, zipSync } from "fflate";
 import { renderBookPageCanvas } from "../lib/book-raster";
-import { measureBookContent, pageFlowHtml, paginateFlowBlocks, refreshBookPageNumbers } from "../lib/book-layout";
+import { measureBookContent, pageFlowHtml, paginateFlowBlocks, refreshBookPageNumbers, assertFlowPreserved, inspectBookPage } from "../lib/book-layout";
 import { AUTHORIAL_READER_INSTRUCTION, authorialReaderHtml, childAgeBand, generationProfileKey, readerFacingChapterTitle } from "../lib/child-summary";
 import { ADAPTATION_PLAN_VERSION, allocatePagesWithinBudget, CHAPTER_PAGE_BUDGET, FIXED_MATTER_PAGES, recommendedAdaptationPages, TOTAL_BOOK_PAGE_LIMIT } from "../lib/adaptation-pages";
 import type { ChapterOneGate, PedagogyQuality } from "../lib/pedagogy";
@@ -96,6 +96,7 @@ type Chapter = {
   pedagogyQuality?: PedagogyQuality;
   importedPages?: ImportedPage[];
   importValidated?: boolean;
+  sectionKind?: "introduction" | "chapter" | "conclusion" | "glossary" | "appendix";
   generationStatus?: ChapterGenerationStatus;
   generationUsage?: GenerationUsage;
   generationError?: string;
@@ -1070,6 +1071,7 @@ function normalizeProject(saved: Project): Project {
     canvaPages: cleanSaved.canvaPages ?? [],
     designerPages: (cleanSaved.designerPages ?? []).map(hydrateDesignerOverride),
     designerPageOrder: cleanSaved.designerPageOrder ?? [],
+    designerLayoutSnapshot: Boolean(cleanSaved.designerLayoutSnapshot),
     designerPresets: cleanSaved.designerPresets ?? [],
     creationMode: cleanSaved.creationMode ?? "automatic",
     externalManuscript: cleanSaved.externalManuscript,
@@ -1122,6 +1124,7 @@ function normalizeProject(saved: Project): Project {
         imageAlt: page.imageAlt || page.imageUrl ? readerSafeImageCaption(page.imageAlt, `Illustration for ${title}`) : undefined,
       })),
       importValidated: Boolean(chapter.importValidated),
+      sectionKind: chapter.sectionKind,
       generationStatus: chapter.generationStatus || (chapter.importValidated || chapter.pedagogyQuality?.status === "passed" ? "Completed" : "Waiting"),
       generationUsage: chapter.generationUsage,
       generationError: chapter.generationError,
@@ -1158,6 +1161,7 @@ function normalizeProject(saved: Project): Project {
     canvaPages: cleanSaved.canvaPages ?? [],
     designerPages: (cleanSaved.designerPages ?? []).map(hydrateDesignerOverride),
     designerPageOrder: cleanSaved.designerPageOrder ?? [],
+    designerLayoutSnapshot: Boolean(cleanSaved.designerLayoutSnapshot),
     designerPresets: cleanSaved.designerPresets ?? [],
     externalIllustrations,
   };
@@ -1644,6 +1648,7 @@ export default function Home() {
       return {
         id: index + 1,
         title: visibleTitle,
+        sectionKind: section.kind,
         pages,
         recommendedPages: pages,
         status: "approved",
@@ -1669,7 +1674,7 @@ export default function Home() {
     const persona = inferBookPersona({ title: result.title || project.title, sourcePreview: result.sections.map((section) => `${section.title} ${section.raw.slice(0, 220)}`).join(" "), sourceHeadings: result.sections.map((section) => readerFacingChapterTitle(section.title)), bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
     const nextBase: Project = {
       ...project,
-      title: result.title === "Imported book" ? project.title : result.title,
+      title: project.title.trim() || result.title,
       sourceHeadings: result.sections.map((section) => readerFacingChapterTitle(section.title)),
       sourceWords: result.words,
       sourceQuality: result.issues.length ? "Imported with review notes" : "External manuscript verified",
@@ -1682,8 +1687,9 @@ export default function Home() {
       briefApproved: true,
       adaptationPlanConfirmed: true,
       adaptationPlanVersion: ADAPTATION_PLAN_VERSION,
-      ...bookPersonaPatch(persona),
+      bookPersona: project.bookPersona ?? persona,
       chapters: importedChapters,
+      designerPages: [], designerPageOrder: [], designerLayoutSnapshot: false,
       updatedAt: "Just now",
     };
     const next = nextBase;
@@ -1726,7 +1732,7 @@ export default function Home() {
       const readySlots = chapterSlots.filter((slot) => slot.status === "ready" && slot.imageUrl);
       const unresolvedSlots = chapterSlots.filter((slot) => slot.status !== "ready" && slot.status !== "skipped");
       const firstReady = readySlots[0];
-      const textPages = paginateReaderHtml(sanitizeReaderHtml(chapter.body), project.audience, project.bookFormat);
+      const textPages = [sanitizeReaderHtml(chapter.body)];
       const placedPages = assignIllustrationsToReaderPages(textPages, readySlots).map((page, pageIndex): ImportedPage => ({
         pageId: `chapter-${chapter.id}-page-${pageIndex + 1}`,
         pageNumber: pageIndex + 1,
@@ -1757,10 +1763,41 @@ export default function Home() {
       const replacement: DesignerPageOverride = { ...base, backgroundImageKey: cover.imageKey, backgroundImageUrl: cover.imageUrl, backgroundSize: "cover", backgroundPosition: "center", backgroundOpacity: 1, savedAt: new Date().toISOString() };
       designerPages = [...designerPages.filter((page) => page.slotId !== "cover"), replacement];
     }
+    // A later ZIP must update materialized Designer pages as well as the
+    // manuscript. Preserve the frame and its manual position when replacing art.
+    for (const slot of slots.filter((slot) => slot.role === "chapter" && slot.status === "ready" && slot.imageUrl && uploaded.has(slot.id))) {
+      const previous = currentSlots.find((item) => item.id === slot.id);
+      const chapterPages = designerPages.filter((page) => page.chapterId === slot.chapterId && !page.deleted);
+      if (!chapterPages.length) continue;
+      let replaced = false;
+      designerPages = designerPages.map((page) => {
+        if (page.chapterId !== slot.chapterId || page.deleted) return page;
+        const root = document.createElement("div"); root.innerHTML = page.html;
+        const image = Array.from(root.querySelectorAll("img")).find((image) => image.dataset.illustrationSlot === slot.id || (previous?.imageUrl && image.getAttribute("src") === previous.imageUrl));
+        if (!image) return page;
+        image.src = slot.imageUrl!; image.alt = readerSafeImageCaption(slot.altText, slot.chapterTitle); image.dataset.illustrationSlot = slot.id;
+        const caption = image.closest("figure")?.querySelector("figcaption"); if (caption) caption.textContent = readerSafeImageCaption(slot.caption);
+        replaced = true; return { ...page, html: root.innerHTML, savedAt: new Date().toISOString() };
+      });
+      if (!replaced) {
+        const target = chapterPages[Math.floor((chapterPages.length - 1) / 2)];
+        designerPages = designerPages.map((page) => {
+          if (page.slotId !== target.slotId) return page;
+          const root = document.createElement("div"); root.innerHTML = page.html;
+          const body = root.querySelector(".preview-body") ?? root;
+          const figure = document.createElement("figure"); figure.className = "chapter-image";
+          figure.innerHTML = `<img data-illustration-slot="${escapeHtml(slot.id)}" src="${escapeHtml(slot.imageUrl!)}" alt="${escapeHtml(readerSafeImageCaption(slot.altText, slot.chapterTitle))}"><figcaption>${escapeHtml(readerSafeImageCaption(slot.caption))}</figcaption>`;
+          const paragraphs = body.querySelectorAll(":scope > p"); const anchor = paragraphs[Math.floor(paragraphs.length / 2)];
+          if (anchor) anchor.after(figure); else body.append(figure);
+          return { ...page, html: root.innerHTML, savedAt: new Date().toISOString() };
+        });
+      }
+    }
     const issues = [...importIssues, ...uploadErrors, ...slots.filter((slot) => slot.status === "missing" || slot.status === "failed").map((slot) => `${slot.id}: ${slot.error || "Illustration unresolved"}`)];
     const next: Project = { ...project, chapters, designerPages, externalIllustrations: { ...project.externalIllustrations!, importedAt: new Date().toISOString(), issues, slots }, updatedAt: "Just now" };
     setProject(next);
     await persistProject(next);
+    if (uploadErrors.length) throw new Error(`${uploadErrors.length} illustrations could not be uploaded. Successfully uploaded images were saved; retry the failed slots.`);
     notify(`${slots.filter((slot) => slot.status === "ready").length} illustrations imported. ${issues.length ? `${issues.length} item${issues.length === 1 ? " needs" : "s need"} review.` : "Every requested image is ready."}`);
   }
 
@@ -1964,21 +2001,30 @@ OUTPUT REQUIREMENTS
     setShowPreview(true);
     setExportBusy(true);
     setPdfProgress(0);
+    let exportSnapshot: HTMLElement | undefined;
     try {
       await new Promise((resolve) => window.setTimeout(resolve, 450));
       await document.fonts?.ready;
-      const sheets = Array.from(document.querySelectorAll<HTMLElement>(".pdf-render-stack .book-sheet"));
+      const liveStack = document.querySelector<HTMLElement>(".pdf-render-stack");
+      if (!liveStack) throw new Error("Preview pages are not ready");
+      await Promise.all(Array.from(liveStack.querySelectorAll("img")).map((image) => image.decode().catch(() => undefined)));
+      exportSnapshot = liveStack.cloneNode(true) as HTMLElement;
+      exportSnapshot.classList.add("pdf-export-snapshot");
+      liveStack.parentElement!.append(exportSnapshot);
+      const sheets = Array.from(exportSnapshot.querySelectorAll<HTMLElement>(".book-sheet"));
       if (!sheets.length) throw new Error("Preview pages are not ready");
       const exportFormat = bookFormat(project.bookFormat);
       await Promise.all(sheets.flatMap((sheet) => Array.from(sheet.querySelectorAll("img")).map((image) => image.decode().catch(() => undefined))));
       const renderedBlockers = sheets.flatMap((sheet, index) => {
         const content = sheet.querySelector<HTMLElement>(".designer-editable-content, .designer-render-content") ?? sheet;
-        const issues: string[] = [];
-        if (measureBookContent(content).overflowY || measureBookContent(content).overflowX) issues.push(`page ${index + 1} overflows its printable area`);
+        const issues = inspectBookPage(content).map((issue) => `Page ${index + 1}: ${issue}`);
         if (hasPrivateProductionText(content.textContent ?? "")) issues.push(`page ${index + 1} contains private production text`);
         return issues;
       });
       const unfinished = new Set(publication.blockers.map((blocker) => blocker.chapterId)).size + renderedBlockers.length;
+      if (mode === "publication" && (!project.designerLayoutSnapshot || !publication.ready || renderedBlockers.length)) {
+        throw new Error(`Publication blocked: ${renderedBlockers[0] || (!project.designerLayoutSnapshot ? "Open Designer to measure and save the book layout first." : "Approve all required chapters and illustrations first.")} Download a draft proof to review the book.`);
+      }
       const { jsPDF } = await import("jspdf");
       const physicalPage: [number, number] = [exportFormat.widthMm, exportFormat.heightMm];
       const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: physicalPage, compress: true });
@@ -2004,11 +2050,13 @@ OUTPUT REQUIREMENTS
         await new Promise((resolve) => window.setTimeout(resolve, 0));
       }
       const safeTitle = project.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "book";
+      if (pdf.getNumberOfPages() !== sheets.length) throw new Error("PDF page count does not match Preview.");
       pdf.save(`${safeTitle}-${exportFormat.id}${mode === "draft" ? "-draft-proof" : "-complete"}.pdf`);
       notify(mode === "draft" ? `${exportFormat.label} draft proof downloaded with ${unfinished} publication blocker${unfinished === 1 ? "" : "s"}` : `${exportFormat.label} publication PDF downloaded`);
     } catch (reason) {
       notify(reason instanceof Error ? reason.message : "The PDF could not be created. Preview remains open so you can inspect the pages.");
     } finally {
+      exportSnapshot?.remove();
       setExportBusy(false);
       setPdfProgress(0);
     }
@@ -2948,11 +2996,12 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
       }
       onNotify(`All ${matched.length} images matched. Uploading and placing them automatically…`);
       await onImport(nextCandidates, result.issues);
+      setCandidates(nextCandidates.map((item) => ({ slotId: item.slotId, decision: "keep" })));
       onNotify(`All ${matched.length} illustrations were placed in their correct cover and chapters.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "The illustration ZIP could not be read";
       setUploadIssues([`The illustration ZIP could not be read: ${message}`]);
-      onNotify("The illustration ZIP could not be read. No book pages were changed.");
+      onNotify(message);
     } finally {
       setBusy(false);
     }
@@ -2962,10 +3011,10 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
   const hasChanges = candidates.some((candidate) => candidate.file || candidate.decision === "skip");
   const activeSlot = slots[activeIndex];
   const activeCandidate = activeSlot ? candidates.find((candidate) => candidate.slotId === activeSlot.id) : undefined;
-  const resolvedCount = slots.filter((slot) => slot.status === "ready" || candidates.some((candidate) => candidate.slotId === slot.id && candidate.file && candidate.decision === "accept" && !candidate.error)).length;
+  const resolvedCount = slots.filter((slot) => slot.status === "ready" && slot.imageUrl).length;
   return <main className="external-manuscript-page external-illustration-page">
     <button className="text-button" onClick={onBack}>← Back to Designer</button>
-    <header className="external-manuscript-hero"><div><p className="eyebrow">STAGE TWO · SEQUENTIAL ILLUSTRATION PACKAGE</p><h1>One image at a time. One final ZIP. Automatic placement.</h1><p>The prompt pack prevents montage and partial-batch failures. Every file has its own scene, exact filename and book position; the completed ZIP is verified and placed in one upload.</p></div><span>{resolvedCount}/{slots.length} ready</span></header>
+    <header className="external-manuscript-hero"><div><p className="eyebrow">STAGE TWO · SEQUENTIAL ILLUSTRATION PACKAGE</p><h1>One image at a time. One final ZIP. Automatic placement.</h1><p>The prompt pack prevents montage and partial-batch failures. Every file has its own scene, exact filename and book position; the completed ZIP is verified and placed in one upload.</p></div><span>{busy ? "Uploading illustrations…" : `${resolvedCount}/${slots.length} saved`}</span></header>
     <section className="simple-image-steps" aria-label="Simple external image workflow"><div><b>1</b><span>Download the prompt pack<small>It contains one independent prompt per required image.</small></span></div><div><b>2</b><span>Generate sequentially<small>Download each full-resolution result using its exact filename.</small></span></div><div><b>3</b><span>Upload one final ZIP<small>Book Studio verifies and places every image automatically.</small></span></div></section>
     <section className="image-session-actions"><div><p className="eyebrow">ART BIBLE + IMAGE QUEUE</p><h2>Generate reliable chapter images</h2><p>Use the numbered files in order. Each prompt creates exactly one image, so later chapters cannot silently disappear into a failed batch.</p><button className="primary" onClick={downloadPrompt}>Download sequential prompt pack</button><button className="secondary" onClick={() => void copyPrompt()}>Copy art bible</button></div><label className={`bulk-image-upload${busy ? " busy" : ""}`}><input type="file" accept=".zip,application/zip,application/x-zip-compressed" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void chooseIllustrationZip(file); }}/><span>{busy ? "…" : "↑"}</span><b>{busy ? "Checking and placing illustrations…" : "Upload the completed illustration ZIP"}</b><small>One ZIP with the exact images/cover.jpg and CH-XX-IMG-XX filenames from the manifest.</small></label></section>
     {uploadIssues.length > 0 && <div className="bulk-image-issues">{uploadIssues.map((issue) => <span key={issue}>{issue}</span>)}</div>}
@@ -3354,24 +3403,29 @@ function readerTextLength(html: string) {
 }
 
 function readerPagesForFormat(chapter: Chapter, audience: string, formatId: BookFormatId) {
-  const imported = (chapter.importedPages ?? [])
-    .map((page) => ({
-      ...page,
-      body: sanitizeReaderHtml(page.body),
-      imageCaption: readerSafeImageCaption(page.imageCaption),
-      imageAlt: page.imageUrl ? readerSafeImageCaption(page.imageAlt, `Illustration for ${chapter.title}`) : undefined,
-    }))
-    .filter((page) => readerTextLength(page.body) > 0 || Boolean(page.imageUrl));
-  if (chapter.importValidated && imported.length && formatId === LEGACY_BOOK_FORMAT) return imported;
-  const sourceHtml = chapter.importValidated && imported.length ? imported.map((page) => page.body).join("") : sanitizeReaderHtml(chapter.body);
-  const bodies = paginateReaderHtml(sourceHtml, audience, formatId);
-  const pages = bodies.map((body) => ({ body } as ImportedPage));
+  // Seed a continuous section. Designer measures this in the selected format;
+  // character estimates must never discard table rows, footnotes or inline art.
+  const imported = chapter.importedPages ?? [];
+  let body = sanitizeReaderHtml(imported.length ? imported.map((page) => page.body).join("") : chapter.body)
+    .replace(/<p\b[^>]*class=["'][^"']*chapter-kicker[^"']*["'][^>]*>[\s\S]*?<\/p>/gi, "")
+    .replace(/<h1\b[^>]*>[\s\S]*?<\/h1>/i, "");
   const images = imported.filter((page) => page.imageUrl);
-  images.forEach((image, imageIndex) => {
-    const targetIndex = Math.min(pages.length - 1, Math.round((imageIndex + 1) * pages.length / (images.length + 1)));
-    pages[targetIndex] = { ...pages[targetIndex], imageKey: image.imageKey, imageUrl: image.imageUrl, imageCaption: image.imageCaption, imageAlt: image.imageAlt };
-  });
-  return pages;
+  if (!images.length && chapter.imageUrl) images.push({ body: "", imageUrl: chapter.imageUrl, imageCaption: chapter.imageCaption, imageAlt: chapter.imageAlt } as ImportedPage);
+  if (typeof document !== "undefined") {
+    const root = document.createElement("div"); root.innerHTML = body;
+    const anchors = Array.from(root.querySelectorAll("p,blockquote,ul,ol,table")).filter((node) => node.parentElement === root);
+    images.forEach((image, index) => {
+      if (Array.from(root.querySelectorAll("img")).some((node) => node.getAttribute("src") === image.imageUrl)) return;
+      const figure = document.createElement("figure"); figure.className = "chapter-image";
+      const art = document.createElement("img"); art.src = image.imageUrl!; art.alt = readerSafeImageCaption(image.imageAlt, `Illustration for ${chapter.title}`); figure.append(art);
+      const caption = readerSafeImageCaption(image.imageCaption);
+      if (caption) { const node = document.createElement("figcaption"); node.textContent = caption; figure.append(node); }
+      const anchor = anchors[Math.min(anchors.length - 1, Math.floor((index + 1) * anchors.length / (images.length + 1)))];
+      if (anchor) anchor.after(figure); else root.append(figure);
+    });
+    body = root.innerHTML;
+  }
+  return [{ body } as ImportedPage];
 }
 
 function Preview({ project, exportBusy, pdfProgress, onClose, onDownload }: { project: Project; exportBusy: boolean; pdfProgress: number; onClose: () => void; onDownload: () => void }) {
@@ -3444,7 +3498,7 @@ function designerBasePages(project: Project): DesignerBasePage[] {
   const printable = printableChapters(project.chapters);
   const chapterLayouts = printable.chapters.map((chapter) => {
     const readerPages = readerPagesForFormat(chapter, project.audience, project.bookFormat).map((page) => ({ ...page }));
-    const hasPlacedIllustration = readerPages.some((page) => Boolean(page.imageUrl));
+    const hasPlacedIllustration = readerPages.some((page) => Boolean(page.imageUrl) || /<img\b/i.test(page.body));
     // Keep fallback chapter artwork with prose. Imported illustration slots
     // already choose a deliberate middle position; older chapter-level images
     // use the page with the most available text room.
@@ -3471,7 +3525,7 @@ function designerBasePages(project: Project): DesignerBasePage[] {
       slotId: contentsPageIndex === 0 ? "contents" : `contents-${contentsPageIndex + 1}`,
       label: contentsPageIndex === 0 ? "Contents page" : `Contents page ${contentsPageIndex + 1}`,
       kind: "contents" as const,
-      html: `<span>CONTENTS${contentsPageIndex ? " · CONTINUED" : ""}</span><h2>${contentsPageIndex ? "Inside this book · continued" : "Inside this book"}</h2><ol>${entries.map((entry) => `<li data-book-chapter="${entry.chapterId}"><b>${String(entry.ordinal).padStart(2, "0")}</b><span>${escapeHtml(entry.title)}</span><i data-book-page-number>p. ${entry.startPage}</i></li>`).join("")}</ol>`,
+      html: `<span>CONTENTS${contentsPageIndex ? " · CONTINUED" : ""}</span><h2>${contentsPageIndex ? "Inside this book · continued" : "Inside this book"}</h2><ol>${entries.map((entry) => `<li data-book-chapter="${entry.chapterId}"><b>${(() => { const chapter = project.chapters.find((item) => item.id === entry.chapterId); return chapter && chapter.sectionKind && chapter.sectionKind !== "chapter" ? "—" : chapter ? sectionLabel(project, chapter).replace("CHAPTER ", "").padStart(2, "0") : entry.ordinal; })()}</b><span>${escapeHtml(entry.title)}</span><i data-book-page-number>p. ${entry.startPage}</i></li>`).join("")}</ol>`,
     })),
   ];
   chapterLayouts.forEach(({ chapter, readerPages, pageCount }) => {
@@ -3484,7 +3538,7 @@ function designerBasePages(project: Project): DesignerBasePage[] {
         kind: "chapter",
         chapterId: chapter.id,
         pageIndex,
-        html: `<header class="print-chapter-header"><span>CHAPTER ${chapter.id}</span><span data-book-page-number>PAGE ${chapterStartPage + pageIndex}</span></header>${pageIndex === 0 ? `<h2>${escapeHtml(chapter.title)}</h2>` : `<p class="continued-title">${escapeHtml(chapter.title)} · continued</p>`}<div class="preview-body">${readerPage.body}</div>${readerPage.imageUrl ? `<figure class="chapter-image"><img src="${escapeHtml(readerPage.imageUrl)}" alt="${escapeHtml(readerSafeImageCaption(readerPage.imageAlt, `Illustration for ${chapter.title}`))}">${caption ? `<figcaption>${escapeHtml(caption)}</figcaption>` : ""}</figure>` : ""}<footer class="sheet-number"><span>${escapeHtml(project.title)}</span><span data-book-page-number>${chapterStartPage + pageIndex}</span></footer>`,
+        html: `<header class="print-chapter-header"><span>${sectionLabel(project, chapter)}</span><span data-book-page-number>PAGE ${chapterStartPage + pageIndex}</span></header>${pageIndex === 0 ? `<h2>${escapeHtml(chapter.title)}</h2>` : `<p class="continued-title">${escapeHtml(chapter.title)} · continued</p>`}<div class="preview-body">${readerPage.body}</div>${readerPage.imageUrl ? `<figure class="chapter-image"><img src="${escapeHtml(readerPage.imageUrl)}" alt="${escapeHtml(readerSafeImageCaption(readerPage.imageAlt, `Illustration for ${chapter.title}`))}">${caption ? `<figcaption>${escapeHtml(caption)}</figcaption>` : ""}</figure>` : ""}<footer class="sheet-number"><span>${escapeHtml(project.title)}</span><span data-book-page-number>${chapterStartPage + pageIndex}</span></footer>`,
       });
     });
   });
@@ -3623,6 +3677,7 @@ function bookContentStyle(revision: DesignerPageRevision, page: { kind: string; 
   return { fontFamily: revision.fontFamily, fontSize: `${revision.fontSize}px`, color: revision.textColor,
     lineHeight: revision.lineHeight, letterSpacing: `${revision.letterSpacing}px`, padding: `${revision.pagePadding}px`,
     "--designer-paragraph-space": `${revision.paragraphSpacing}px`,
+    "--book-body-size": `${revision.fontSize}px`, "--book-body-leading": revision.lineHeight, "--book-body-family": revision.fontFamily,
     ...designerColumnVariables(designerColumnsForPage(page, revision.columns), revision.columnGap) } as CSSProperties;
 }
 
@@ -3668,8 +3723,14 @@ function designerFlowBody(html: string) {
     .trim();
 }
 
+function sectionLabel(project: Project, chapter: Chapter) {
+  if (chapter.sectionKind && chapter.sectionKind !== "chapter") return chapter.sectionKind.toUpperCase();
+  const ordinal = project.chapters.filter((item) => !item.sectionKind || item.sectionKind === "chapter").findIndex((item) => item.id === chapter.id) + 1;
+  return `CHAPTER ${ordinal}`;
+}
+
 function designerChapterPageHtml(project: Project, chapter: Chapter, body: string, pageIndex: number, titleHtml?: string, continuationTitle = chapter.title) {
-  return `<header class="print-chapter-header"><span>CHAPTER ${chapter.id}</span><span data-book-page-number>PAGE ${pageIndex + 1}</span></header>${pageIndex === 0 ? titleHtml ?? `<h2>${escapeHtml(chapter.title)}</h2>` : `<p class="continued-title">${escapeHtml(continuationTitle)} · continued</p>`}<div class="preview-body">${body}</div><footer class="sheet-number"><span>${escapeHtml(project.title)}</span><span data-book-page-number>${pageIndex + 1}</span></footer>`;
+  return `<header class="print-chapter-header"><span>${sectionLabel(project, chapter)}</span><span data-book-page-number>PAGE ${pageIndex + 1}</span></header>${pageIndex === 0 ? titleHtml ?? `<h2>${escapeHtml(chapter.title)}</h2>` : `<p class="continued-title">${escapeHtml(continuationTitle)} · continued</p>`}<div class="preview-body">${body}</div><footer class="sheet-number"><span>${escapeHtml(project.title)}</span><span data-book-page-number>${pageIndex + 1}</span></footer>`;
 }
 
 function designerPageFill(html: string, audience: string, firstPage: boolean, formatId: BookFormatId = LEGACY_BOOK_FORMAT) {
@@ -3735,6 +3796,7 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
   const selected = orderedPages.find((page) => page.slotId === selectedId) ?? orderedPages[0];
   const saved = savedPages.find((page) => page.slotId === selected?.slotId);
   const [draft, setDraft] = useState<DesignerPageRevision>(() => hydrateDesignerRevision(saved, selected?.html));
+  const automaticLayoutStarted = useRef(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("Designer edits are local and use no AI tokens.");
   const [panel, setPanel] = useState<"page" | "text" | "image" | "layers" | "preflight">("page");
@@ -4218,7 +4280,14 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
       image.style.maxHeight = `${Math.min(440, bookFormat(project.bookFormat).screenHeightPx * .42)}px`;
       image.style.height = "auto"; image.style.maxWidth = "100%"; image.style.objectFit = "contain";
     });
-    await Promise.all(Array.from(source.querySelectorAll("img")).map((image) => image.decode().catch(() => undefined)));
+    await Promise.all(Array.from(source.querySelectorAll("img")).map((image) => image.decode().catch(() => { throw new Error(`An illustration in ${chapter.title} could not load. Retry balancing after it loads.`); })));
+    // Intrinsic dimensions reserve the same space immediately after innerHTML
+    // replacement, including Firefox where a cached image may load next frame.
+    source.querySelectorAll<HTMLImageElement>("img").forEach((image) => {
+      image.setAttribute("width", String(image.naturalWidth));
+      image.setAttribute("height", String(image.naturalHeight));
+      image.style.aspectRatio = `${image.naturalWidth} / ${image.naturalHeight}`;
+    });
     const blocks = Array.from(source.childNodes).flatMap((node) => node instanceof HTMLElement ? [node.outerHTML] : node.textContent?.trim() ? [`<p>${escapeHtml(node.textContent)}</p>`] : []);
     if (!blocks.length) return [""];
     const original = orderedPages.find((page) => page.chapterId === chapter.id && !revisionFor(page).deleted);
@@ -4242,7 +4311,7 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
         const measured = measureBookContent(content);
         return !measured.overflowX && !measured.overflowY;
       };
-      return paginateFlowBlocks(blocks, fits);
+      return paginateFlowBlocks(blocks, fits, document, (blocks, index) => { fits(blocks, index); return measureBookContent(content).fillRatio; });
     } finally { wrapper.remove(); }
   };
 
@@ -4271,6 +4340,7 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
         const title = firstPage.querySelector(":scope > .print-chapter-header") ? firstPage.querySelector(":scope > h2") : null;
         const titleHtml = title?.outerHTML; const continuationTitle = title?.textContent || chapter.title;
         const bodies = await measureChapterPages(chapter, combined, revisions.map(({ revision }) => revision), titleHtml, continuationTitle);
+        assertFlowPreserved(combined, bodies.join(""));
         const existingIds = chapterPages.map((page) => page.slotId);
         const insertion = Math.max(0, Math.min(...existingIds.map((slotId) => nextOrder.indexOf(slotId)).filter((index) => index >= 0)));
         const nextIds: string[] = [];
@@ -4282,9 +4352,6 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
           const pageStyle = revisions[pageIndex]?.revision ?? revisions.at(-1)?.revision ?? firstStyle;
           const revision = { ...pageStyle, deleted: false, intentionalBlank: false, layoutLocked: false, html: designerChapterPageHtml(project, chapter, body, pageIndex, titleHtml, continuationTitle), savedAt: new Date().toISOString() };
           replacements.set(slotId, makeOverride(descriptor, revision, existing));
-          liveBookDrafts.current[slotId] = revision;
-          if (slotId === selectedId) setDraft(revision);
-          replaceEditorHtml(slotId, revision.html, slotId === selectedId);
           nextIds.push(slotId);
         });
         chapterPages.slice(bodies.length).forEach((page) => {
@@ -4295,6 +4362,46 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
         nextOrder.splice(insertion, 0, ...nextIds);
         balanced += 1;
       }
+      if (scope === "book") {
+        const contents = orderedPages.filter((page) => page.kind === "contents" && !revisionFor(page).deleted);
+        if (contents.length && contents.every((page) => !revisionFor(page).layoutLocked && isGeneratedContentsScaffold(page))) {
+          const template = document.createElement("div"); template.innerHTML = revisionFor(contents[0]).html;
+          const rows = contents.flatMap((page) => {
+            const root = document.createElement("div"); root.innerHTML = revisionFor(page).html;
+            return Array.from(root.querySelectorAll("ol > li")).map((row) => row.outerHTML);
+          });
+          const article = bookEditors.current.get(contents[0].slotId)?.closest("article")?.cloneNode(true) as HTMLElement | undefined;
+          if (article) {
+            const wrapper = document.createElement("div"); wrapper.className = "book-publication";
+            Object.assign(wrapper.style, { position: "fixed", left: "-20000px", top: "0", visibility: "hidden" });
+            wrapper.append(article); document.body.append(wrapper);
+            const content = article.querySelector<HTMLElement>(".designer-editable-content")!;
+            const contentsHtml = (items: string[], index: number) => {
+              const root = template.cloneNode(true) as HTMLElement;
+              root.querySelector("ol")!.innerHTML = items.join("");
+              if (index) root.querySelector("h2")!.textContent = "Inside this book · continued";
+              return root.innerHTML;
+            };
+            try {
+              const groups = paginateFlowBlocks(rows, (items, index) => {
+                content.innerHTML = contentsHtml(items, index);
+                const result = measureBookContent(content); return !result.overflowX && !result.overflowY;
+              });
+              assertFlowPreserved(rows.join(""), groups.join(""));
+              const oldIds = contents.map((page) => page.slotId);
+              const nextIds = groups.map((body, index) => {
+                const slotId = contents[index]?.slotId ?? `contents-${index + 1}`;
+                const descriptor = { slotId, kind: "contents" as const, label: index ? `Contents page ${index + 1}` : "Contents page", html: "" };
+                const revision = { ...revisionFor(contents[0]), html: contentsHtml([body], index), deleted: false, savedAt: new Date().toISOString() };
+                replacements.set(slotId, makeOverride(descriptor, revision, replacements.get(slotId))); return slotId;
+              });
+              contents.slice(groups.length).forEach((page) => replacements.set(page.slotId, { ...page, deleted: true }));
+              const insertion = Math.max(0, nextOrder.indexOf(oldIds[0]));
+              nextOrder = nextOrder.filter((id) => !oldIds.includes(id) && !nextIds.includes(id)); nextOrder.splice(insertion, 0, ...nextIds);
+            } finally { wrapper.remove(); }
+          }
+        }
+      }
       const next = { ...project, designerPages: [...replacements.values()], designerPageOrder: nextOrder, designerLayoutSnapshot: true };
       next.designerPages = refreshBookPageNumbers(resolveBookPages(next), orderedPages, project.chapters);
       await commitDesignerProject(next);
@@ -4304,6 +4411,13 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
       setMessage(error instanceof Error ? `Layout balancing failed: ${error.message}` : "Layout balancing failed.");
     } finally { setBusy(false); }
   };
+  useEffect(() => {
+    if (automaticLayoutStarted.current || busy || project.designerLayoutSnapshot || savedPages.some((page) => page.chapterId) || !project.chapters.length) return;
+    if (project.chapters.some((chapter) => !(chapter.status === "approved" || chapter.generationStatus === "Completed") || readerTextLength(chapter.body) < 100)) return;
+    automaticLayoutStarted.current = true;
+    setMessage("Measuring text and illustrations for this book’s first layout…");
+    void balanceLayout("book");
+  }, [project.id, project.chapters]);
   const uploadBackground = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     const target = descriptorFor(selectedId);
@@ -4952,7 +5066,7 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
           onMouseDown: () => { if (page.slotId !== selectedId) setSelectedId(page.slotId); },
           editorProps: {
             ref: (node) => connectBookEditor(page.slotId, revision.html, node),
-            contentEditable: true, suppressContentEditableWarning: true,
+            contentEditable: !busy, suppressContentEditableWarning: true,
             onMouseDown: (event) => beginTextInteraction(event, page.slotId),
             onMouseUp: () => { if (!pendingCaretPoint.current) captureSelection(); },
             onFocus: () => { if (page.slotId !== selectedId && !pendingCaretPoint.current) setSelectedId(page.slotId); },
@@ -5104,7 +5218,7 @@ function CanvaPreview({ project: savedProject, exportBusy, pdfProgress, pdfExpor
   const printable = useMemo(() => printableChapters(project.chapters), [project.chapters]);
   const publicationReview = useMemo(() => publicationStatus(project), [project]);
   // Review findings remain available as warnings, but no longer lock export.
-  const publication = useMemo(() => ({ ...publicationReview, ready: true }), [publicationReview]);
+  const publication = publicationReview;
   const unresolvedChapterCount = 0;
   const unresolved = { length: 0 };
   const watermarkSlug = normalizedTitle(project.pageWatermark).replace(/[^a-z]+/g, "-");
@@ -5196,6 +5310,7 @@ function CanvaPreview({ project: savedProject, exportBusy, pdfProgress, pdfExpor
           pageIndex: siblings.length ? siblings.findIndex((page) => page.slotId === sheet.slotId) : slot.pageIndex,
           chapterPageCount,
           ...measured,
+          structuralIssues: content ? inspectBookPage(content) : ["Page is not ready for measurement."],
           intentionalBlank: designer?.intentionalBlank,
           layoutLocked: designer?.layoutLocked,
           illustrationOnly: Boolean(sheet.chapterId && /<img\b/i.test(sheet.html) && readerTextLength(designerFlowBody(sheet.html)) < 100),
@@ -5208,7 +5323,7 @@ function CanvaPreview({ project: savedProject, exportBusy, pdfProgress, pdfExpor
     return () => { cancelled = true; };
   }, [previewFormat, savedProject, pdfExportMode, formatChooserOpen]);
 
-  const overflowCount = qualityReport?.overflowIssues.length ?? 0;
+  const overflowCount = qualityReport ? new Set([...qualityReport.overflowIssues, ...qualityReport.structuralIssues].map((issue) => issue.slotId)).size : 0;
   const warningCount = (qualityReport?.underflowIssues.length ?? 0) + (qualityReport?.imageIssues.length ?? 0);
   const layoutTitle = !qualityReport ? "Checking page layout…" : overflowCount ? `${overflowCount} page${overflowCount === 1 ? " needs" : "s need"} layout attention` : warningCount ? `${warningCount} layout or image warning${warningCount === 1 ? "" : "s"}` : "Layout matches Designer";
   const layoutDetail = !qualityReport ? "Waiting for fonts and images before measuring the pages." : overflowCount ? "Some content crosses a page boundary or overlaps a footer. Return to Designer to adjust the affected pages." : warningCount ? "Review sparse middle pages and image quality before publishing." : `${sheets.length} pages checked at ${bookFormat(project.bookFormat).label}.`;
@@ -5255,7 +5370,7 @@ function CanvaPreview({ project: savedProject, exportBusy, pdfProgress, pdfExpor
       </section>
     </div>;
   }
-  return <div className="modal-backdrop book-preview-backdrop"><section className="preview-modal preview-v2 book-publication" style={bookFormatCssVariables(project.bookFormat) as CSSProperties} data-page-watermark={watermarkSlug}><header className="preview-main-header"><div><p className="eyebrow">BOOK PREVIEW</p><h2>{project.title}</h2><span>{sheets.length} pages · {project.chapters.length} chapters · {(project.canvaPages ?? []).filter((page) => page.active).length} Canva pages</span></div><div className="preview-header-actions"><button className="download-book-button" onClick={() => onDownload("draft")} disabled={exportBusy}>{exportBusy && pdfExportMode === "draft" ? `Creating draft · ${pdfProgress}%` : "Download draft proof"}</button><button className="download-book-button" onClick={() => onDownload("publication")} disabled={exportBusy || !publication.ready}>{exportBusy && pdfExportMode === "publication" ? `Creating publication PDF · ${pdfProgress}%` : "Download publication PDF"}</button><button data-change-book-format onClick={() => { setPreviewFormat(savedProject.bookFormat); setFormatChooserOpen(true); }}>Size · {bookFormat(project.bookFormat).label}</button><button className="preview-close" onClick={onClose} aria-label="Close preview">×</button></div></header><div className={`preview-availability ${overflowCount ? "format-quality-error" : warningCount ? "format-quality-warning" : "complete"}`}><span className="preview-status-dot"/><div><b>{layoutTitle}</b><small>{layoutDetail}</small></div></div><div className="preview-mode-bar"><div className="preview-mode-switch" aria-label="Preview layout"><button className={viewMode === "book" ? "active" : ""} onClick={() => setViewMode("book")}><b>Whole book</b><span>Scroll every page</span></button><button className={viewMode === "chapter" ? "active" : ""} onClick={() => setViewMode("chapter")}><b>Chapter</b><span>All chapter pages</span></button><button className={viewMode === "page" ? "active" : ""} onClick={() => setViewMode("page")}><b>Single page</b><span>Focused reading</span></button></div></div><div className="preview-toolbar">{viewMode === "page" ? <div className="page-navigation"><button onClick={() => setPageIndex(Math.max(0, pageIndex - 1))} disabled={pageIndex === 0}>←</button><span><b>{pageIndex + 1}</b> / {sheets.length}</span><button onClick={() => setPageIndex(Math.min(sheets.length - 1, pageIndex + 1))} disabled={pageIndex === sheets.length - 1}>→</button></div> : viewMode === "chapter" ? <div className="page-navigation chapter-navigation"><button onClick={() => moveChapter(-1)} disabled={selectedChapterPosition === 0}>←</button><span><b>{selectedChapterPosition + 1}</b> / {project.chapters.length}</span><button onClick={() => moveChapter(1)} disabled={selectedChapterPosition === project.chapters.length - 1}>→</button></div> : <div className="preview-scope-summary"><b>{sheets.length}</b><span>pages shown below</span></div>}{viewMode === "page" ? <select aria-label="Jump to chapter" value={currentChapter} onChange={(event) => { const destination = Number(event.target.value); destination > 0 ? goToChapter(destination) : setPageIndex(Math.max(0, sheets.findIndex((sheet) => sheet.kind === (destination === -1 ? "contents" : "cover")))); }}><option value={0}>Cover</option><option value={-1}>Contents</option>{project.chapters.map((chapter) => <option key={chapter.id} value={chapter.id}>Chapter {chapter.id} · {chapter.title}</option>)}</select> : viewMode === "chapter" ? <select value={selectedChapterId} onChange={(event) => goToChapter(Number(event.target.value))}>{project.chapters.map((chapter) => <option key={chapter.id} value={chapter.id}>Chapter {chapter.id} · {chapter.title}</option>)}</select> : <div className="whole-book-label">Cover → Contents → Every chapter → Back cover</div>}<div className="zoom-controls"><button onClick={() => setZoom(Math.max(.45, zoom - .1))}>−</button><span>{Math.round(zoom * 100)}%</span><button onClick={() => setZoom(Math.min(1.1, zoom + .1))}>＋</button><button onClick={() => setZoom(.68)}>Fit page</button><button onClick={() => setZoom(.92)}>Fit width</button>{viewMode === "page" && <button onClick={() => setShowThumbnails(!showThumbnails)}>{showThumbnails ? "Hide pages" : "Show pages"}</button>}</div></div>{viewMode === "book" ? <div className="continuous-book-stage whole-book-preview">{sheets.map((sheet, index) => scaledSheet(sheet, `whole-book-${index}`))}</div> : viewMode === "chapter" ? <div className="continuous-book-stage chapter-book-preview"><div className="chapter-preview-heading"><div><span>CHAPTER {selectedChapterId}</span><h3>{selectedChapter?.title}</h3></div><b>{selectedChapterSheets.length} pages</b></div>{selectedChapterSheets.map((sheet, index) => scaledSheet(sheet, `chapter-${selectedChapterId}-${index}`))}</div> : <div className="page-viewer-shell">{showThumbnails && <aside className="page-thumbnails">{sheets.map((sheet, index) => <button className={index === pageIndex ? "active" : ""} onClick={() => setPageIndex(index)} key={index}><span>{index + 1}</span><b>{sheet.kind === "chapter" ? `Chapter ${sheet.chapterId}` : sheet.kind}</b></button>)}</aside>}<div className="single-page-stage">{current ? scaledSheet(current, `visible-${pageIndex}`) : <p>No pages are included. Return to Designer to restore a page.</p>}</div></div>}<div className="pdf-render-stack" aria-hidden="true">{sheets.map((sheet, index) => renderSheet(sheet, `export-${index}`))}</div></section>{canvaTarget && <div className="canva-workflow-backdrop" role="dialog" aria-modal="true"><section className="canva-workflow-modal"><header><div><p className="eyebrow">MANUAL CANVA WORKFLOW</p><h2>{canvaTarget.label}</h2><span>Your chapter content and request history will not be changed.</span></div><button onClick={() => setCanvaTarget(null)}>×</button></header><ol className="canva-steps"><li><b>1</b><div><strong>Download the studio page</strong><span>Use this correctly sized PNG as your Canva design reference.</span><button onClick={() => void downloadCanvaTemplate()} disabled={canvaBusy}>{canvaBusy ? "Preparing…" : "Download page PNG"}</button></div></li><li><b>2</b><div><strong>Edit it in Canva</strong><span>Upload the PNG to Canva, finish the design, then export at the same proportions as PNG.</span><button onClick={() => window.open("https://www.canva.com/", "_blank", "noopener,noreferrer")}>Open Canva ↗</button></div></li><li><b>3</b><div><strong>Bring the finished page back</strong><span>PNG is recommended. JPG and WebP are also accepted.</span><label className="canva-upload"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={chooseCanvaFile}/><span>{canvaFile ? canvaFile.name : "Choose finished page"}</span></label></div></li></ol><div className="canva-compare"><figure><span>STUDIO VERSION</span>{studioPagePreview ? <img src={studioPagePreview} alt="Studio page preview"/> : <div>Download the page to create its comparison preview.</div>}</figure><figure><span>CANVA RETURN</span>{canvaFilePreview ? <img src={canvaFilePreview} alt="Returned Canva page preview"/> : <div>Your uploaded Canva page will appear here.</div>}</figure></div><footer><button className="secondary" onClick={() => setCanvaTarget(null)}>Keep studio version</button>{(project.canvaPages ?? []).some((page) => page.slotId === canvaTarget.slotId && page.active) && <button className="secondary" onClick={() => void onSetCanvaActive(canvaTarget.slotId, false)}>Restore studio version</button>}<button className="primary" onClick={() => void acceptCanvaPage()} disabled={!canvaFile || canvaBusy}>{canvaBusy ? "Saving…" : "Use Canva version"}</button></footer></section></div>}</div>;
+  return <div className="modal-backdrop book-preview-backdrop"><section className="preview-modal preview-v2 book-publication" style={bookFormatCssVariables(project.bookFormat) as CSSProperties} data-page-watermark={watermarkSlug}><header className="preview-main-header"><div><p className="eyebrow">BOOK PREVIEW</p><h2>{project.title}</h2><span>{sheets.length} pages · {project.chapters.length} chapters · {(project.canvaPages ?? []).filter((page) => page.active).length} Canva pages</span></div><div className="preview-header-actions"><button className="download-book-button" onClick={() => onDownload("draft")} disabled={exportBusy}>{exportBusy && pdfExportMode === "draft" ? `Creating draft · ${pdfProgress}%` : "Download draft proof"}</button><button className="download-book-button" onClick={() => onDownload("publication")} disabled={exportBusy || !publication.ready || !qualityReport?.publicationReady || !project.designerLayoutSnapshot}>{exportBusy && pdfExportMode === "publication" ? `Creating publication PDF · ${pdfProgress}%` : "Download publication PDF"}</button><button data-change-book-format onClick={() => { setPreviewFormat(savedProject.bookFormat); setFormatChooserOpen(true); }}>Size · {bookFormat(project.bookFormat).label}</button><button className="preview-close" onClick={onClose} aria-label="Close preview">×</button></div></header><div className={`preview-availability ${overflowCount ? "format-quality-error" : warningCount ? "format-quality-warning" : "complete"}`}><span className="preview-status-dot"/><div><b>{layoutTitle}</b><small>{layoutDetail}</small></div></div>{qualityReport && <details className="book-preflight-results"><summary>Page checks · {overflowCount} blocking pages · {warningCount} warnings</summary>{[...qualityReport.structuralIssues, ...qualityReport.underflowIssues, ...qualityReport.imageIssues].map((issue, index) => <button key={`${issue.slotId}-${index}`} onClick={() => { setViewMode("page"); setPageIndex(Math.max(0, sheets.findIndex((sheet) => sheet.slotId === issue.slotId))); }}>{issue.label}: {issue.message}</button>)}</details>}<div className="preview-mode-bar"><div className="preview-mode-switch" aria-label="Preview layout"><button className={viewMode === "book" ? "active" : ""} onClick={() => setViewMode("book")}><b>Whole book</b><span>Scroll every page</span></button><button className={viewMode === "chapter" ? "active" : ""} onClick={() => setViewMode("chapter")}><b>Chapter</b><span>All chapter pages</span></button><button className={viewMode === "page" ? "active" : ""} onClick={() => setViewMode("page")}><b>Single page</b><span>Focused reading</span></button></div></div><div className="preview-toolbar">{viewMode === "page" ? <div className="page-navigation"><button onClick={() => setPageIndex(Math.max(0, pageIndex - 1))} disabled={pageIndex === 0}>←</button><span><b>{pageIndex + 1}</b> / {sheets.length}</span><button onClick={() => setPageIndex(Math.min(sheets.length - 1, pageIndex + 1))} disabled={pageIndex === sheets.length - 1}>→</button></div> : viewMode === "chapter" ? <div className="page-navigation chapter-navigation"><button onClick={() => moveChapter(-1)} disabled={selectedChapterPosition === 0}>←</button><span><b>{selectedChapterPosition + 1}</b> / {project.chapters.length}</span><button onClick={() => moveChapter(1)} disabled={selectedChapterPosition === project.chapters.length - 1}>→</button></div> : <div className="preview-scope-summary"><b>{sheets.length}</b><span>pages shown below</span></div>}{viewMode === "page" ? <select aria-label="Jump to chapter" value={currentChapter} onChange={(event) => { const destination = Number(event.target.value); destination > 0 ? goToChapter(destination) : setPageIndex(Math.max(0, sheets.findIndex((sheet) => sheet.kind === (destination === -1 ? "contents" : "cover")))); }}><option value={0}>Cover</option><option value={-1}>Contents</option>{project.chapters.map((chapter) => <option key={chapter.id} value={chapter.id}>Chapter {chapter.id} · {chapter.title}</option>)}</select> : viewMode === "chapter" ? <select value={selectedChapterId} onChange={(event) => goToChapter(Number(event.target.value))}>{project.chapters.map((chapter) => <option key={chapter.id} value={chapter.id}>Chapter {chapter.id} · {chapter.title}</option>)}</select> : <div className="whole-book-label">Cover → Contents → Every chapter → Back cover</div>}<div className="zoom-controls"><button onClick={() => setZoom(Math.max(.45, zoom - .1))}>−</button><span>{Math.round(zoom * 100)}%</span><button onClick={() => setZoom(Math.min(1.1, zoom + .1))}>＋</button><button onClick={() => setZoom(.68)}>Fit page</button><button onClick={() => setZoom(.92)}>Fit width</button>{viewMode === "page" && <button onClick={() => setShowThumbnails(!showThumbnails)}>{showThumbnails ? "Hide pages" : "Show pages"}</button>}</div></div>{viewMode === "book" ? <div className="continuous-book-stage whole-book-preview">{sheets.map((sheet, index) => scaledSheet(sheet, `whole-book-${index}`))}</div> : viewMode === "chapter" ? <div className="continuous-book-stage chapter-book-preview"><div className="chapter-preview-heading"><div><span>CHAPTER {selectedChapterId}</span><h3>{selectedChapter?.title}</h3></div><b>{selectedChapterSheets.length} pages</b></div>{selectedChapterSheets.map((sheet, index) => scaledSheet(sheet, `chapter-${selectedChapterId}-${index}`))}</div> : <div className="page-viewer-shell">{showThumbnails && <aside className="page-thumbnails">{sheets.map((sheet, index) => <button className={index === pageIndex ? "active" : ""} onClick={() => setPageIndex(index)} key={index}><span>{index + 1}</span><b>{sheet.kind === "chapter" ? `Chapter ${sheet.chapterId}` : sheet.kind}</b></button>)}</aside>}<div className="single-page-stage">{current ? scaledSheet(current, `visible-${pageIndex}`) : <p>No pages are included. Return to Designer to restore a page.</p>}</div></div>}<div className="pdf-render-stack" aria-hidden="true">{sheets.map((sheet, index) => renderSheet(sheet, `export-${index}`))}</div></section>{canvaTarget && <div className="canva-workflow-backdrop" role="dialog" aria-modal="true"><section className="canva-workflow-modal"><header><div><p className="eyebrow">MANUAL CANVA WORKFLOW</p><h2>{canvaTarget.label}</h2><span>Your chapter content and request history will not be changed.</span></div><button onClick={() => setCanvaTarget(null)}>×</button></header><ol className="canva-steps"><li><b>1</b><div><strong>Download the studio page</strong><span>Use this correctly sized PNG as your Canva design reference.</span><button onClick={() => void downloadCanvaTemplate()} disabled={canvaBusy}>{canvaBusy ? "Preparing…" : "Download page PNG"}</button></div></li><li><b>2</b><div><strong>Edit it in Canva</strong><span>Upload the PNG to Canva, finish the design, then export at the same proportions as PNG.</span><button onClick={() => window.open("https://www.canva.com/", "_blank", "noopener,noreferrer")}>Open Canva ↗</button></div></li><li><b>3</b><div><strong>Bring the finished page back</strong><span>PNG is recommended. JPG and WebP are also accepted.</span><label className="canva-upload"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={chooseCanvaFile}/><span>{canvaFile ? canvaFile.name : "Choose finished page"}</span></label></div></li></ol><div className="canva-compare"><figure><span>STUDIO VERSION</span>{studioPagePreview ? <img src={studioPagePreview} alt="Studio page preview"/> : <div>Download the page to create its comparison preview.</div>}</figure><figure><span>CANVA RETURN</span>{canvaFilePreview ? <img src={canvaFilePreview} alt="Returned Canva page preview"/> : <div>Your uploaded Canva page will appear here.</div>}</figure></div><footer><button className="secondary" onClick={() => setCanvaTarget(null)}>Keep studio version</button>{(project.canvaPages ?? []).some((page) => page.slotId === canvaTarget.slotId && page.active) && <button className="secondary" onClick={() => void onSetCanvaActive(canvaTarget.slotId, false)}>Restore studio version</button>}<button className="primary" onClick={() => void acceptCanvaPage()} disabled={!canvaFile || canvaBusy}>{canvaBusy ? "Saving…" : "Use Canva version"}</button></footer></section></div>}</div>;
 }
 
 function LegacyPreview({ project, draftBusy, onFill, onRefresh, onClose, onPrint }: { project: Project; draftBusy: boolean; onFill: () => void; onRefresh: () => void; onClose: () => void; onPrint: () => void }) {

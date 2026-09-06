@@ -5,10 +5,10 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 
 const require = createRequire(resolve(process.cwd(), "package.json"));
-const { chromium } = require(process.env.IKS_PLAYWRIGHT_MODULE || "playwright");
+const engine = require(process.env.IKS_PLAYWRIGHT_MODULE || "playwright")[process.env.IKS_BROWSER || "chromium"];
 const ts = require("typescript");
 const code = ts.transpileModule(readFileSync("lib/book-raster.ts", "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-const browser = await chromium.launch({ headless: true });
+const browser = await engine.launch({ headless: true });
 after(async () => browser.close());
 const page = await browser.newPage();
 await page.setContent('<style>*{box-sizing:border-box}#sheet{position:absolute;left:40px;top:120px;width:200px;height:240px;background:white;outline:3px solid green;outline-offset:-3px}#sheet::after{content:"";position:absolute;left:140px;top:180px;width:30px;height:30px;background:color-mix(in srgb,red 50%,blue)}img{position:absolute;left:20px;top:30px;width:100px;height:160px;object-fit:contain;object-position:center}</style><article id="sheet"><img></article>');
@@ -45,4 +45,27 @@ test("the folk border stays on the page edge and does not fill the page", async 
   });
   assert.deepEqual(pixels.center, [255, 255, 255, 255]);
   assert.notDeepEqual(pixels.edge, [255, 255, 255, 255]);
+});
+
+test("an asynchronous asset load cannot detach later footer styles from the export snapshot", async () => {
+  const result = await page.evaluate(async () => {
+    const sheet = document.createElement('article');
+    sheet.style.cssText = 'position:relative;width:200px;height:240px;background:white';
+    sheet.innerHTML = '<img src="https://book.test/art.png" style="width:30px;height:30px"><footer style="position:absolute;bottom:10px;left:10px;width:180px;height:12px;background:rgb(255,0,0);font-size:7px;display:flex;justify-content:space-between"><span>Title</span><span>3</span></footer>';
+    document.body.append(sheet);
+    const img = sheet.querySelector('img'); img.decode = async () => {};
+    const originalFetch = window.fetch;
+    window.fetch = async () => {
+      // React can replace innerHTML while an asset request is pending.
+      sheet.innerHTML = sheet.innerHTML;
+      const canvas = document.createElement('canvas'); canvas.width = 1; canvas.height = 1;
+      const blob = await new Promise(resolve => canvas.toBlob(resolve));
+      return new Response(blob);
+    };
+    try {
+      const canvas = await raster.renderBookPageCanvas(sheet, { scale: 1 });
+      return Array.from(canvas.getContext('2d').getImageData(100, 224, 1, 1).data);
+    } finally { window.fetch = originalFetch; sheet.remove(); }
+  });
+  assert.deepEqual(result, [255, 0, 0, 255]);
 });
