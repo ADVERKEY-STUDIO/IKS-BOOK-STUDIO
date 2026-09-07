@@ -69,11 +69,13 @@ test("failed chapters can be handed to a designer while keeping draft-proof expo
   assert.match(page, /Download draft proof/);
 });
 
-test("draft export remains available while publication requires approval and layout review", () => {
+test("both PDF exports remain available for unfinished books", () => {
   assert.match(page, /function openPreview\(\)/);
   assert.match(page, /Download draft proof/);
   assert.match(page, /Download publication PDF/);
-  assert.match(page, /disabled=\{exportBusy \|\| !publication\.ready \|\| !qualityReport\?\.publicationReady \|\| !project\.designerLayoutSnapshot\}/);
+  assert.match(page, /onClick=\{\(\) => onDownload\("publication"\)\} disabled=\{exportBusy\}/);
+  assert.doesNotMatch(page, /Publication blocked:/);
+  assert.doesNotMatch(page, /await import\("jspdf"\)/);
   assert.match(page, /DRAFT PROOF/);
   assert.match(page, /draft-proof/);
   assert.match(page, /renderingMode:\s*"invisible"/);

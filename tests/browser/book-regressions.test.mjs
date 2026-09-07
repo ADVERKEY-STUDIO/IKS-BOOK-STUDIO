@@ -28,6 +28,8 @@ async function open(make) {
   await page.route('**/api/preferences',r=>r.fulfill({json:{preferences:[]}}));
   await page.route('**/api/projects',async r=>{if(r.request().method()==='POST')project=r.request().postDataJSON();await r.fulfill({json:r.request().method()==='POST'?{project}:{projects:[project]}});});
   await page.goto(appUrl);await page.getByRole('button',{name:/CHAPTERS.*Book regression/}).click();
+  await page.locator('.designer-flow-page').or(page.getByRole('button',{name:'Return to Designer',exact:true})).first().waitFor();
+  if(await page.getByRole('button',{name:'Return to Designer',exact:true}).count())await page.getByRole('button',{name:'Return to Designer',exact:true}).click();
   await page.locator('.designer-flow-page').first().waitFor();
   return {page, project:()=>project};
 }
@@ -74,4 +76,19 @@ test('page border None suppresses inherited ornamental borders in Designer and P
 test('an older book keeps its explicit No Border choice when its theme is inferred', options, async()=>{
   const run=await open(()=>({bookPersona:undefined,bookBorder:'No Border',chapters:[chapter('<p>A short reader passage.</p>')]}));
   try {await run.page.waitForFunction(()=>/balanced locally|Layout balancing failed/.test(document.body.innerText));assert.equal(run.project().bookBorder,'No Border');} finally {await run.page.close();}
+});
+
+test('publication PDF downloads the current pages of an unfinished book without lazy PDF modules', options, async()=>{
+  const run=await open(()=>({chapters:[chapter('<p>This chapter is still being written.</p>',{status:'draft',generationStatus:'Waiting',manualApproved:false})]}));
+  try {
+    await preview(run.page);
+    await run.page.route('**/*jspdf*',r=>r.abort());
+    const button=run.page.getByRole('button',{name:'Download publication PDF',exact:true});
+    assert.equal(await button.isEnabled(),true,'Incomplete editorial status must not disable downloading');
+    const waiting=run.page.waitForEvent('download');await button.click();const download=await waiting;
+    assert.equal(await download.failure(),null);assert.match(download.suggestedFilename(),/-publication\.pdf$/);
+    const pdf=await require('pdf-lib').PDFDocument.load(readFileSync(await download.path()));
+    assert.equal(pdf.getPageCount(),await run.page.locator('.pdf-render-stack .book-sheet').count());
+    assert.match(pdf.getSubject(),/review incomplete/);
+  } finally {await run.page.close();}
 });

@@ -1,12 +1,12 @@
 # Book structure implementation — three phases
 
-The shared page model is the authority for Designer, Preview and PDF. New completed books receive a measured first layout; saved in-flow image overflow is repaired on opening, while protected manual compositions require explicit adjustment. Publication export enforces objective structural checks. Draft export remains available for review.
+The shared page model is the authority for Designer, Preview and PDF. New completed books receive a measured first layout; saved in-flow image overflow is repaired on opening, while protected manual compositions require explicit adjustment. Publication export reports objective structural checks without blocking a requested download. Draft export remains available for review.
 
 ## Phase 1 — preserve content and export geometry
 
 - Capture every computed style synchronously before fetching PDF assets. Freeze the entire publication DOM for the duration of export so progress updates cannot detach footers or captions.
 - Compare ordered reader text, image sources and alternative text before committing reflow. The comparison excludes only explicitly repeated table headers. A failed comparison leaves the saved book untouched.
-- Validate the actual rendered pages at publication export: printable boundaries, footer collisions, broken images, stranded headings and private production text. Require editorial approval and a saved layout; verify PDF page count.
+- Validate the actual rendered pages at publication export: printable boundaries, footer collisions, broken images, stranded headings and private production text. Report pending editorial approval and layout review; verify PDF page count.
 
 ## Phase 2 — measured pagination
 
@@ -22,7 +22,7 @@ The shared page model is the authority for Designer, Preview and PDF. New comple
 - Attach Part labels before chapter boundaries to the following chapter instead of the preceding section.
 - Show saved image counts separately from staged files, clear staged uploads after success, and report upload failures accurately. Later image ZIPs update saved Designer artwork as well as manuscript image metadata, preserving an existing image frame.
 - Make typography controls apply to the actual body text and make No border suppress theme page borders.
-- Use the same rendered structural inspection in Designer, Preview and export, including private production text. Link preflight findings to individual Preview pages. Structural errors block publication; sparse-page and image-resolution findings remain review warnings.
+- Use the same rendered structural inspection in Designer, Preview and export, including private production text. Link preflight findings to individual Preview pages. Structural errors, sparse-page and image-resolution findings remain visible for review; they do not disable download.
 
 ## Verification
 
@@ -38,3 +38,7 @@ Run unit tests with `node --test tests/*.test.mjs`. Run browser tests with Playw
 ## Practical limits
 
 These checks do not guarantee aesthetic perfection for arbitrary source material. A merged table cell larger than a page, a deliberately positioned composition, a missing font, or unsuitable artwork can require editorial intervention. Existing completed books are checked for overflowing in-flow illustrations on opening; eligible affected chapters are repaired automatically. Locked, blank and freely positioned compositions remain protected. Use Designer → More → Balance layout for other eligible layout changes, then review Preview's page checks.
+
+## Download policy update — 7 September 2026
+
+At the publisher’s request, Download publication PDF exports the current preview even when approval, illustrations or layout review are incomplete. The PDF retains publication rendering quality without a draft watermark, uses a neutral publication filename, and identifies incomplete editorial review in its metadata. Missing renderable pages and actual rendering errors still produce errors. The PDF engine is imported with the app instead of fetched only when downloading, avoiding the missing lazy-module URL reported on the Workers deployment. Existing open tabs must load the updated app after their edits are saved.
