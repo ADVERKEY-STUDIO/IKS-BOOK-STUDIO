@@ -77,6 +77,35 @@ test('source selection and real manuscript/image ZIP uploads produce a publishab
     assert.equal(await page.locator('.pdf-render-stack figure img').count(),slots.filter(s=>s.role==='chapter').length);
     assert.equal(await page.locator('.pdf-render-stack [data-source-verse=V01]').count(),1);
     assert.equal(await page.locator('.pdf-render-stack [data-illustration-slot=SRC01_P1]').count(),1);assert.equal(await page.locator('.pdf-render-stack [data-illustration-slot=SRC01_P2]').count(),1);
+    await page.getByRole('button',{name:/^Review sources/}).click();
+    const imageReview=page.getByRole('article',{name:'Review image SRC01'});
+    await imageReview.getByRole('checkbox').check();
+    const frames=project.designerPages.map(p=>p.html.match(/<img[^>]*data-illustration-slot="SRC01_P[12]"[^>]*>/g)||[]).flat().map(html=>html.replace(/src="[^"]*"/,'src=""'));
+    for(const variant of ['original','cleaned','original']){
+      await imageReview.getByRole('button',{name:variant==='original'?'Use original':'Approve cleaned image',exact:true}).click();
+      await page.waitForFunction(v=>document.querySelector('[aria-label="Review image SRC01"]').textContent.includes(`Approved: ${v}.`),variant);
+      assert.equal(project.sourceReview.images.SRC01.variant,variant);
+      const asset=project.sourceAssets.find(a=>a.path===(variant==='original'?'source-images/SRC01.png':'cleaned-source-images/SRC01.png'));
+      assert.equal(project.externalIllustrations.slots.filter(s=>s.sourceImageId==='SRC01'&&s.imageUrl===asset.url).length,2);
+    }
+    assert.deepEqual(project.designerPages.map(p=>p.html.match(/<img[^>]*data-illustration-slot="SRC01_P[12]"[^>]*>/g)||[]).flat().map(html=>html.replace(/src="[^"]*"/,'src=""')),frames);
+    const verseReview=page.getByRole('article',{name:'Review verse V01'});
+    const comparison=await PDFDocument.create();for(let i=0;i<5;i++)comparison.addPage().drawText('Source comparison page '+(i+1));
+    await page.getByLabel('Choose source PDF for local comparison').setInputFiles({name:'Comparison.pdf',mimeType:'application/pdf',buffer:Buffer.from(await comparison.save())});
+    await page.getByText('Source PDF loaded locally. Compare each verse on its cited page.',{exact:true}).waitFor();
+    assert.match(await verseReview.getByLabel('Source text for V01').inputValue(),/Source comparison page 5/);
+    assert.equal(await verseReview.getByRole('button',{name:'Approve source verse',exact:true}).isEnabled(),false);
+
+    await verseReview.getByLabel('Source text for V01').fill(sourceManifest.verses[0].sanskrit);
+    await verseReview.getByRole('checkbox').check();
+    await verseReview.getByRole('button',{name:'Approve source verse',exact:true}).click();
+    await verseReview.getByText('Source review saved.',{exact:true}).waitFor();
+    assert.equal(project.sourceReview.verses.V01.method,'manual');
+    if(process.env.IKS_EVIDENCE_DIR)await page.locator('.source-review-panel').screenshot({path:resolve(process.env.IKS_EVIDENCE_DIR,'source-review.png')});
+    await page.getByRole('button',{name:'Close source review',exact:true}).click();
+    await page.waitForTimeout(300);
+    assert.deepEqual(await page.locator('.source-preflight-results').allTextContents(),[]);
+    assert.ok(await page.evaluate(()=>document.fonts.check('16px "Book Sanskrit"','धर्म')));
     const downloadPromise=page.waitForEvent('download',{timeout:90000});
     await page.getByRole('button',{name:'Download publication PDF',exact:true}).click();
     const download=await downloadPromise;const file=await download.path();

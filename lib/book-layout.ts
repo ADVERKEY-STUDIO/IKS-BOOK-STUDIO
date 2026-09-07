@@ -84,6 +84,8 @@ export function splitFlowBlock(html: string, accepts: (head: string) => boolean,
   const holder = doc.createElement("div"); holder.innerHTML = html;
   const element = holder.firstElementChild as HTMLElement | null;
   if (!element) return null;
+  // Preserve the source verse, attribution and explanation as one reading unit.
+  if (element.matches(".source-verse")) return null;
   if (element.matches("section,div,article") && !element.matches(".designer-free-image,.designer-free-text,.designer-text-box")
     && !/position\s*:\s*(absolute|fixed)|display\s*:\s*(grid|flex)/i.test(element.getAttribute("style") ?? "")) {
     const children = Array.from(element.childNodes);
@@ -276,6 +278,11 @@ export function inspectBookPage(content: HTMLElement): string[] {
   const geometry = measureBookContent(content);
   if (geometry.overflowX || geometry.overflowY) issues.push("Content crosses the printable area or overlaps the footer.");
   if (Array.from(content.querySelectorAll("img")).some((image) => !image.complete || !image.naturalWidth)) issues.push("An illustration has not loaded.");
+  content.querySelectorAll(".source-verse").forEach(verse=>{
+    if(!verse.querySelector(".sanskrit-verse"))issues.push("A source verse is missing its Sanskrit text.");
+  });
+  if(content.querySelector(".sanskrit-verse") && !document.fonts.check('16px "Book Sanskrit"', 'धर्म'))issues.push("The Sanskrit font has not loaded.");
+  content.querySelectorAll("figcaption").forEach(caption=>{if(!caption.closest("figure"))issues.push("An image caption is separated from its figure.");});
   const flow = content.querySelector(":scope > .preview-body") ?? content;
   const last = flow.lastElementChild;
   if (last?.matches("h1,h2,h3,h4,h5,h6")) issues.push("A heading is stranded without its following text.");

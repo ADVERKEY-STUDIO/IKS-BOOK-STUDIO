@@ -19,8 +19,14 @@ Setup and review choices cover new/source/mixed images, enhancement, illustratio
 
 Standalone TypeScript checking reports 34 existing errors. Enabling TypeScript import extensions for this no-emit project removes the previous import-extension diagnostics and supports the shared modules executed by the Node tests. No new feature-module errors remain. Production build and Worker artifact validation pass.
 
-## Phase 3: review and layout safeguards — awaiting user approval
+## Phase 3: review and layout safeguards — complete
 
-Add original/enhanced comparisons with approval and revert, source-image resolution and context review, source-PDF verse comparison, font and line-break checks, and verse/explanation/image-caption grouping improvements. Phase 2 checks package consistency; it cannot independently certify that the external AI faithfully extracted the original source. Automatic PDF extraction or in-app enhancement remains a separately agreed capability.
+- Preview and Advanced now open source review. Compare originals and cleaned images side by side, inspect pixel dimensions and placement reasons, approve cleaned artwork or restore originals across every occurrence. Existing saved image frames remain unchanged.
+- Review Sanskrit against a locally selected source PDF. Text extraction reads the cited PDF page in the browser; scanned or unreadable text supports explicit manual comparison. Approval requires matching Sanskrit and a human check of attribution, line breaks and companion text. AI-declared verified status is not human approval.
+- Changed source files, context or verse details require fresh review. Preview also reports missing/duplicate placements, replaced approved images and altered Sanskrit, line breaks or companion text in saved pages.
+- A bundled, licensed Noto Serif Devanagari font is loaded before Sanskrit pagination and used in Designer, Preview and raster PDF export. Verses, attribution and explanations stay together; captions remain with their figures. Oversized groups are reported for editing rather than silently discarded.
+- Source warnings do not disable draft or publication PDF downloads. Human review remains necessary for semantic relevance and source fidelity; this workflow does not guarantee that external AI extraction is correct.
 
-Stop after each phase, push it, and obtain the user's instruction before starting the next phase.
+### Phase 3 verification
+
+228 unit and Chromium browser tests pass. The real ZIP workflow checks multiple image placements, original/cleaned/revert approval, preserved saved frames, local PDF page-text extraction, mismatching verse rejection, manual Sanskrit approval, publication PDF export and reload. HTTP persistence and asset storage are mocked; parsing, rendering, comparison and PDF export use real application code. Standalone TypeScript checking retains the same 34 pre-existing diagnostics.
