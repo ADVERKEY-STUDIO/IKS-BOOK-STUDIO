@@ -132,7 +132,7 @@ test("designer supports reusable styles, scoped application and local preflight"
   assert.match(page, /applyStyle\("book"\)/);
   assert.match(page, /Save current style/);
   assert.match(page, /runPreflight/);
-  assert.match(page, /overflow the printable page/);
+  assert.match(page, /inspectBookPage\(root\)/);
   assert.match(page, /missing accessibility text/);
   assert.match(page, /undoStack/);
   assert.match(page, /redoStack/);
@@ -245,7 +245,7 @@ test("Designer Studio exposes the complete book as one editable flowing workspac
 });
 
 test("whole-book layout balancing is local, scoped and preserves locked pages", () => {
-  assert.match(page, /balanceLayout = async \(scope: "chapter" \| "book"\)/);
+  assert.match(page, /balanceLayout = async \(scope: "chapter" \| "book", repairIds\?: number\[\]\)/);
   assert.match(page, /measureChapterPages\(chapter, combined, revisions\.map/);
   assert.match(page, /const measured = measureBookContent\(content\)/);
   assert.match(page, /return !measured\.overflowX && !measured\.overflowY/);
@@ -263,7 +263,7 @@ test("whole-book preflight reports fill problems with page navigation", () => {
   assert.match(page, /designerPageFill/);
   assert.match(page, /runBookPreflight/);
   assert.match(page, /Only \$\{fill\.ratio\}% filled/);
-  assert.match(page, /Content crosses the page boundary or overlaps its footer/);
+  assert.match(layout, /Content crosses the printable area or overlaps the footer/);
   assert.match(page, />Go to page</);
   assert.match(css, /\.page-fill-badge\.empty/);
   assert.match(css, /\.page-fill-badge\.overflow/);

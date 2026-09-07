@@ -2,6 +2,7 @@
 
 import { ChangeEvent, CSSProperties, forwardRef, MouseEvent as ReactMouseEvent, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { strToU8, unzipSync, zipSync } from "fflate";
+import { placeBookIllustrations } from "../lib/book-illustrations";
 import { renderBookPageCanvas } from "../lib/book-raster";
 import { measureBookContent, pageFlowHtml, paginateFlowBlocks, refreshBookPageNumbers, assertFlowPreserved, inspectBookPage } from "../lib/book-layout";
 import { AUTHORIAL_READER_INSTRUCTION, authorialReaderHtml, childAgeBand, generationProfileKey, readerFacingChapterTitle } from "../lib/child-summary";
@@ -11,7 +12,7 @@ import { BOOK_PACKAGE_FORMAT, expectedChapterId, expectedContextKey, expectedPag
 import { bookPersonaClass, bookPersonaDefinitions, bookPersonaPatch, inferBookPersona, materializePersona, personaById, type BookPersona } from "../lib/book-persona";
 import { outlineForMode, pdfChunkRanges, SAFE_OCR_CHUNK_BYTES, SAFE_OCR_CHUNK_PAGES, type OutlineMode, type SourceIntelligence, type SourceOutlineItem } from "../lib/source-intelligence";
 import { assignIllustrationsToReaderPages, buildExternalAiPrompt, buildExternalIllustrationPrompt, buildExternalIllustrationPromptPack, buildExternalIllustrationSlotPrompt, createExternalIllustrationSlots, matchExternalIllustrationArchive, parseExternalManuscript, upgradeExternalIllustrationSlots, type ExternalIllustrationSlot, type ExternalManuscriptResult } from "../lib/external-manuscript";
-import { assessPublication, chapterRequiresIllustration, hasPrivateProductionText, paginateContents, pdfRasterSettings, readerSafeImageCaption, sanitizeReaderHtml, sanitizeReaderImageHtml, type ContentsEntry } from "../lib/publication";
+import { assessPublication, chapterRequiresIllustration, paginateContents, pdfRasterSettings, readerSafeImageCaption, sanitizeReaderHtml, sanitizeReaderImageHtml, type ContentsEntry } from "../lib/publication";
 import { BOOK_FORMATS, DEFAULT_NEW_BOOK_FORMAT, LEGACY_BOOK_FORMAT, assessBookFormatPreview, bookFormat, bookFormatCapacityRatio, bookFormatCssVariables, isBookFormatId, type BookFormatId, type BookFormatPreviewResult, type BookPageMetric } from "../lib/book-format";
 
 type View = "dashboard" | "wizard" | "external" | "analysis" | "brief" | "editor";
@@ -57,6 +58,9 @@ type DraftApiResponse = {
 const MAX_CONCURRENT_CHAPTERS = 2;
 
 type ImportedPage = {
+  illustrationSlotId?: string;
+  illustrationPlacement?: "after-opening" | "chapter-middle" | "before-reflection";
+  illustrationAnchorId?: string;
   pageId: string;
   pageNumber: number;
   purpose: string;
@@ -1738,6 +1742,9 @@ export default function Home() {
         pageNumber: pageIndex + 1,
         purpose: page.illustrationSlotId ? `Text and ${page.illustrationSlotId.toLowerCase()} illustration` : "Reader text",
         body: page.body,
+        illustrationSlotId: page.illustrationSlotId,
+        illustrationPlacement: page.illustrationPlacement,
+        illustrationAnchorId: page.illustrationAnchorId,
         imageKey: page.imageKey,
         imageUrl: page.imageUrl,
         imageCaption: page.imageCaption,
@@ -1763,35 +1770,20 @@ export default function Home() {
       const replacement: DesignerPageOverride = { ...base, backgroundImageKey: cover.imageKey, backgroundImageUrl: cover.imageUrl, backgroundSize: "cover", backgroundPosition: "center", backgroundOpacity: 1, savedAt: new Date().toISOString() };
       designerPages = [...designerPages.filter((page) => page.slotId !== "cover"), replacement];
     }
-    // A later ZIP must update materialized Designer pages as well as the
-    // manuscript. Preserve the frame and its manual position when replacing art.
-    for (const slot of slots.filter((slot) => slot.role === "chapter" && slot.status === "ready" && slot.imageUrl && uploaded.has(slot.id))) {
-      const previous = currentSlots.find((item) => item.id === slot.id);
-      const chapterPages = designerPages.filter((page) => page.chapterId === slot.chapterId && !page.deleted);
-      if (!chapterPages.length) continue;
-      let replaced = false;
-      designerPages = designerPages.map((page) => {
-        if (page.chapterId !== slot.chapterId || page.deleted) return page;
-        const root = document.createElement("div"); root.innerHTML = page.html;
-        const image = Array.from(root.querySelectorAll("img")).find((image) => image.dataset.illustrationSlot === slot.id || (previous?.imageUrl && image.getAttribute("src") === previous.imageUrl));
-        if (!image) return page;
-        image.src = slot.imageUrl!; image.alt = readerSafeImageCaption(slot.altText, slot.chapterTitle); image.dataset.illustrationSlot = slot.id;
-        const caption = image.closest("figure")?.querySelector("figcaption"); if (caption) caption.textContent = readerSafeImageCaption(slot.caption);
-        replaced = true; return { ...page, html: root.innerHTML, savedAt: new Date().toISOString() };
-      });
-      if (!replaced) {
-        const target = chapterPages[Math.floor((chapterPages.length - 1) / 2)];
-        designerPages = designerPages.map((page) => {
-          if (page.slotId !== target.slotId) return page;
-          const root = document.createElement("div"); root.innerHTML = page.html;
-          const body = root.querySelector(".preview-body") ?? root;
-          const figure = document.createElement("figure"); figure.className = "chapter-image";
-          figure.innerHTML = `<img data-illustration-slot="${escapeHtml(slot.id)}" src="${escapeHtml(slot.imageUrl!)}" alt="${escapeHtml(readerSafeImageCaption(slot.altText, slot.chapterTitle))}"><figcaption>${escapeHtml(readerSafeImageCaption(slot.caption))}</figcaption>`;
-          const paragraphs = body.querySelectorAll(":scope > p"); const anchor = paragraphs[Math.floor(paragraphs.length / 2)];
-          if (anchor) anchor.after(figure); else body.append(figure);
-          return { ...page, html: root.innerHTML, savedAt: new Date().toISOString() };
-        });
-      }
+    // Resolve anchors across a saved chapter while preserving every page frame.
+    for (const chapter of chapters) {
+      const changed = slots.filter((slot) => slot.chapterId === chapter.id && slot.role === "chapter" && slot.status === "ready" && slot.imageUrl && uploaded.has(slot.id));
+      const chapterPages = designerPages.filter((page) => page.chapterId === chapter.id && !page.deleted);
+      if (!changed.length || !chapterPages.length) continue;
+      const root = document.createElement("div");
+      const containers = new Map(chapterPages.map((page) => { const section = document.createElement("section"); section.innerHTML = page.html; root.append(section); return [page.slotId, section]; }));
+      placeBookIllustrations(root, changed.map((slot) => {
+        const previous = currentSlots.find((item) => item.id === slot.id);
+        return { slotId: slot.id, placement: slot.placement === "cover" ? "after-opening" : slot.placement, anchorId: slot.anchorId,
+          imageUrl: slot.imageUrl!, imageAlt: readerSafeImageCaption(slot.altText, slot.chapterTitle), imageCaption: readerSafeImageCaption(slot.caption),
+          previousUrl: previous?.imageUrl, previousCaption: previous ? readerSafeImageCaption(previous.caption) : undefined };
+      }));
+      designerPages = designerPages.map((page) => containers.has(page.slotId) ? { ...page, html: containers.get(page.slotId)!.innerHTML, savedAt: new Date().toISOString() } : page);
     }
     const issues = [...importIssues, ...uploadErrors, ...slots.filter((slot) => slot.status === "missing" || slot.status === "failed").map((slot) => `${slot.id}: ${slot.error || "Illustration unresolved"}`)];
     const next: Project = { ...project, chapters, designerPages, externalIllustrations: { ...project.externalIllustrations!, importedAt: new Date().toISOString(), issues, slots }, updatedAt: "Just now" };
@@ -2018,7 +2010,6 @@ OUTPUT REQUIREMENTS
       const renderedBlockers = sheets.flatMap((sheet, index) => {
         const content = sheet.querySelector<HTMLElement>(".designer-editable-content, .designer-render-content") ?? sheet;
         const issues = inspectBookPage(content).map((issue) => `Page ${index + 1}: ${issue}`);
-        if (hasPrivateProductionText(content.textContent ?? "")) issues.push(`page ${index + 1} contains private production text`);
         return issues;
       });
       const unfinished = new Set(publication.blockers.map((blocker) => blocker.chapterId)).size + renderedBlockers.length;
@@ -3019,7 +3010,7 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
     <section className="image-session-actions"><div><p className="eyebrow">ART BIBLE + IMAGE QUEUE</p><h2>Generate reliable chapter images</h2><p>Use the numbered files in order. Each prompt creates exactly one image, so later chapters cannot silently disappear into a failed batch.</p><button className="primary" onClick={downloadPrompt}>Download sequential prompt pack</button><button className="secondary" onClick={() => void copyPrompt()}>Copy art bible</button></div><label className={`bulk-image-upload${busy ? " busy" : ""}`}><input type="file" accept=".zip,application/zip,application/x-zip-compressed" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void chooseIllustrationZip(file); }}/><span>{busy ? "…" : "↑"}</span><b>{busy ? "Checking and placing illustrations…" : "Upload the completed illustration ZIP"}</b><small>One ZIP with the exact images/cover.jpg and CH-XX-IMG-XX filenames from the manifest.</small></label></section>
     {uploadIssues.length > 0 && <div className="bulk-image-issues">{uploadIssues.map((issue) => <span key={issue}>{issue}</span>)}</div>}
     {activeSlot && <section className="active-image-slot"><div className="active-image-preview">{activeCandidate?.file ? <LocalImagePreview file={activeCandidate.file} alt={activeSlot.altText}/> : activeSlot.imageUrl ? <img src={activeSlot.imageUrl} alt={activeSlot.altText}/> : <span>Illustration pending</span>}</div><div className="active-image-copy"><p className="eyebrow">{activeIndex + 1} OF {slots.length} · {activeSlot.id}</p><h2>{activeSlot.chapterTitle}</h2><p>{activeSlot.sceneBrief}</p><div className="active-image-actions"><button disabled={activeIndex === 0} onClick={() => setActiveIndex((index) => Math.max(0, index - 1))}>← Previous</button><button onClick={() => void copySlotPrompt(activeSlot)}>Copy only this prompt</button><label>{activeCandidate?.file || activeSlot.imageUrl ? "Replace image" : "Upload this image"}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void chooseImage(activeSlot, file); }}/></label><button disabled={activeIndex === slots.length - 1} onClick={() => setActiveIndex((index) => Math.min(slots.length - 1, index + 1))}>Next →</button></div></div></section>}
-    <section className="compact-image-review"><header><div><p className="eyebrow">QUICK REVIEW</p><h2>{resolvedCount} of {slots.length} images ready</h2></div><span>Click a thumbnail only when you need to inspect or replace it.</span></header><div>{slots.map((slot, index) => { const candidate = candidates.find((item) => item.slotId === slot.id); const ready = Boolean(candidate?.file || slot.imageUrl); return <button key={slot.id} className={`${ready ? "ready" : "pending"} ${activeIndex === index ? "active" : ""}`} onClick={() => setActiveIndex(index)}><span>{candidate?.file ? <LocalImagePreview file={candidate.file} alt=""/> : slot.imageUrl ? <img src={slot.imageUrl} alt=""/> : <i>{index + 1}</i>}</span><b>{slot.id}</b><small>{ready ? "Ready" : "Missing"}</small></button>; })}</div><footer><button className="secondary" onClick={onReplaceManuscript}>Replace manuscript</button><button className="secondary" onClick={onOpenDesigner}>Continue with pending images</button>{hasChanges && <button className="primary" disabled={busy} onClick={() => { setBusy(true); void onImport(candidates, uploadIssues).finally(() => setBusy(false)); }}>{busy ? "Saving images…" : "Import ready images"}</button>}</footer></section>
+    <section className="compact-image-review"><header><div><p className="eyebrow">QUICK REVIEW</p><h2>{resolvedCount} of {slots.length} images ready</h2></div><span>Click a thumbnail only when you need to inspect or replace it.</span></header><div>{slots.map((slot, index) => { const candidate = candidates.find((item) => item.slotId === slot.id); const ready = Boolean(candidate?.file || slot.imageUrl); return <button key={slot.id} className={`${ready ? "ready" : "pending"} ${activeIndex === index ? "active" : ""}`} onClick={() => setActiveIndex(index)}><span>{candidate?.file ? <LocalImagePreview file={candidate.file} alt=""/> : slot.imageUrl ? <img src={slot.imageUrl} alt=""/> : <i>{index + 1}</i>}</span><b>{slot.id}</b><small>{ready ? "Ready" : "Missing"}</small></button>; })}</div><footer><button className="secondary" onClick={onReplaceManuscript}>Replace manuscript</button><button className="secondary" onClick={onOpenDesigner}>{resolvedCount === slots.length ? "Open Designer" : "Continue with pending images"}</button>{hasChanges && <button className="primary" disabled={busy} onClick={() => { setBusy(true); void onImport(candidates, uploadIssues).finally(() => setBusy(false)); }}>{busy ? "Saving images…" : "Import ready images"}</button>}</footer></section>
   </main>;
 }
 
@@ -3413,16 +3404,12 @@ function readerPagesForFormat(chapter: Chapter, audience: string, formatId: Book
   if (!images.length && chapter.imageUrl) images.push({ body: "", imageUrl: chapter.imageUrl, imageCaption: chapter.imageCaption, imageAlt: chapter.imageAlt } as ImportedPage);
   if (typeof document !== "undefined") {
     const root = document.createElement("div"); root.innerHTML = body;
-    const anchors = Array.from(root.querySelectorAll("p,blockquote,ul,ol,table")).filter((node) => node.parentElement === root);
-    images.forEach((image, index) => {
-      if (Array.from(root.querySelectorAll("img")).some((node) => node.getAttribute("src") === image.imageUrl)) return;
-      const figure = document.createElement("figure"); figure.className = "chapter-image";
-      const art = document.createElement("img"); art.src = image.imageUrl!; art.alt = readerSafeImageCaption(image.imageAlt, `Illustration for ${chapter.title}`); figure.append(art);
-      const caption = readerSafeImageCaption(image.imageCaption);
-      if (caption) { const node = document.createElement("figcaption"); node.textContent = caption; figure.append(node); }
-      const anchor = anchors[Math.min(anchors.length - 1, Math.floor((index + 1) * anchors.length / (images.length + 1)))];
-      if (anchor) anchor.after(figure); else root.append(figure);
-    });
+    placeBookIllustrations(root, images.map((image, index) => ({
+      slotId: image.illustrationSlotId ?? `chapter-${chapter.id}-illustration-${index + 1}`,
+      placement: image.illustrationPlacement ?? "chapter-middle", anchorId: image.illustrationAnchorId,
+      imageUrl: image.imageUrl!, imageAlt: readerSafeImageCaption(image.imageAlt, `Illustration for ${chapter.title}`),
+      imageCaption: readerSafeImageCaption(image.imageCaption),
+    })));
     body = root.innerHTML;
   }
   return [{ body } as ImportedPage];
@@ -4270,15 +4257,17 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     await document.fonts?.ready;
     const source = document.createElement("div");
     source.innerHTML = flowingHtml;
-    source.querySelectorAll<HTMLElement>("figure.designer-full-figure").forEach((figure) => {
+    source.querySelectorAll<HTMLElement>("figure").forEach((figure) => {
       figure.classList.remove("designer-full-figure");
-      figure.style.height = "auto";
+      figure.style.setProperty("height", "auto", "important");
+      figure.style.minHeight = "0";
     });
     // In-flow artwork gets a bounded height during explicit reflow; its
     // caption remains inside the same indivisible figure.
     source.querySelectorAll<HTMLImageElement>("figure img").forEach((image) => {
-      image.style.maxHeight = `${Math.min(440, bookFormat(project.bookFormat).screenHeightPx * .42)}px`;
-      image.style.height = "auto"; image.style.maxWidth = "100%"; image.style.objectFit = "contain";
+      image.style.setProperty("max-height", `${Math.min(440, bookFormat(project.bookFormat).screenHeightPx * .42)}px`, "important");
+      image.style.setProperty("height", "auto", "important"); image.style.minHeight = "0";
+      image.style.maxWidth = "100%"; image.style.objectFit = "contain";
     });
     await Promise.all(Array.from(source.querySelectorAll("img")).map((image) => image.decode().catch(() => { throw new Error(`An illustration in ${chapter.title} could not load. Retry balancing after it loads.`); })));
     // Intrinsic dimensions reserve the same space immediately after innerHTML
@@ -4315,8 +4304,8 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     } finally { wrapper.remove(); }
   };
 
-  const balanceLayout = async (scope: "chapter" | "book") => {
-    const targetChapterIds = scope === "book" ? project.chapters.map((chapter) => chapter.id) : selected.chapterId ? [selected.chapterId] : [];
+  const balanceLayout = async (scope: "chapter" | "book", repairIds?: number[]) => {
+    const targetChapterIds = repairIds ?? (scope === "book" ? project.chapters.map((chapter) => chapter.id) : selected.chapterId ? [selected.chapterId] : []);
     if (!targetChapterIds.length) { setMessage("Choose a chapter page before balancing this chapter."); return; }
     setBusy(true);
     try {
@@ -4412,11 +4401,29 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     } finally { setBusy(false); }
   };
   useEffect(() => {
-    if (automaticLayoutStarted.current || busy || project.designerLayoutSnapshot || savedPages.some((page) => page.chapterId) || !project.chapters.length) return;
-    if (project.chapters.some((chapter) => !(chapter.status === "approved" || chapter.generationStatus === "Completed") || readerTextLength(chapter.body) < 100)) return;
+    if (automaticLayoutStarted.current || busy || !project.chapters.length) return;
+    if (project.chapters.some((chapter) => !(chapter.status === "approved" || chapter.generationStatus === "Completed"))) return;
     automaticLayoutStarted.current = true;
-    setMessage("Measuring text and illustrations for this book’s first layout…");
-    void balanceLayout("book");
+    const firstLayout = !project.designerLayoutSnapshot && !savedPages.some((page) => page.chapterId);
+    if (firstLayout) {
+      setMessage("Measuring text and illustrations for this book’s first layout…");
+      void balanceLayout("book"); return;
+    }
+    // Upgrade a saved overflowing illustration as soon as the book opens.
+    // Reflow itself excludes locked, blank and freely positioned compositions.
+    void (async () => {
+      await document.fonts?.ready;
+      const roots = Array.from(bookEditors.current.entries());
+      await Promise.all(roots.flatMap(([, root]) => Array.from(root.querySelectorAll("img")).map((image) => image.decode().catch(() => undefined))));
+      if (!roots.length || roots.some(([, root]) => !root.isConnected)) return;
+      const repairIds = [...new Set(roots.flatMap(([id, root]) => {
+        const page = orderedPages.find((page) => page.slotId === id);
+        if (!page?.chapterId || !root.querySelector("figure img")) return [];
+        const measured = measureBookContent(root);
+        return measured.overflowX || measured.overflowY ? [page.chapterId] : [];
+      }))];
+      if (repairIds.length) { setMessage("Fitting overflowing illustrations and their captions inside the printable pages…"); await balanceLayout("book", repairIds); }
+    })();
   }, [project.id, project.chapters]);
   const uploadBackground = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -4953,7 +4960,7 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     const found: string[] = []; const root = editor.current;
     if (draft.deleted) found.push("This page is removed from the final book.");
     if (draft.intentionalBlank) found.push("Intentional blank page — accepted.");
-    if (!draft.intentionalBlank && root && (measureBookContent(root).overflowX || measureBookContent(root).overflowY)) found.push("Text or objects overflow the printable page.");
+    if (!draft.intentionalBlank && root) found.push(...inspectBookPage(root));
     if (draft.fontSize < 11) found.push("Body text is smaller than the recommended print size.");
     root?.querySelectorAll("img").forEach((image) => {
       if (!image.getAttribute("alt")) found.push("An image is missing accessibility text.");
@@ -4973,13 +4980,10 @@ const DesignerStudio = forwardRef<DesignerStudioHandle, DesignerStudioProps>(fun
     orderedPages.forEach((page) => {
       const revision = revisionFor(page);
       if (revision.deleted || revision.intentionalBlank) return;
-      const html = bookEditors.current.get(page.slotId)?.innerHTML ?? revision.html;
       const root = bookEditors.current.get(page.slotId);
-      const measured = root ? measureBookContent(root) : pageMeasurements[page.slotId];
       const fill = fillForPage(page);
-      if (measured?.overflowX || measured?.overflowY) found.push({ slotId: page.slotId, label: page.label, issue: "Content crosses the page boundary or overlaps its footer." });
+      if (root) inspectBookPage(root).forEach((issue) => found.push({ slotId: page.slotId, label: page.label, issue }));
       if (fill.tone === "empty") found.push({ slotId: page.slotId, label: page.label, issue: `Only ${fill.ratio}% filled — balance this chapter.` });
-      if (/<h[23][^>]*>[^<]*<\/h[23]>\s*$/i.test(designerFlowBody(html))) found.push({ slotId: page.slotId, label: page.label, issue: "Heading is separated from its paragraph." });
     });
     setBookIssues(found); setBookChecked(true); setPanel("preflight");
     setMessage(found.length ? `${found.length} whole-book layout issue${found.length === 1 ? "" : "s"} found.` : "Whole-book preflight passed. No accidental empty or overflowing pages found.");

@@ -41,6 +41,7 @@ export type ExternalIllustrationSlot = {
   caption: string;
   imageIndex: number;
   placement: "cover" | "after-opening" | "chapter-middle" | "before-reflection";
+  anchorId?: string;
   status: "pending" | "ready" | "missing" | "failed" | "skipped";
   imageKey?: string;
   imageUrl?: string;
@@ -74,6 +75,8 @@ export type ExternalIllustrationArchiveResult = {
 export type ExternalPlacedReaderPage = {
   body: string;
   illustrationSlotId?: string;
+  illustrationPlacement?: "after-opening" | "chapter-middle" | "before-reflection";
+  illustrationAnchorId?: string;
   imageKey?: string;
   imageUrl?: string;
   imageCaption?: string;
@@ -342,6 +345,8 @@ export function assignIllustrationsToReaderPages(textPages: string[], slots: Ext
     return illustrations.map((slot, illustrationIndex) => ({
       body: illustrationIndex === 0 ? body : "",
       illustrationSlotId: slot.id,
+      illustrationPlacement: slot.placement === "cover" ? "after-opening" : slot.placement,
+      illustrationAnchorId: slot.anchorId,
       imageKey: slot.imageKey,
       imageUrl: slot.imageUrl,
       imageCaption: readerSafeImageCaption(slot.caption, slot.chapterTitle),

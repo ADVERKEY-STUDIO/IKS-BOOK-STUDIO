@@ -1,3 +1,5 @@
+import { hasPrivateProductionText } from "./publication";
+
 /** Geometry measured from the same publication surface in every view. */
 export function measureBookContent(content: HTMLElement) {
   const box = content.getBoundingClientRect();
@@ -81,7 +83,42 @@ export function refreshBookPageNumbers<T extends NumberedPage>(pages: T[], previ
 export function splitFlowBlock(html: string, accepts: (head: string) => boolean, doc: Document = document): [string, string] | null {
   const holder = doc.createElement("div"); holder.innerHTML = html;
   const element = holder.firstElementChild as HTMLElement | null;
-  if (!element || element.querySelector("img,figure,table,[style*='position:']")) return null;
+  if (!element) return null;
+  if (element.matches("section,div,article") && !element.matches(".designer-free-image,.designer-free-text,.designer-text-box")
+    && !/position\s*:\s*(absolute|fixed)|display\s*:\s*(grid|flex)/i.test(element.getAttribute("style") ?? "")) {
+    const children = Array.from(element.childNodes);
+    const serialize = (nodes: Node[], tail = false) => {
+      const wrapper = element.cloneNode(false) as HTMLElement;
+      if (tail) wrapper.removeAttribute("id");
+      nodes.forEach((node) => wrapper.append(node.cloneNode(true))); return wrapper.outerHTML;
+    };
+    const endsInHeading = (html: string) => {
+      const root = doc.createElement("div"); root.innerHTML = html;
+      let last = root.lastElementChild;
+      while (last?.matches("section,div,article")) last = last.lastElementChild;
+      return Boolean(last?.matches("h1,h2,h3,h4,h5,h6"));
+    };
+    for (let index = children.length - 1; index >= 0; index--) {
+      const prefix = children.slice(0, index);
+      const child = children[index];
+      const childHtml = child instanceof Element ? child.outerHTML : "";
+      const parts = childHtml && splitFlowBlock(childHtml, (head) => {
+        const fragment = doc.createElement("div"); fragment.innerHTML = head;
+        return accepts(serialize([...prefix, ...Array.from(fragment.childNodes)]));
+      }, doc);
+      if (parts) {
+        const head = doc.createElement("div"); head.innerHTML = parts[0];
+        const tail = doc.createElement("div"); tail.innerHTML = parts[1];
+        return [serialize([...prefix, ...Array.from(head.childNodes)]), serialize([...Array.from(tail.childNodes), ...children.slice(index + 1)], true)];
+      }
+      if (prefix.some((node) => node.textContent?.trim() || node instanceof Element && node.querySelector("img"))) {
+        const head = serialize(prefix);
+        if (!endsInHeading(head) && accepts(head)) return [head, serialize(children.slice(index), true)];
+      }
+    }
+    return null;
+  }
+  if (element.querySelector("img,figure,table,[style*='position:']")) return null;
   if (element.matches("table")) {
     // Rowspans need a dedicated table editor; never split through a merged cell.
     if (element.querySelector("[rowspan]")) return null;
@@ -235,6 +272,7 @@ export function assertFlowPreserved(before: string, after: string, doc: Document
 /** Issues that must be checked against the rendered page, including locked pages. */
 export function inspectBookPage(content: HTMLElement): string[] {
   const issues: string[] = [];
+  if (hasPrivateProductionText(content.textContent ?? "")) issues.push("This page contains private production text.");
   const geometry = measureBookContent(content);
   if (geometry.overflowX || geometry.overflowY) issues.push("Content crosses the printable area or overlaps the footer.");
   if (Array.from(content.querySelectorAll("img")).some((image) => !image.complete || !image.naturalWidth)) issues.push("An illustration has not loaded.");

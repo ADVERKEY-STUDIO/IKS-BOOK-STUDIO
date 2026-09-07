@@ -15,11 +15,13 @@ const browser = await engine.launch({ headless: true });
 after(async () => { await browser.close(); });
 const page = await browser.newPage();
 await page.setContent("<!doctype html><html><body></body></html>");
-await page.evaluate((code) => {
+const publicationCode = ts.transpileModule(readFileSync(resolve(repoRoot, "lib/publication.ts"), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+await page.evaluate(([code, publicationCode]) => {
+  const publication = {}; new Function("exports", publicationCode)(publication);
   const exports = {};
-  new Function("exports", code)(exports);
+  new Function("exports", "require", code)(exports, () => publication);
   globalThis.bookLayout = exports;
-}, source);
+}, [source, publicationCode]);
 
 test("flow extraction keeps nested story formatting, anchors, artwork and captions in authored order", async () => {
   const result = await page.evaluate(() => {
@@ -213,4 +215,9 @@ test("carrying a paragraph with an image also carries its heading", async () => 
     return blocks.reduce((sum,block)=>sum+(weights[block]??60),0)<=100;
   }));
   assert.equal(pages.length,2);assert.equal(pages[0],'<p>Opening</p>');assert.match(pages[1],/^<h3>New idea<\/h3><p>Related paragraph/);
+});
+
+test('rendered preflight flags private production text before export', async()=>{
+  const issues=await page.evaluate(()=>{const root=document.createElement('div');root.style.cssText='width:400px;height:600px;padding:30px';root.innerHTML='<p>[PRIVATE — illustration brief]</p>';document.body.append(root);const issues=bookLayout.inspectBookPage(root);root.remove();return issues;});
+  assert.ok(issues.some(issue=>/private production/i.test(issue)));
 });
