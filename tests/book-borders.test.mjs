@@ -42,6 +42,6 @@ test("selected borders reach editor, preview and print output", () => {
 });
 
 test("older saved books receive a safe border default", () => {
-  assert.match(page, /bookBorder\(cleanSaved\.bookBorder \?\? ""\)/);
+  assert.match(page, /bookBorder\(cleanSaved\.bookBorder \|\| "No Border"\)/);
   assert.match(page, /bookBorder: border\.value/);
 });

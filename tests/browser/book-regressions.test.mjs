@@ -63,9 +63,8 @@ test('page border None suppresses inherited ornamental borders in Designer and P
     const saved={...app.defaultDesignerRevision('<div class="preview-body"><p>A borderless saved page.</p></div>'),borderStyle:'none',slotId:'chapter-1-page-1',kind:'chapter',chapterId:1,pageIndex:0,label:'Chapter 1 · page 1',history:[]};
     return {bookBorder:'Lotus Arch',chapters:[chapter('<p>A borderless saved page.</p>')],designerPages:[saved],designerLayoutSnapshot:true};
   });
-  const borders=async selector=>run.page.locator(selector).evaluate(node=>[null,'::before','::after'].map(p=>{const s=getComputedStyle(node,p);return s.display==='none'?0:parseFloat(s.borderTopWidth)+(node.closest('.designer-flow-page.selected') && !p ? 0 : parseFloat(s.outlineWidth));}));
+  const borders=async selector=>run.page.locator(selector).evaluate(node=>[null,'::before','::after'].map(p=>{const s=getComputedStyle(node,p);return s.display==='none'?0:parseFloat(s.borderTopWidth)+(node.closest('.designer-flow-page.selected') && !p ? 0 : (s.outlineStyle === "none" ? 0 : parseFloat(s.outlineWidth)));}));
   try {
-    console.log(await run.page.locator('.designer-flow-page [data-page-slot="chapter-1-page-1"]').evaluate(n=>({class:n.className,parent:n.parentElement.className,b:getComputedStyle(n).borderTop,outline:getComputedStyle(n).outline})));
     assert.deepEqual(await borders('.designer-flow-page [data-page-slot="chapter-1-page-1"]'),[0,0,0]);
     await preview(run.page);
     assert.deepEqual(await borders('.pdf-render-stack [data-page-slot="chapter-1-page-1"]'),[0,0,0]);
