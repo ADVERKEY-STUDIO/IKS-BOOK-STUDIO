@@ -311,7 +311,7 @@ test("publication export requires approval and measured structural checks", () =
 test("Designer uses the final publication template and saves individual pages", () => {
   assert.match(page, /function designerBookClasses/);
   assert.match(page, /function designerPageClasses/);
-  assert.match(page, /designer-canvas-page book-sheet \$\{designerBookClasses\(project\)\} \$\{designerPageClasses\(project, page\)\}/);
+  assert.match(page, /designer-canvas-page book-sheet \$\{designerBookClasses\(project,[^}]+\)\} \$\{designerPageClasses\(project, page\)\}/);
   assert.match(page, /page\.backgroundImageUrl \? " has-background"/);
   assert.match(page, /style=\{bookContentStyle\(page, page\)\}/);
   assert.match(page, /savePageById = async/);

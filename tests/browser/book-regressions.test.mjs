@@ -57,3 +57,22 @@ test('an existing saved oversized in-flow illustration is repaired above the foo
   });
   try {await run.page.waitForFunction(()=>/balanced locally|Layout balancing failed/.test(document.body.innerText),{},{timeout:5000});assert.match(await preview(run.page),/0 blocking pages/);assert.equal(await run.page.locator('.pdf-render-stack figure img').count(),1);assert.equal(await run.page.locator('.pdf-render-stack figcaption').textContent(),'The scene remains with its caption.');} finally {await run.page.close();}
 });
+
+test('page border None suppresses inherited ornamental borders in Designer and Preview', options, async()=>{
+  const run=await open(()=>{
+    const saved={...app.defaultDesignerRevision('<div class="preview-body"><p>A borderless saved page.</p></div>'),borderStyle:'none',slotId:'chapter-1-page-1',kind:'chapter',chapterId:1,pageIndex:0,label:'Chapter 1 · page 1',history:[]};
+    return {bookBorder:'Lotus Arch',chapters:[chapter('<p>A borderless saved page.</p>')],designerPages:[saved],designerLayoutSnapshot:true};
+  });
+  const borders=async selector=>run.page.locator(selector).evaluate(node=>[null,'::before','::after'].map(p=>{const s=getComputedStyle(node,p);return s.display==='none'?0:parseFloat(s.borderTopWidth)+(node.closest('.designer-flow-page.selected') && !p ? 0 : parseFloat(s.outlineWidth));}));
+  try {
+    console.log(await run.page.locator('.designer-flow-page [data-page-slot="chapter-1-page-1"]').evaluate(n=>({class:n.className,parent:n.parentElement.className,b:getComputedStyle(n).borderTop,outline:getComputedStyle(n).outline})));
+    assert.deepEqual(await borders('.designer-flow-page [data-page-slot="chapter-1-page-1"]'),[0,0,0]);
+    await preview(run.page);
+    assert.deepEqual(await borders('.pdf-render-stack [data-page-slot="chapter-1-page-1"]'),[0,0,0]);
+  } finally {await run.page.close();}
+});
+
+test('an older book keeps its explicit No Border choice when its theme is inferred', options, async()=>{
+  const run=await open(()=>({bookPersona:undefined,bookBorder:'No Border',chapters:[chapter('<p>A short reader passage.</p>')]}));
+  try {await run.page.waitForFunction(()=>/balanced locally|Layout balancing failed/.test(document.body.innerText));assert.equal(run.project().bookBorder,'No Border');} finally {await run.page.close();}
+});
