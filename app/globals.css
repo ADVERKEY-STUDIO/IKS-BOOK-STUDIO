@@ -696,3 +696,21 @@ html[data-theme="scholar"] .paper{padding-left:84px !important;padding-right:84p
 .book-preflight-results button { display: block; text-align: left; margin: 6px 0; color: #783b22; }
 .book-publication .book-sheet .preview-body p:not([style*="font-family"]),
 .book-publication .book-sheet .preview-body li:not([style*="font-family"]) { font-family: inherit !important; }
+
+/* Source preservation preferences use the same setup cards as the book brief. */
+.source-book-options { margin: 20px 0; }
+.source-book-options h2 { margin: 8px 0; font: 25px/1.2 Georgia,serif; }
+.source-options-note { color: #586a63; font-size: 13px; line-height: 1.5; }
+.source-options-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 22px; }
+.source-book-options fieldset { min-width: 0; border: 1px solid #dcd3c4; padding: 16px; }
+.source-book-options legend { padding: 0 6px; font-weight: 700; font-size: 14px; }
+.source-book-options label { display: grid; gap: 7px; margin: 12px 0; font-size: 13px; }
+.source-book-options select,.source-book-options textarea { width: 100%; min-width: 0; padding: 9px; border: 1px solid #bdb7ab; background: white; color: #203c33; font: inherit; }
+.source-book-options textarea { resize: vertical; }
+.source-book-options .source-option-check { display: flex; align-items: flex-start; gap: 9px; line-height: 1.5; }
+.source-option-check input { flex: 0 0 auto; width: 16px; height: 16px; margin: 2px 0 0; accent-color: #245749; }
+.source-book-options p,.source-book-options small { font-size: 12px; line-height: 1.5; color: #586a63; }
+.source-book-options fieldset:disabled { opacity: .55; }
+.source-book-options summary { cursor: pointer; font-size: 13px; margin: 12px 0; }
+.assistant .source-options-grid { grid-template-columns: minmax(0,1fr); }
+@media(max-width:760px) { .source-options-grid { grid-template-columns: minmax(0,1fr); } }

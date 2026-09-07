@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,7 +44,7 @@ function loadSource(filename) {
     if (specifier === "react/jsx-runtime") return { jsx, jsxs: jsx, Fragment: "fragment" };
     if (specifier.startsWith(".")) {
       const imported = resolve(dirname(filename), specifier);
-      return loadSource(/\.tsx?$/.test(imported) ? imported : `${imported}.ts`);
+      return loadSource(/\.tsx?$/.test(imported) ? imported : existsSync(`${imported}.ts`) ? `${imported}.ts` : `${imported}.tsx`);
     }
     return require(specifier);
   };

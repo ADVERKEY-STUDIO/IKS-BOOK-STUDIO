@@ -29,7 +29,17 @@ test('source selection and real manuscript/image ZIP uploads produce a publishab
     const source=await PDFDocument.create();source.addPage().drawText('A garden teaches careful observation, patience and thoughtful action.');
     await page.locator('.wizard-main input[type=file]').setInputFiles({name:'Garden source.pdf',mimeType:'application/pdf',buffer:Buffer.from(await source.save())});
     await page.getByLabel('New book title').fill('Garden ZIP workflow');
-    for(let i=0;i<3;i++)await page.getByRole('button',{name:'Continue →',exact:true}).click();
+    for(let i=0;i<2;i++)await page.getByRole('button',{name:'Continue →',exact:true}).click();
+    await page.getByLabel('Image source',{exact:true}).selectOption('hybrid');
+    await page.getByLabel('Source image enhancement',{exact:true}).selectOption('clean');
+    await page.getByLabel('Illustration style',{exact:true}).selectOption('custom');
+    await page.getByLabel('Describe your custom style').fill('Fine ink outlines with muted earth colours.');
+    await page.getByLabel('Preserve Sanskrit ślokas from the source').check();
+    await page.getByLabel('Roman transliteration').check();
+    await page.getByLabel('Translation in the book’s language').uncheck();
+    if(process.env.IKS_EVIDENCE_DIR){mkdirSync(process.env.IKS_EVIDENCE_DIR,{recursive:true});await page.locator('.source-book-options').screenshot({path:resolve(process.env.IKS_EVIDENCE_DIR,'source-options.png')});}
+    await page.getByRole('button',{name:'Continue →',exact:true}).click();
+    assert.match(await page.getByRole('region',{name:'Source image and Sanskrit choices'}).innerText(), /Fine ink outlines/);
     await page.getByRole('button',{name:'Create AI manuscript request →',exact:true}).click();
     const story=Array.from({length:10},(_,i)=>`Observation ${i}. ${'Children compare seeds, record what they see and consider how the garden changes. '.repeat(5)}`).join('\n\n');
     const manuscript=zipSync({
@@ -42,6 +52,8 @@ test('source selection and real manuscript/image ZIP uploads produce a publishab
     await page.getByRole('button',{name:'Accept manuscript & create image prompt',exact:true}).click();
     await page.locator('.bulk-image-upload input[type=file]').waitFor({state:'attached'});
     assert.equal(project.title,'Garden ZIP workflow');assert.equal(project.chapters.length,4);
+    const choices={imageMode:'hybrid',enhancement:'clean',imageStyle:'custom',customStyle:'Fine ink outlines with muted earth colours.',preserveSlokas:true,transliteration:true,translation:false,explanation:true,chapterStyles:{}};
+    assert.deepEqual(project.sourceBookOptions,choices);
     const slots=project.externalIllustrations.slots;
     const art=await page.evaluate(count=>Array.from({length:count},(_,i)=>{const c=document.createElement('canvas');c.width=i%2?1800:2200;c.height=i%2?2200:1600;const x=c.getContext('2d');x.fillStyle=['#c0a779','#88a86c','#9bacc9','#c99c88'][i%4];x.fillRect(0,0,c.width,c.height);x.fillStyle='#244233';x.fillRect(100,100,150,200);return c.toDataURL();}),slots.length);
     const images=Object.fromEntries(slots.map((slot,i)=>[slot.filename.replace(/\.jpe?g$/i,'.png'),Buffer.from(art[i].split(',')[1],'base64')]));
@@ -61,6 +73,6 @@ test('source selection and real manuscript/image ZIP uploads produce a publishab
     const pdf=await PDFDocument.load(readFileSync(file));assert.equal(pdf.getPageCount(),count);
     if(process.env.IKS_EVIDENCE_DIR){mkdirSync(process.env.IKS_EVIDENCE_DIR,{recursive:true});await download.saveAs(resolve(process.env.IKS_EVIDENCE_DIR,'zip-workflow.pdf'));}
     await page.reload();await page.getByRole('button',{name:/CHAPTERS.*Garden ZIP workflow/}).click();await page.locator('.designer-flow-page').first().waitFor();
-    assert.equal(await page.locator('.designer-flow-page').count(),count);assert.deepEqual(errors,[]);
+    assert.equal(await page.locator('.designer-flow-page').count(),count);assert.deepEqual(project.sourceBookOptions,choices);assert.deepEqual(errors,[]);
   } finally {await browser.close();}
 });

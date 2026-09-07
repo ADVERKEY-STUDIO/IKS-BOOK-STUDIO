@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve, dirname } from 'node:path';
 
@@ -13,7 +13,7 @@ function load(file) {
   const module = { exports: {} }; modules.set(file, module);
   const source = readFileSync(file, 'utf8') + (file.endsWith('/app/page.tsx') ? '\nexport { emptyProject };' : '');
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
-  new Function('require', 'module', 'exports', code)(name => name.startsWith('.') ? load(resolve(dirname(file), /\.tsx?$/.test(name) ? name : name + '.ts')) : require(name), module, module.exports);
+  new Function('require', 'module', 'exports', code)(name => name.startsWith('.') ? load(resolve(dirname(file), /\.tsx?$/.test(name) ? name : existsSync(resolve(dirname(file),name+'.ts')) ? name+'.ts' : name+'.tsx')) : require(name), module, module.exports);
   return module.exports;
 }
 
