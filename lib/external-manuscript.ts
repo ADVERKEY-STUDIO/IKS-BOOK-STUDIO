@@ -1,7 +1,10 @@
+import { normalizeSourceBookOptions, sourceImageStyles, type SourceBookOptions } from "./source-book-options.ts";
+import { sourceManifestContract, type SourceBookManifest } from "./source-book-package.ts";
 import { authorialReaderHtml, readerFacingChapterTitle } from "./child-summary.ts";
 import { readerSafeImageCaption } from "./publication.ts";
 
 export type ExternalManuscriptSettings = {
+  sourceBookOptions?: SourceBookOptions;
   title: string;
   sourceName: string;
   audience: string;
@@ -24,6 +27,7 @@ export type ExternalManuscriptSection = {
 };
 
 export type ExternalManuscriptResult = {
+  sourceManifest?: SourceBookManifest;
   title: string;
   sections: ExternalManuscriptSection[];
   issues: string[];
@@ -31,6 +35,8 @@ export type ExternalManuscriptResult = {
 };
 
 export type ExternalIllustrationSlot = {
+  sourceImageId?: string;
+  sourcePage?: number;
   id: string;
   role: "cover" | "chapter";
   chapterId?: number;
@@ -107,6 +113,7 @@ export function manuscriptMarkdownToHtml(value: string) {
   const output: string[] = [];
   let paragraph: string[] = [];
   let list: "ul" | "ol" | null = null;
+  let verseBlock: {id:string;lines:string[]} | undefined;
   const flushParagraph = () => {
     if (!paragraph.length) return;
     output.push(`<p>${inlineMarkdown(paragraph.join(" "))}</p>`);
@@ -119,6 +126,13 @@ export function manuscriptMarkdownToHtml(value: string) {
   };
   for (const sourceLine of lines) {
     const line = cleanLine(sourceLine);
+    if(verseBlock){
+      if(line === ":::"){output.push(`<div data-source-verse-block="${verseBlock.id}">${escapeHtml(verseBlock.lines.join("\n")).replace(/\n/g,"<br>")}</div>`);verseBlock=undefined;}
+      else verseBlock.lines.push(sourceLine);
+      continue;
+    }
+    const verseStart=line.match(/^:::sloka ([A-Za-z][A-Za-z0-9_-]{0,79})$/);
+    if(verseStart){flushParagraph();closeList();verseBlock={id:verseStart[1],lines:[]};continue;}
     if (!line) { flushParagraph(); closeList(); continue; }
     const heading = line.match(/^(#{1,4})\s+(.+)$/);
     if (heading) {
@@ -138,6 +152,7 @@ export function manuscriptMarkdownToHtml(value: string) {
     }
     paragraph.push(line);
   }
+  if(verseBlock)throw new Error(`Sanskrit block ${verseBlock.id} needs a closing ::: line.`);
   flushParagraph(); closeList();
   return output.join("");
 }
@@ -280,6 +295,8 @@ export function upgradeExternalIllustrationSlots(
   chapters: Array<{ id: number; title: string; body?: string; wordCount?: number }>,
   existingSlots: ExternalIllustrationSlot[],
 ) {
+  const sourceSlots = existingSlots.filter(slot => slot.sourceImageId);
+  existingSlots = existingSlots.filter(slot => !slot.sourceImageId);
   const cover = existingSlots.find((slot) => slot.role === "cover");
   const upgraded: ExternalIllustrationSlot[] = cover ? [{
     ...cover,
@@ -324,7 +341,7 @@ export function upgradeExternalIllustrationSlots(
       });
     }
   }
-  return upgraded;
+  return [...upgraded, ...sourceSlots];
 }
 
 export function assignIllustrationsToReaderPages(textPages: string[], slots: ExternalIllustrationSlot[]): ExternalPlacedReaderPage[] {
@@ -369,7 +386,7 @@ function rasterMimeType(bytes: Uint8Array): ExternalIllustrationArchiveMatch["mi
 }
 
 export function matchExternalIllustrationArchive(entries: ExternalIllustrationArchiveEntry[], slots: ExternalIllustrationSlot[]): ExternalIllustrationArchiveResult {
-  if (entries.length > 100) return { matches: slots.map((slot) => ({ slotId: slot.id, error: "Archive contains too many files" })), issues: ["The ZIP contains too many files (maximum 100)."] };
+  if (entries.length > 600) return { matches: slots.map((slot) => ({ slotId: slot.id, error: "Archive contains too many files" })), issues: ["The ZIP contains too many files (maximum 600)."] };
   const unpackedBytes = entries.reduce((sum, entry) => sum + entry.bytes.byteLength, 0);
   if (unpackedBytes > 100 * 1024 * 1024) return { matches: slots.map((slot) => ({ slotId: slot.id, error: "Archive exceeds safe unpacked size" })), issues: ["The unpacked ZIP is larger than the safe 100 MB limit."] };
 
@@ -400,6 +417,7 @@ export function matchExternalIllustrationArchive(entries: ExternalIllustrationAr
 }
 
 export function buildExternalAiPrompt(settings: ExternalManuscriptSettings) {
+  const sourceOptions = normalizeSourceBookOptions(settings.sourceBookOptions);
   return `# IKS BOOK STUDIO — EXTERNAL AI MANUSCRIPT REQUEST
 
 You are the author and developmental editor of a source-faithful illustrated children’s book.
@@ -422,7 +440,7 @@ Write like the book’s author. Never tell the child that text came from an uplo
 Choose the shortest complete structure that explains the source well. Keep genuine chapters in logical order, but combine tiny source subsections when that improves the child’s book. Every chapter must have its own narrative purpose, concrete moments and examples. This first request creates the complete reader manuscript plus a private scene brief for each chapter; Book Studio will turn those briefs into separately runnable image prompts after approval.
 
 ## REQUIRED OUTPUT
-Return one complete Markdown manuscript. Do not return JSON. If the complete manuscript is too large for one response, create a downloadable ZIP containing 00-Introduction.md, numbered chapter files, Conclusion.md and Glossary.md. Do not shorten later chapters to fit a response limit.
+Return a downloadable ZIP containing 00-Introduction.md, numbered chapter files, Conclusion.md, Glossary.md and source-manifest.json. The reader manuscript is Markdown; the separate JSON manifest preserves source evidence. Do not shorten later chapters to fit a response limit.
 
 Use this exact heading system:
 
@@ -451,6 +469,13 @@ Use this exact heading system:
 # GLOSSARY
 [Important terms in alphabetical order]
 
+## SOURCE VERSES AND IMAGES
+${sourceManifestContract()}
+
+${sourceOptions.preserveSlokas ? `Include relevant Sanskrit ślokas that actually occur in the uploaded source, near the adapted passage they clarify. Preserve their wording, line breaks, verse numbers and attribution. Do not add unrelated verses or sacred quotations from memory. Roman transliteration: ${sourceOptions.transliteration ? "include" : "omit"}. Translation into ${settings.language}: ${sourceOptions.translation ? "include" : "omit"}. Age-appropriate explanation: ${sourceOptions.explanation ? "include" : "omit"}. Keep all companion text separate from the Sanskrit.` : "Do not request extra Sanskrit verses. Preserve any source quotation needed for faithful prose; do not invent quotations."}
+
+Image policy: ${sourceOptions.imageMode === "generate" ? "Generate new illustrations; sourceImages may be empty when source reuse is not requested." : "Retain the normal new-illustration briefs AND catalogue relevant images from the uploaded source. Extract original raster images when your tools support it; do not redraw an original and label it extracted. The illustration stage adds original and cleaned-source folders alongside normal new illustrations. Select by meaning and nearby context, not decoration. Keep useful unplaced source pictures in their folder. If extraction is unavailable, report it explicitly."}
+
 ## QUALITY RULES
 - Each chapter must be substantial enough for approximately 2–5 designed pages.
 - Keep paragraphs connected; do not write disconnected bullet-point filler.
@@ -461,8 +486,8 @@ Use this exact heading system:
 - Frame historically loaded social labels with care. Prefer “Varna: Roles and Responsibilities”, “relationships of guidance”, “peers”, and “those in our care” in reader-facing headings; explain original terms accurately inside the discussion.
 - Avoid the mechanical subject “This chapter…”. State ideas directly and vary sentence openings. Never begin a sentence with lowercase “this chapter”.
 - Never include commentary about preserving, modernising, adapting, sanitising or making the source suitable for children. Those are editor decisions, not reader prose.
-- Do not generate or embed images in this manuscript response. Include only the private ILLUSTRATION BRIEF requested above; do not include image links, SVG artwork, diagrams or visible illustration placeholders.
-- Do not include citations inside child-facing prose. If useful, add a final private heading “## SOURCE COVERAGE NOTES” inside each chapter; Book Studio will remove it from the printed book.
+- Do not generate new illustrations or embed images in the manuscript text. Keep the private ILLUSTRATION BRIEF for normal new artwork. Source-image files and their manifest are separate from reader prose; do not print image links or placeholders.
+- Preserve original verse attribution and verse numbers alongside Sanskrit quotations. For other citations, add a final private heading “## SOURCE COVERAGE NOTES” inside each chapter; Book Studio will remove it from the printed book.
 - Use only two recurring learning blocks—KEY TERMS and THINK IT THROUGH. Do not add “In This Chapter”, “You Will Learn” or “Chapter Recap” blocks.
 - Check the complete manuscript for missing chapters, repeated “This chapter” openings, editorial commentary, contradictions and abrupt endings before returning it.
 
@@ -477,7 +502,7 @@ export function buildExternalIllustrationPrompt(project: ExternalIllustrationPro
   const requests = project.slots.map((slot, index) => {
     const chapter = project.chapters.find((item) => item.id === slot.chapterId);
     const context = plainReaderText(chapter?.body || chapter?.context || "").slice(0, 1800);
-    const dimensions = slot.role === "cover" ? "portrait A4, 2480 × 3508 px, full bleed" : "landscape 4:3, 2400 × 1800 px";
+    const dimensions = slot.sourceImageId ? "Preserve the original aspect ratio and all source details; no forced crop" : slot.role === "cover" ? "portrait A4, 2480 × 3508 px, full bleed" : "landscape 4:3, 2400 × 1800 px";
     return `## ${index + 1}. ${slot.id} — ${slot.role === "cover" ? "FRONT COVER" : slot.chapterTitle}
 - Exact ZIP path: ${slot.filename}
 - Automatic book placement: ${(slot.placement || (slot.role === "cover" ? "cover" : "chapter-middle")).replace(/-/g, " ")}
@@ -492,11 +517,14 @@ ${slot.role === "cover" ? `- Book subject: ${project.title}` : `- Chapter contex
 
 The manuscript for “${project.title}” is complete and approved. This file is the art bible and destination manifest. Do not attempt the complete queue in one response. Open the separate prompt file for each destination and perform one real image-generation operation at a time. Download every result with its exact filename, then place all completed files in one \`images\` folder and ZIP that folder for automatic placement by Book Studio.
 
+## SOURCE IMAGE COMPANION PACKAGE
+${sourceImageInstructions(project)}
+
 ## BOOK ART BIBLE
 - Reader: ${project.audience} (${project.readingLevel})
 - Language and cultural context: ${project.language}
 - Book world: ${project.aesthetic}
-- Required illustration direction: ${project.illustrationStyle}
+- Required illustration direction: ${requestedImageStyle(project)}
 - Keep recurring people, clothing, architecture, materials, palette and rendering style consistent throughout the entire package.
 - Every scene must show a specific place, people, action, focal point, lighting and meaningful background details grounded in its chapter context.
 - Use culturally and historically respectful details. Do not invent sacred symbols, historical claims or costumes that the chapter does not support.
@@ -518,7 +546,7 @@ ${requests}
 
 ## REQUIRED ZIP TREE
 
-Create exactly these image paths at the root of the ZIP:
+Create these normal illustration paths, plus the declared source-image folders, at the root of the ZIP:
 
 ${zipTree}
 
@@ -530,13 +558,14 @@ ${zipTree}
 - A JPG slot may instead use the same path stem with \`.png\` or \`.webp\` when the image tool cannot export JPG. Do not change any other part of the filename.
 - Do not create substitute files, thumbnails, icons, diagrams, contact sheets, SVGs, text descriptions or fake image placeholders.
 - Open and visually inspect each result before moving to the next prompt. Confirm that it is a distinct, complete editorial illustration matching its destination.
-- Put only the requested finished images in one ZIP named \`${zipName}\`.
+- Keep source-images/ originals and cleaned-source-images/ copies alongside images/ new artwork, including unplaced source images and source-manifest.json. Source diagrams and existing labels must be preserved faithfully; the restrictions on invented diagrams and text apply only to NEW artwork. Put the complete package in one ZIP named \`${zipName}\`.
 - The external image tool returns one image per prompt; the designer creates the final ZIP only after every required file exists.
 
 Use the numbered prompt files now. When the queue is complete, package the exact files as \`${zipName}\` and upload it to Book Studio for automatic placement.`;
 }
 
 export function buildExternalIllustrationSlotPrompt(project: ExternalIllustrationPromptProject, slot: ExternalIllustrationSlot) {
+  if (slot.sourceImageId) return `SOURCE IMAGE ${slot.sourceImageId} — use the actual uploaded source page ${slot.sourcePage}.\n${sourceImageInstructions(project)}\nDestination: ${slot.filename}. Preserve source details and labels. Never generate a substitute original. Context: ${slot.sceneBrief}. Caption: ${slot.caption}. Placement anchor: ${slot.anchorId}.`;
   const chapter = project.chapters.find((item) => item.id === slot.chapterId);
   const context = plainReaderText(chapter?.body || chapter?.context || "").slice(0, 3200);
   const dimensions = slot.role === "cover" ? "portrait A4 composition, 2480 × 3508 px, full bleed" : "landscape 4:3 composition, 2400 × 1800 px";
@@ -546,7 +575,7 @@ DESTINATION: ${slot.id} — ${slot.role === "cover" ? "FRONT COVER" : slot.chapt
 EXACT OUTPUT FILENAME: ${slot.filename}
 BOOK PLACEMENT: ${(slot.placement || (slot.role === "cover" ? "cover" : "chapter-middle")).replace(/-/g, " ")}
 FORMAT: ${dimensions}
-STYLE: ${project.illustrationStyle}; ${project.aesthetic}; coherent with the same book’s previously approved images.
+STYLE: ${requestedImageStyle(project, slot.chapterId)}; ${project.aesthetic}; coherent with the same book’s previously approved images.
 READER: ${project.audience} (${project.readingLevel})
 SCENE: ${slot.sceneBrief}
 ${slot.role === "cover" ? `BOOK SUBJECT: ${project.title}` : `CHAPTER CONTEXT: ${context}`}
@@ -573,5 +602,18 @@ export function buildExternalIllustrationPromptPack(project: ExternalIllustratio
     path: `prompts/${String(index + 1).padStart(3, "0")}-${slot.id}.md`,
     content: buildExternalIllustrationSlotPrompt(project, slot),
   }));
-  return { manifest, prompts };
+  return { manifest, prompts: normalizeSourceBookOptions(project.sourceBookOptions).imageMode === "generate" ? prompts : [...prompts, {slotId:"SOURCE-ASSETS",path:"prompts/source-images-companion.md",content:sourceImageInstructions(project)}] };
+}
+
+function requestedImageStyle(project: ExternalManuscriptSettings, chapterId?:number) {
+  const o=normalizeSourceBookOptions(project.sourceBookOptions);const style=chapterId ? o.chapterStyles[String(chapterId)] || o.imageStyle : o.imageStyle;
+  return style === "book" ? project.illustrationStyle : style === "custom" ? o.customStyle || project.illustrationStyle : sourceImageStyles.find(s=>s.value===style)?.label || project.illustrationStyle;
+}
+function sourceImageInstructions(project:ExternalManuscriptSettings) {
+  const o=normalizeSourceBookOptions(project.sourceBookOptions);
+  return `${o.imageMode === "generate" ? "Source reuse is not selected; keep the normal new-illustration queue." : "Generate the normal new illustrations AND return source-book images as a separate companion set. Upload the actual source PDF and manuscript manifest to this conversation. Reuse MULTIPLE relevant source images per chapter when they explain different passages; do not impose a one-picture limit. Retain unplaced extracted pictures in their own folder."}
+Treatment: ${o.enhancement === "original" ? "Keep original bytes unchanged; omit cleaned copies." : o.enhancement === "clean" ? "Keep originals unchanged and create gently cleaned/upscaled copies. Remove scanning noise and improve clarity only; preserve labels, numbers, symbols, geometry, faces and factual details." : "Keep originals unchanged. Restyle only images explicitly selected for restyling; preserve their factual details and labels. Otherwise use light cleaning only."}
+Source pictures must match the actual passage: record sourcePage, caption, alt, exact anchorText and a relevance reason. Do not insert unrelated artwork simply to fill space. Never substitute generated pictures for failed extractions. If source access, extraction or file export is unavailable, report it explicitly in extractionNotes.
+${sourceManifestContract()}
+Use the approved source-manifest.json without changing its verse text, IDs, chapter mapping or anchors. Return images/ (normal new artwork), source-images/ (originals), cleaned-source-images/ (real cleaned copies) and source-manifest.json in one ZIP. Preserve the original source captions and diagram labels even though normal new illustrations do not contain text. Keep all source images, including those with placements:[], in these separate folders.`;
 }

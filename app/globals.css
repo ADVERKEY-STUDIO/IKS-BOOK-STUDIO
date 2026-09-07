@@ -714,3 +714,7 @@ html[data-theme="scholar"] .paper{padding-left:84px !important;padding-right:84p
 .source-book-options summary { cursor: pointer; font-size: 13px; margin: 12px 0; }
 .assistant .source-options-grid { grid-template-columns: minmax(0,1fr); }
 @media(max-width:760px) { .source-options-grid { grid-template-columns: minmax(0,1fr); } }
+
+.source-verse { margin: 1em 0; }
+.source-verse .sanskrit-verse { font-family: "Noto Serif Devanagari", "Nirmala UI", "Kohinoor Devanagari", serif; line-height: 1.8; white-space: normal; }
+.source-verse .verse-reference { font-weight: 700; }

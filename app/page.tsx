@@ -3,6 +3,7 @@
 import { ChangeEvent, CSSProperties, forwardRef, MouseEvent as ReactMouseEvent, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { SourceBookOptions, SourceBookOptionsReview } from "./components/source-book-options";
 import { normalizeSourceBookOptions, type SourceBookOptions as SourceBookSettings } from "../lib/source-book-options";
+import { attachSourceBookManifest, parseSourceBookManifest, sourceImageSlots, type SourceBookManifest, type SourceArchiveAsset } from "../lib/source-book-package";
 import { strToU8, unzipSync, zipSync } from "fflate";
 import { jsPDF } from "jspdf";
 import { placeBookIllustrations } from "../lib/book-illustrations";
@@ -207,6 +208,8 @@ type DesignerPageOverride = DesignerPageRevision & {
 type DesignerStylePreset = { id: string; name: string; style: Partial<DesignerPageRevision> };
 
 type Project = {
+  sourceManifest?: SourceBookManifest;
+  sourceAssets?: SourceArchiveAsset[];
   sourceBookOptions?: SourceBookSettings;
   id: string;
   title: string;
@@ -334,6 +337,7 @@ async function canvasToJpegBytes(canvas: HTMLCanvasElement, quality: number) {
   return new Uint8Array(await blob.arrayBuffer());
 }
 
+type SourceImageUpload = {path:string;file:File};
 type ExternalIllustrationCandidate = {
   slotId: string;
   file?: File;
@@ -580,6 +584,7 @@ seedProject = {
 
 const emptyProject: Project = {
   ...seedProject,
+  sourceBookOptions: normalizeSourceBookOptions({imageMode:"hybrid",enhancement:"clean",preserveSlokas:true}),
   id: "",
   title: "Untitled adaptation",
   source: "No source selected",
@@ -1679,13 +1684,15 @@ export default function Home() {
         generationRuns: [],
       };
     });
-    const illustrationSlots = createExternalIllustrationSlots(result, project.title);
+    const illustrationSlots = [...createExternalIllustrationSlots(result, project.title), ...(result.sourceManifest ? sourceImageSlots(result.sourceManifest,result.sections) : [])];
+    if(new Set(illustrationSlots.map(slot=>slot.id)).size!==illustrationSlots.length)throw new Error("Source placement IDs must not overlap the generated illustration IDs. Rename them in the source manifest.");
     const persona = inferBookPersona({ title: result.title || project.title, sourcePreview: result.sections.map((section) => `${section.title} ${section.raw.slice(0, 220)}`).join(" "), sourceHeadings: result.sections.map((section) => readerFacingChapterTitle(section.title)), bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
     const nextBase: Project = {
       ...project,
       title: project.title.trim() || result.title,
       sourceHeadings: result.sections.map((section) => readerFacingChapterTitle(section.title)),
       sourceWords: result.words,
+      sourceManifest: result.sourceManifest, sourceAssets: [],
       sourceQuality: result.issues.length ? "Imported with review notes" : "External manuscript verified",
       sourcePreview: result.sections.map((section) => section.raw).join(" ").slice(0, 8000),
       sourceSections: result.sections.map((section, index) => ({ title: readerFacingChapterTitle(section.title), page: index + 1, excerpt: section.raw.replace(/[#*_]/g, " ").replace(/\s+/g, " ").slice(0, 240) })),
@@ -1708,10 +1715,19 @@ export default function Home() {
     notify(`${next.chapters.length} ordered manuscript sections imported. The sequential illustration prompt pack is now ready.`);
   }
 
-  async function importExternalIllustrations(candidates: ExternalIllustrationCandidate[], importIssues: string[]) {
+  async function importExternalIllustrations(candidates: ExternalIllustrationCandidate[], importIssues: string[], sourceFiles: SourceImageUpload[] = []) {
     const currentSlots = project.externalIllustrations?.slots ?? [];
     const uploaded = new Map<string, { key: string; url: string; sourcePath: string }>();
     const uploadErrors: string[] = [];
+    const sourceAssets = new Map((project.sourceAssets ?? []).map(asset=>[asset.path,asset]));
+    for (const source of sourceFiles) {
+      try { const form=new FormData();form.set("file",source.file);form.set("projectId",project.id);
+        const response=await fetch("/api/image",{method:"POST",headers:ownerHeaders(),body:form});
+        const data=await response.json() as {image?:{key:string;url:string};error?:string};
+        if(!response.ok||!data.image)throw new Error(data.error||"Source image upload failed");
+        sourceAssets.set(source.path,{path:source.path,...data.image});
+      } catch(error) {uploadErrors.push(`${source.path}: ${error instanceof Error ? error.message : "Source image upload failed"}`);}
+    }
     for (const candidate of candidates.filter((item) => item.decision === "accept" && item.file)) {
       try {
         const form = new FormData();
@@ -1791,7 +1807,7 @@ export default function Home() {
       designerPages = designerPages.map((page) => containers.has(page.slotId) ? { ...page, html: containers.get(page.slotId)!.innerHTML, savedAt: new Date().toISOString() } : page);
     }
     const issues = [...importIssues, ...uploadErrors, ...slots.filter((slot) => slot.status === "missing" || slot.status === "failed").map((slot) => `${slot.id}: ${slot.error || "Illustration unresolved"}`)];
-    const next: Project = { ...project, chapters, designerPages, externalIllustrations: { ...project.externalIllustrations!, importedAt: new Date().toISOString(), issues, slots }, updatedAt: "Just now" };
+    const next: Project = { ...project, chapters, designerPages, sourceAssets:[...sourceAssets.values()], externalIllustrations: { ...project.externalIllustrations!, importedAt: new Date().toISOString(), issues, slots }, updatedAt: "Just now" };
     setProject(next);
     await persistProject(next);
     if (uploadErrors.length) throw new Error(`${uploadErrors.length} illustrations could not be uploaded. Successfully uploaded images were saved; retry the failed slots.`);
@@ -2884,7 +2900,7 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
   project: Project;
   onBack: () => void;
   onReplaceManuscript: () => void;
-  onImport: (candidates: ExternalIllustrationCandidate[], issues: string[]) => Promise<void>;
+  onImport: (candidates: ExternalIllustrationCandidate[], issues: string[], sourceFiles?: SourceImageUpload[]) => Promise<void>;
   onOpenDesigner: () => void;
   onNotify: (message: string) => void;
 }) {
@@ -2898,6 +2914,7 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
     bookType: project.bookType,
     aesthetic: project.aesthetic,
     illustrationStyle: project.illustrationStyle,
+    sourceBookOptions: project.sourceBookOptions,
     learningFeatures: project.learningFeatures,
     chapters: project.chapters.map((chapter) => ({ id: chapter.id, title: chapter.title, body: chapter.body, context: chapter.context })),
     slots,
@@ -2911,6 +2928,7 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
   const downloadPrompt = () => {
     const archive = zipSync({
       "00-READ-ME-FIRST.md": strToU8(promptPack.manifest),
+      ...(project.sourceManifest ? {"source-manifest.json":strToU8(JSON.stringify(project.sourceManifest,null,2))} : {}),
       ...Object.fromEntries(promptPack.prompts.map((item) => [item.path, strToU8(item.content)])),
     }, { level: 6 });
     const href = URL.createObjectURL(new Blob([archive.slice().buffer], { type: "application/zip" }));
@@ -2920,6 +2938,20 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
     anchor.click();
     URL.revokeObjectURL(href);
     onNotify(`${promptPack.prompts.length} one-image prompts downloaded with the placement manifest`);
+  };
+  const downloadSourceImages = async () => {
+    setBusy(true);
+    try {
+      const files:Record<string,Uint8Array>={"source-manifest.json":strToU8(JSON.stringify(project.sourceManifest,null,2))};
+      for(const asset of project.sourceAssets ?? []) {
+        const response=await fetch(asset.url,{headers:ownerHeaders()});
+        if(!response.ok)throw new Error(`Could not download ${asset.path}. Retry when the image is available.`);
+        files[asset.path]=new Uint8Array(await response.arrayBuffer());
+      }
+      const href=URL.createObjectURL(new Blob([zipSync(files).slice().buffer],{type:"application/zip"}));
+      const link=document.createElement("a");link.href=href;link.download="source-book-images.zip";link.click();URL.revokeObjectURL(href);
+    } catch(error){onNotify(error instanceof Error?error.message:"Source images could not be downloaded");}
+    finally {setBusy(false);}
   };
   const copyPrompt = async () => {
     await navigator.clipboard.writeText(prompt);
@@ -2964,7 +2996,22 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
         : "";
       const wrapperIsShared = Boolean(commonWrapper) && illustrationPaths.every(([path]) => path.startsWith(commonWrapper));
       const entries = archiveEntries.map(([path, bytes]) => ({ path: wrapperIsShared && path.startsWith(commonWrapper) ? path.slice(commonWrapper.length) : path, bytes }));
+      const manifestEntry = entries.find(entry=>entry.path === "source-manifest.json");
+      if(manifestEntry) {
+        const supplied=parseSourceBookManifest(JSON.parse(new TextDecoder().decode(manifestEntry.bytes)));
+        if(!project.sourceManifest || JSON.stringify(supplied)!==JSON.stringify(project.sourceManifest))throw new Error("The source manifest differs from the approved manuscript. Import the updated manuscript package first.");
+      }
+      const declaredPaths=new Set((project.sourceManifest?.sourceImages ?? []).flatMap(image=>[image.originalPath,image.cleanedPath].filter((path):path is string=>Boolean(path))));
+      const sourceFiles: SourceImageUpload[]=[];
+      const sourceErrors:string[]=[];
+      for(const path of declaredPaths){
+        const check=matchExternalIllustrationArchive(entries,[{...slots[0],id:path,filename:path}]).matches[0];
+        if(check?.bytes&&check.mimeType&&!check.error)sourceFiles.push({path,file:new File([check.bytes.slice().buffer],path.split("/").pop()!,{type:check.mimeType})});
+        else sourceErrors.push(check?.error || `Missing source image ${path}`);
+      }
+      if(sourceErrors.length)throw new Error(sourceErrors.join(" "));
       const result = matchExternalIllustrationArchive(entries, slots);
+      result.issues=result.issues.filter(issue=>!issue.startsWith("Unused file ignored: ") || !declaredPaths.has(issue.slice("Unused file ignored: ".length)));
       const matched = result.matches.flatMap((match) => {
         if (!match.bytes || !match.sourcePath || !match.mimeType || match.error) return [];
         const name = match.sourcePath.split("/").pop() || `${match.slotId}.jpg`;
@@ -2989,7 +3036,7 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
         return;
       }
       onNotify(`All ${matched.length} images matched. Uploading and placing them automatically…`);
-      await onImport(nextCandidates, result.issues);
+      await onImport(nextCandidates, result.issues, sourceFiles);
       setCandidates(nextCandidates.map((item) => ({ slotId: item.slotId, decision: "keep" })));
       onNotify(`All ${matched.length} illustrations were placed in their correct cover and chapters.`);
     } catch (error) {
@@ -3013,12 +3060,12 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
     <section className="image-session-actions"><div><p className="eyebrow">ART BIBLE + IMAGE QUEUE</p><h2>Generate reliable chapter images</h2><p>Use the numbered files in order. Each prompt creates exactly one image, so later chapters cannot silently disappear into a failed batch.</p><button className="primary" onClick={downloadPrompt}>Download sequential prompt pack</button><button className="secondary" onClick={() => void copyPrompt()}>Copy art bible</button></div><label className={`bulk-image-upload${busy ? " busy" : ""}`}><input type="file" accept=".zip,application/zip,application/x-zip-compressed" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void chooseIllustrationZip(file); }}/><span>{busy ? "…" : "↑"}</span><b>{busy ? "Checking and placing illustrations…" : "Upload the completed illustration ZIP"}</b><small>One ZIP with the exact images/cover.jpg and CH-XX-IMG-XX filenames from the manifest.</small></label></section>
     {uploadIssues.length > 0 && <div className="bulk-image-issues">{uploadIssues.map((issue) => <span key={issue}>{issue}</span>)}</div>}
     {activeSlot && <section className="active-image-slot"><div className="active-image-preview">{activeCandidate?.file ? <LocalImagePreview file={activeCandidate.file} alt={activeSlot.altText}/> : activeSlot.imageUrl ? <img src={activeSlot.imageUrl} alt={activeSlot.altText}/> : <span>Illustration pending</span>}</div><div className="active-image-copy"><p className="eyebrow">{activeIndex + 1} OF {slots.length} · {activeSlot.id}</p><h2>{activeSlot.chapterTitle}</h2><p>{activeSlot.sceneBrief}</p><div className="active-image-actions"><button disabled={activeIndex === 0} onClick={() => setActiveIndex((index) => Math.max(0, index - 1))}>← Previous</button><button onClick={() => void copySlotPrompt(activeSlot)}>Copy only this prompt</button><label>{activeCandidate?.file || activeSlot.imageUrl ? "Replace image" : "Upload this image"}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void chooseImage(activeSlot, file); }}/></label><button disabled={activeIndex === slots.length - 1} onClick={() => setActiveIndex((index) => Math.min(slots.length - 1, index + 1))}>Next →</button></div></div></section>}
-    <section className="compact-image-review"><header><div><p className="eyebrow">QUICK REVIEW</p><h2>{resolvedCount} of {slots.length} images ready</h2></div><span>Click a thumbnail only when you need to inspect or replace it.</span></header><div>{slots.map((slot, index) => { const candidate = candidates.find((item) => item.slotId === slot.id); const ready = Boolean(candidate?.file || slot.imageUrl); return <button key={slot.id} className={`${ready ? "ready" : "pending"} ${activeIndex === index ? "active" : ""}`} onClick={() => setActiveIndex(index)}><span>{candidate?.file ? <LocalImagePreview file={candidate.file} alt=""/> : slot.imageUrl ? <img src={slot.imageUrl} alt=""/> : <i>{index + 1}</i>}</span><b>{slot.id}</b><small>{ready ? "Ready" : "Missing"}</small></button>; })}</div><footer><button className="secondary" onClick={onReplaceManuscript}>Replace manuscript</button><button className="secondary" onClick={onOpenDesigner}>{resolvedCount === slots.length ? "Open Designer" : "Continue with pending images"}</button>{hasChanges && <button className="primary" disabled={busy} onClick={() => { setBusy(true); void onImport(candidates, uploadIssues).finally(() => setBusy(false)); }}>{busy ? "Saving images…" : "Import ready images"}</button>}</footer></section>
+    <section className="compact-image-review"><header><div><p className="eyebrow">QUICK REVIEW</p><h2>{resolvedCount} of {slots.length} images ready</h2></div><span>Click a thumbnail only when you need to inspect or replace it.</span></header><div>{slots.map((slot, index) => { const candidate = candidates.find((item) => item.slotId === slot.id); const ready = Boolean(candidate?.file || slot.imageUrl); return <button key={slot.id} className={`${ready ? "ready" : "pending"} ${activeIndex === index ? "active" : ""}`} onClick={() => setActiveIndex(index)}><span>{candidate?.file ? <LocalImagePreview file={candidate.file} alt=""/> : slot.imageUrl ? <img src={slot.imageUrl} alt=""/> : <i>{index + 1}</i>}</span><b>{slot.id}</b><small>{ready ? "Ready" : "Missing"}</small></button>; })}</div><footer>{Boolean(project.sourceAssets?.length) && <button className="secondary" disabled={busy} onClick={() => void downloadSourceImages()}>Download source images</button>}<button className="secondary" onClick={onReplaceManuscript}>Replace manuscript</button><button className="secondary" onClick={onOpenDesigner}>{resolvedCount === slots.length ? "Open Designer" : "Continue with pending images"}</button>{hasChanges && <button className="primary" disabled={busy} onClick={() => { setBusy(true); void onImport(candidates, uploadIssues).finally(() => setBusy(false)); }}>{busy ? "Saving images…" : "Import ready images"}</button>}</footer></section>
   </main>;
 }
 
-function ExternalAiManuscript({ project, onBack, onAccept, onImportIllustrations, onOpenDesigner, onNotify }: { project: Project; onBack: () => void; onAccept: (result: ExternalManuscriptResult, fileName: string) => Promise<void>; onImportIllustrations: (candidates: ExternalIllustrationCandidate[], issues: string[]) => Promise<void>; onOpenDesigner: () => void; onNotify: (message: string) => void }) {
-  const prompt = useMemo(() => buildExternalAiPrompt({ title: project.title, sourceName: project.source, audience: project.audience, readingLevel: project.readingLevel, language: project.language, bookType: project.bookType, aesthetic: project.aesthetic, illustrationStyle: project.illustrationStyle, learningFeatures: project.learningFeatures }), [project]);
+function ExternalAiManuscript({ project, onBack, onAccept, onImportIllustrations, onOpenDesigner, onNotify }: { project: Project; onBack: () => void; onAccept: (result: ExternalManuscriptResult, fileName: string) => Promise<void>; onImportIllustrations: (candidates: ExternalIllustrationCandidate[], issues: string[], sourceFiles?: SourceImageUpload[]) => Promise<void>; onOpenDesigner: () => void; onNotify: (message: string) => void }) {
+  const prompt = useMemo(() => buildExternalAiPrompt({ title: project.title, sourceName: project.source, audience: project.audience, readingLevel: project.readingLevel, language: project.language, bookType: project.bookType, aesthetic: project.aesthetic, illustrationStyle: project.illustrationStyle, sourceBookOptions: project.sourceBookOptions, learningFeatures: project.learningFeatures }), [project]);
   const [showManuscriptStage, setShowManuscriptStage] = useState(!project.externalManuscript);
   const [manuscriptText, setManuscriptText] = useState("");
   const [fileName, setFileName] = useState("Pasted manuscript.md");
@@ -3042,8 +3089,10 @@ function ExternalAiManuscript({ project, onBack, onAccept, onImportIllustrations
     setResult(null);
     try {
       let text = "";
+      let sourceManifest: SourceBookManifest | undefined;
       if (/\.zip$/i.test(file.name)) {
         const archive = unzipSync(new Uint8Array(await file.arrayBuffer()));
+        if(archive["source-manifest.json"]) sourceManifest=parseSourceBookManifest(JSON.parse(new TextDecoder().decode(archive["source-manifest.json"])));
         const names = Object.keys(archive).filter((name) => /\.(md|markdown|txt)$/i.test(name) && !name.startsWith("__MACOSX/")).sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
         if (!names.length) throw new Error("The ZIP contains no Markdown or text chapter files");
         text = names.map((name) => new TextDecoder().decode(archive[name])).join("\n\n");
@@ -3057,7 +3106,9 @@ function ExternalAiManuscript({ project, onBack, onAccept, onImportIllustrations
       } else text = await file.text();
       setFileName(file.name);
       setManuscriptText(text);
-      const parsed = parseExternalManuscript(text, project.audience);
+      const initial = parseExternalManuscript(text, project.audience);
+      if(!sourceManifest && /\{\{SLOKA:|:::sloka /.test(text)) throw new Error("Verse markers require source-manifest.json in the manuscript ZIP.");
+      const parsed = sourceManifest ? attachSourceBookManifest(initial,sourceManifest) : initial;
       setResult(parsed);
       onNotify(`${parsed.sections.length} ordered book sections detected`);
     } catch (error) {
@@ -3066,6 +3117,7 @@ function ExternalAiManuscript({ project, onBack, onAccept, onImportIllustrations
   };
   const inspectPaste = () => {
     if (manuscriptText.trim().length < 200) return onNotify("Paste the complete manuscript first");
+    if (/\{\{SLOKA:|:::sloka /.test(manuscriptText)) return onNotify("Upload the manuscript ZIP with source-manifest.json to expand Sanskrit verses.");
     const parsed = parseExternalManuscript(manuscriptText, project.audience);
     setResult(parsed);
     setFileName("Pasted manuscript.md");
@@ -3077,18 +3129,20 @@ function ExternalAiManuscript({ project, onBack, onAccept, onImportIllustrations
     if (target < 0 || target >= current.sections.length) return current;
     const sections = [...current.sections];
     [sections[index], sections[target]] = [sections[target], sections[index]];
-    return { ...current, sections };
+    const remap=(number:number)=>number===index+1?target+1:number===target+1?index+1:number;
+    const sourceManifest=current.sourceManifest ? {...current.sourceManifest,sourceImages:current.sourceManifest.sourceImages.map(image=>({...image,placements:image.placements.map(p=>({...p,sectionNumber:remap(p.sectionNumber)}))})),verses:current.sourceManifest.verses.map(verse=>({...verse,sectionNumber:remap(verse.sectionNumber)}))} : undefined;
+    return { ...current, sections, sourceManifest };
   });
   const chapterCount = result?.sections.filter((section) => section.kind === "chapter").length || 0;
   const sectionIssueCount = result?.sections.reduce((sum, section) => sum + section.issues.length, 0) || 0;
   if (project.externalManuscript && !showManuscriptStage) return <ExternalIllustrationWorkflow project={project} onBack={onBack} onReplaceManuscript={() => setShowManuscriptStage(true)} onImport={onImportIllustrations} onOpenDesigner={onOpenDesigner} onNotify={onNotify}/>;
   return <main className="external-manuscript-page">
     <button className="text-button" onClick={onBack}>← Change book settings</button>
-    <header className="external-manuscript-hero"><div><p className="eyebrow">EXTERNAL AI MANUSCRIPT · RECOMMENDED</p><h1>Let your chosen AI read the source. Bring back the finished book.</h1><p>No website OCR, no OpenRouter quota and no fragile JSON. The manuscript is checked and organised locally before it enters your design studio.</p></div><span>0 website AI requests</span></header>
+    <header className="external-manuscript-hero"><div><p className="eyebrow">EXTERNAL AI MANUSCRIPT · RECOMMENDED</p><h1>Let your chosen AI read the source. Bring back the finished book.</h1><p>Your chosen AI reads the source. Book Studio checks the manuscript and its source manifest locally before opening Designer.</p></div><span>0 website AI requests</span></header>
     <section className="external-steps" aria-label="External manuscript workflow"><div className="complete"><b>1</b><span>Book settings<small>Complete</small></span></div><div className="active"><b>2</b><span>Download prompt<small>Ready</small></span></div><div><b>3</b><span>Create in your AI<small>Upload source + prompt</small></span></div><div className={result ? "complete" : ""}><b>4</b><span>Import manuscript<small>{result ? "Complete" : "Waiting"}</small></span></div><div className={result ? "active" : ""}><b>5</b><span>Review order<small>{result ? `${result.sections.length} sections` : "Waiting"}</small></span></div><div><b>6</b><span>Design & export<small>Next</small></span></div></section>
-    <div className="external-manuscript-grid"><section className="external-action-card prompt-card"><p className="eyebrow">STEP 1 · TAKE THIS TO YOUR AI</p><h2>Download the manuscript-only prompt</h2><p>Upload this prompt and <b>{project.source}</b> together in ChatGPT, Claude or DeepSeek. It returns only the finished writing. Book Studio prepares the separate image prompt after you approve the chapters.</p><div className="external-provider-row"><span>ChatGPT</span><span>Claude</span><span>DeepSeek</span></div><button className="primary" onClick={downloadPrompt}>Download manuscript prompt</button><button className="secondary" onClick={() => void copyPrompt()}>Copy manuscript prompt</button><details><summary>See what the prompt guarantees</summary><ul><li>Reads the complete source before writing</li><li>Preserves real chapter order and important IKS concepts</li><li>Writes for {project.audience}</li><li>Creates introduction, chapters, conclusion and glossary</li><li>Does not embed generic or placeholder artwork</li><li>Returns Markdown—not JSON</li></ul></details></section>
+    <div className="external-manuscript-grid"><section className="external-action-card prompt-card"><p className="eyebrow">STEP 1 · TAKE THIS TO YOUR AI</p><h2>Download the manuscript prompt</h2><p>Upload this prompt and <b>{project.source}</b> together in ChatGPT, Claude or DeepSeek. It returns the writing plus source-image and Sanskrit references in a manuscript ZIP. Book Studio prepares the new-illustration and source-image prompts after you approve the chapters.</p><div className="external-provider-row"><span>ChatGPT</span><span>Claude</span><span>DeepSeek</span></div><button className="primary" onClick={downloadPrompt}>Download manuscript prompt</button><button className="secondary" onClick={() => void copyPrompt()}>Copy manuscript prompt</button><details><summary>See what the prompt guarantees</summary><ul><li>Reads the complete source before writing</li><li>Preserves real chapter order and important IKS concepts</li><li>Writes for {project.audience}</li><li>Creates introduction, chapters, conclusion and glossary</li><li>Does not embed generic or placeholder artwork</li><li>Returns Markdown—not JSON</li></ul></details></section>
       <section className="external-action-card import-card"><p className="eyebrow">STEP 2 · BRING BACK THE RESULT</p><h2>Upload or paste the finished manuscript</h2><label className="external-manuscript-upload"><input type="file" accept=".md,.markdown,.txt,.docx,.zip" disabled={busy} onChange={(event) => event.target.files?.[0] && void readManuscriptFile(event.target.files[0])}/><b>{busy ? "Reading manuscript…" : "Upload manuscript"}</b><span>Markdown, TXT, DOCX or a ZIP of numbered chapter files</span></label><span className="or-divider">OR PASTE IT</span><textarea value={manuscriptText} onChange={(event) => { setManuscriptText(event.target.value); setResult(null); }} placeholder="# BOOK TITLE\n\n# INTRODUCTION\n...\n\n# CHAPTER 01: ..."/><button className="secondary" disabled={busy || manuscriptText.trim().length < 200} onClick={inspectPaste}>Inspect pasted manuscript</button></section></div>
-    {result && <section className="manuscript-review"><header><div><p className="eyebrow">IMPORT REVIEW</p><h2>{result.title}</h2><p>{result.words.toLocaleString()} reader-facing words · {chapterCount} main chapters · {result.sections.length} total sections</p></div><div className={result.issues.length || sectionIssueCount ? "review-warning" : "review-ready"}><b>{result.issues.length + sectionIssueCount ? `${result.issues.length + sectionIssueCount} review note${result.issues.length + sectionIssueCount === 1 ? "" : "s"}` : "Structure ready"}</b><span>{result.issues.length + sectionIssueCount ? "You can still import and edit every section." : "Introduction, chapters and ending are in order."}</span></div></header>{result.issues.length > 0 && <div className="manuscript-global-issues">{result.issues.map((issue) => <span key={issue}>! {issue}</span>)}</div>}<div className="manuscript-section-list">{result.sections.map((section, index) => <article key={`${section.kind}-${index}`}><span>{section.kind === "chapter" ? `CH ${String(result.sections.slice(0, index + 1).filter((item) => item.kind === "chapter").length).padStart(2, "0")}` : section.kind.toUpperCase()}</span><div><b>{section.title}</b><small>{section.wordCount.toLocaleString()} words</small>{section.issues.map((issue) => <em key={issue}>{issue}</em>)}</div><div><button aria-label={`Move ${section.title} up`} disabled={index === 0} onClick={() => moveSection(index, -1)}>↑</button><button aria-label={`Move ${section.title} down`} disabled={index === result.sections.length - 1} onClick={() => moveSection(index, 1)}>↓</button></div></article>)}</div><footer><div><b>Source-fidelity reminder</b><span>Book Studio checks structure, length and teaching sections locally. Before publication, spot-check important claims against the source.</span></div><button className="primary" disabled={!chapterCount || busy} onClick={() => { setBusy(true); void onAccept(result, fileName).then(() => setShowManuscriptStage(false)).finally(() => setBusy(false)); }}>{busy ? "Importing…" : "Accept manuscript & create image prompt"}</button></footer></section>}
+    {result && <section className="manuscript-review"><header><div><p className="eyebrow">IMPORT REVIEW</p><h2>{result.title}</h2><p>{result.words.toLocaleString()} reader-facing words · {chapterCount} main chapters · {result.sections.length} total sections{result.sourceManifest ? ` · ${result.sourceManifest.verses.length} source verses · ${result.sourceManifest.sourceImages.length} source images` : ""}</p></div><div className={result.issues.length || sectionIssueCount ? "review-warning" : "review-ready"}><b>{result.issues.length + sectionIssueCount ? `${result.issues.length + sectionIssueCount} review note${result.issues.length + sectionIssueCount === 1 ? "" : "s"}` : "Structure ready"}</b><span>{result.issues.length + sectionIssueCount ? "You can still import and edit every section." : "Introduction, chapters and ending are in order."}</span></div></header>{result.issues.length > 0 && <div className="manuscript-global-issues">{result.issues.map((issue) => <span key={issue}>! {issue}</span>)}</div>}<div className="manuscript-section-list">{result.sections.map((section, index) => <article key={`${section.kind}-${index}`}><span>{section.kind === "chapter" ? `CH ${String(result.sections.slice(0, index + 1).filter((item) => item.kind === "chapter").length).padStart(2, "0")}` : section.kind.toUpperCase()}</span><div><b>{section.title}</b><small>{section.wordCount.toLocaleString()} words</small>{section.issues.map((issue) => <em key={issue}>{issue}</em>)}</div><div><button aria-label={`Move ${section.title} up`} disabled={index === 0} onClick={() => moveSection(index, -1)}>↑</button><button aria-label={`Move ${section.title} down`} disabled={index === result.sections.length - 1} onClick={() => moveSection(index, 1)}>↓</button></div></article>)}</div><footer><div><b>Source-fidelity reminder</b><span>Book Studio checks structure, length and teaching sections locally. Before publication, spot-check important claims against the source.</span></div><button className="primary" disabled={!chapterCount || busy} onClick={() => { setBusy(true); void onAccept(result, fileName).then(() => setShowManuscriptStage(false)).finally(() => setBusy(false)); }}>{busy ? "Importing…" : "Accept manuscript & create image prompt"}</button></footer></section>}
   </main>;
 }
 

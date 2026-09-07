@@ -8,7 +8,7 @@ export function SourceBookOptions({ value, onChange, chapters = [] }: Props) {
   const needsCustom = options.imageStyle === "custom" || Object.values(options.chapterStyles).includes("custom");
   return <section className="source-book-options form-card">
     <p className="eyebrow">SOURCE IMAGES & SANSKRIT</p><h2>Choose what to carry into your book</h2>
-    <p className="source-options-note">These preferences are saved with your book. Source-image processing and Sanskrit prompt support will become available in the next phase.</p>
+    <p className="source-options-note">These choices guide your external-AI prompts. Upload the source book with the prompt, then import the returned manuscript and image packages.</p>
     <div className="source-options-grid">
       <fieldset><legend>Illustrations</legend>
         <label>Image source<select aria-label="Image source" value={options.imageMode} onChange={e=>patch({imageMode:e.target.value as Options["imageMode"]})}>{sourceImageModes.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select></label>

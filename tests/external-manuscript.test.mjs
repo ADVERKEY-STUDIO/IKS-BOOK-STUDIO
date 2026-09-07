@@ -22,9 +22,9 @@ test("external prompt asks a provider to read the source and return structured M
   assert.match(prompt, /# CHAPTER 01:/);
   assert.match(prompt, /# CONCLUSION/);
   assert.match(prompt, /# GLOSSARY/);
-  assert.match(prompt, /Do not return JSON/);
+  assert.match(prompt, /separate JSON manifest preserves source evidence/);
   assert.match(prompt, /complete reader manuscript plus a private scene brief/i);
-  assert.match(prompt, /Do not generate or embed images/);
+  assert.match(prompt, /Do not generate new illustrations or embed images/);
   assert.match(prompt, /Use only two recurring learning blocks/);
   assert.match(prompt, /Anaya, Kabir, and Acharya Mira/);
 });
