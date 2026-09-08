@@ -21,6 +21,10 @@ Standalone TypeScript checking reports 34 existing errors. Enabling TypeScript i
 
 ## Phase 3: review and layout safeguards — complete
 
+### Import recovery
+
+Chapter discovery now remains visible when source validation fails. Missing verse blocks are reported together with section titles; acceptance and reordering remain unavailable until the package is consistent. A copyable AI correction request helps repair the package without inventing Sanskrit or dropping manifest entries. Folder-wrapped ZIPs are supported, Finder metadata is ignored, ambiguous manifests are rejected, and the same filename can be uploaded again after correction. The original FINAL manuscript ZIP reproduces four missing verse blocks; the supplied ready ZIP validates with six sections. All 231 tests pass, including upload failure, retained chapter list and successful retry with a nested corrected package.
+
 - Preview and Advanced now open source review. Compare originals and cleaned images side by side, inspect pixel dimensions and placement reasons, approve cleaned artwork or restore originals across every occurrence. Existing saved image frames remain unchanged.
 - Review Sanskrit against a locally selected source PDF. Text extraction reads the cited PDF page in the browser; scanned or unreadable text supports explicit manual comparison. Approval requires matching Sanskrit and a human check of attribution, line breaks and companion text. AI-declared verified status is not human approval.
 - Changed source files, context or verse details require fresh review. Preview also reports missing/duplicate placements, replaced approved images and altered Sanskrit, line breaks or companion text in saved pages.

@@ -50,7 +50,17 @@ test('source selection and real manuscript/image ZIP uploads produce a publishab
       '03-conclusion.md':strToU8('# Conclusion\n\nThoughtful observation helps us understand growing things.\n\nContinue caring for the plants and comparing your findings.'),
       '04-glossary.md':strToU8('# Glossary\n\nSeed — a new beginning.')
     });
-    await page.locator('.external-manuscript-upload input[type=file]').setInputFiles({name:'garden-manuscript.zip',mimeType:'application/zip',buffer:Buffer.from(manuscript)});
+    const broken=require('fflate').unzipSync(manuscript);
+    broken['02-garden.md']=strToU8(new TextDecoder().decode(broken['02-garden.md']).replace(/:::sloka V01[\s\S]*?:::/,''));
+    await page.locator('.external-manuscript-upload input[type=file]').setInputFiles({name:'garden-manuscript.zip',mimeType:'application/zip',buffer:Buffer.from(zipSync(broken))});
+    await page.getByRole('alert').waitFor();
+    assert.match(await page.getByRole('alert').textContent(),/4 sections detected/);
+    assert.match(await page.getByRole('alert').textContent(),/V01/);
+    assert.equal(await page.locator('.manuscript-section-list article').count(),4);
+    assert.equal(await page.getByRole('button',{name:'Accept manuscript & create image prompt',exact:true}).isEnabled(),false);
+    const wrapped=Object.fromEntries(Object.entries(require('fflate').unzipSync(manuscript)).map(([name,data])=>['Garden/'+name,data]));
+    wrapped['Garden/._02-garden.md']=strToU8('# CHAPTER 99: Finder metadata');
+    await page.locator('.external-manuscript-upload input[type=file]').setInputFiles({name:'garden-manuscript.zip',mimeType:'application/zip',buffer:Buffer.from(zipSync(wrapped))});
     await page.getByRole('button',{name:'Accept manuscript & create image prompt',exact:true}).click();
     await page.locator('.bulk-image-upload input[type=file]').waitFor({state:'attached'});
     assert.equal(project.title,'Garden ZIP workflow');assert.equal(project.chapters.length,4);

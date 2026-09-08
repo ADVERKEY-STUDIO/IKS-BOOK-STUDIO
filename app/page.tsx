@@ -4,6 +4,7 @@ import { ChangeEvent, CSSProperties, forwardRef, MouseEvent as ReactMouseEvent, 
 import { SourceBookOptions, SourceBookOptionsReview } from "./components/source-book-options";
 import { normalizeSourceBookOptions, type SourceBookOptions as SourceBookSettings } from "../lib/source-book-options";
 import { attachSourceBookManifest, parseSourceBookManifest, sourceImageSlots, type SourceBookManifest, type SourceArchiveAsset } from "../lib/source-book-package";
+import { inspectManuscript, inspectManuscriptArchive, manuscriptRepairRequest } from "../lib/manuscript-import";
 import { SourceBookReviewPanel } from "./components/source-book-review";
 import { compareSourceVerse, sourceImageSignature, sourceVerseSignature, sourceReviewIssues, inspectRenderedSourceVerses, inspectRenderedSourceImages, type SourceBookReview } from "../lib/source-book-review";
 import { strToU8, unzipSync, zipSync } from "fflate";
@@ -3105,6 +3106,7 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
 function ExternalAiManuscript({ project, onBack, onAccept, onImportIllustrations, onOpenDesigner, onNotify }: { project: Project; onBack: () => void; onAccept: (result: ExternalManuscriptResult, fileName: string) => Promise<void>; onImportIllustrations: (candidates: ExternalIllustrationCandidate[], issues: string[], sourceFiles?: SourceImageUpload[]) => Promise<void>; onOpenDesigner: () => void; onNotify: (message: string) => void }) {
   const prompt = useMemo(() => buildExternalAiPrompt({ title: project.title, sourceName: project.source, audience: project.audience, readingLevel: project.readingLevel, language: project.language, bookType: project.bookType, aesthetic: project.aesthetic, illustrationStyle: project.illustrationStyle, sourceBookOptions: project.sourceBookOptions, learningFeatures: project.learningFeatures }), [project]);
   const [showManuscriptStage, setShowManuscriptStage] = useState(!project.externalManuscript);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
   const [manuscriptText, setManuscriptText] = useState("");
   const [fileName, setFileName] = useState("Pasted manuscript.md");
   const [result, setResult] = useState<ExternalManuscriptResult | null>(null);
@@ -3125,15 +3127,14 @@ function ExternalAiManuscript({ project, onBack, onAccept, onImportIllustrations
   const readManuscriptFile = async (file: File) => {
     setBusy(true);
     setResult(null);
+    setImportErrors([]);
     try {
       let text = "";
-      let sourceManifest: SourceBookManifest | undefined;
+      let inspection: ReturnType<typeof inspectManuscript> | undefined;
       if (/\.zip$/i.test(file.name)) {
         const archive = unzipSync(new Uint8Array(await file.arrayBuffer()));
-        if(archive["source-manifest.json"]) sourceManifest=parseSourceBookManifest(JSON.parse(new TextDecoder().decode(archive["source-manifest.json"])));
-        const names = Object.keys(archive).filter((name) => /\.(md|markdown|txt)$/i.test(name) && !name.startsWith("__MACOSX/")).sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
-        if (!names.length) throw new Error("The ZIP contains no Markdown or text chapter files");
-        text = names.map((name) => new TextDecoder().decode(archive[name])).join("\n\n");
+        inspection = inspectManuscriptArchive(archive, project.audience);
+        text = inspection.text;
       } else if (/\.docx$/i.test(file.name)) {
         const form = new FormData();
         form.set("file", file);
@@ -3144,24 +3145,27 @@ function ExternalAiManuscript({ project, onBack, onAccept, onImportIllustrations
       } else text = await file.text();
       setFileName(file.name);
       setManuscriptText(text);
-      const initial = parseExternalManuscript(text, project.audience);
-      if(!sourceManifest && /\{\{SLOKA:|:::sloka /.test(text)) throw new Error("Verse markers require source-manifest.json in the manuscript ZIP.");
-      const parsed = sourceManifest ? attachSourceBookManifest(initial,sourceManifest) : initial;
-      setResult(parsed);
-      onNotify(`${parsed.sections.length} ordered book sections detected`);
+      inspection ??= inspectManuscript(text, project.audience);
+      setResult(inspection.result);
+      setImportErrors(inspection.errors);
+      onNotify(`${inspection.result.sections.length} ordered book sections detected${inspection.errors.length ? "; source corrections needed below" : ""}`);
     } catch (error) {
+      setImportErrors([error instanceof Error ? error.message : "The manuscript could not be read"]);
       onNotify(error instanceof Error ? error.message : "The manuscript could not be read");
     } finally { setBusy(false); }
   };
   const inspectPaste = () => {
     if (manuscriptText.trim().length < 200) return onNotify("Paste the complete manuscript first");
-    if (/\{\{SLOKA:|:::sloka /.test(manuscriptText)) return onNotify("Upload the manuscript ZIP with source-manifest.json to expand Sanskrit verses.");
-    const parsed = parseExternalManuscript(manuscriptText, project.audience);
-    setResult(parsed);
+    try {
+    const inspection = inspectManuscript(manuscriptText, project.audience);
+    setResult(inspection.result);
+    setImportErrors(inspection.errors);
     setFileName("Pasted manuscript.md");
-    onNotify(`${parsed.sections.length} ordered book sections detected`);
+    onNotify(`${inspection.result.sections.length} ordered book sections detected`);
+    } catch(error) { setResult(null); setImportErrors([error instanceof Error ? error.message : "The manuscript could not be read"]); }
   };
   const moveSection = (index: number, direction: -1 | 1) => setResult((current) => {
+    if (importErrors.length) return current;
     if (!current) return current;
     const target = index + direction;
     if (target < 0 || target >= current.sections.length) return current;
@@ -3177,10 +3181,11 @@ function ExternalAiManuscript({ project, onBack, onAccept, onImportIllustrations
   return <main className="external-manuscript-page">
     <button className="text-button" onClick={onBack}>← Change book settings</button>
     <header className="external-manuscript-hero"><div><p className="eyebrow">EXTERNAL AI MANUSCRIPT · RECOMMENDED</p><h1>Let your chosen AI read the source. Bring back the finished book.</h1><p>Your chosen AI reads the source. Book Studio checks the manuscript and its source manifest locally before opening Designer.</p></div><span>0 website AI requests</span></header>
-    <section className="external-steps" aria-label="External manuscript workflow"><div className="complete"><b>1</b><span>Book settings<small>Complete</small></span></div><div className="active"><b>2</b><span>Download prompt<small>Ready</small></span></div><div><b>3</b><span>Create in your AI<small>Upload source + prompt</small></span></div><div className={result ? "complete" : ""}><b>4</b><span>Import manuscript<small>{result ? "Complete" : "Waiting"}</small></span></div><div className={result ? "active" : ""}><b>5</b><span>Review order<small>{result ? `${result.sections.length} sections` : "Waiting"}</small></span></div><div><b>6</b><span>Design & export<small>Next</small></span></div></section>
+    <section className="external-steps" aria-label="External manuscript workflow"><div className="complete"><b>1</b><span>Book settings<small>Complete</small></span></div><div className="active"><b>2</b><span>Download prompt<small>Ready</small></span></div><div><b>3</b><span>Create in your AI<small>Upload source + prompt</small></span></div><div className={result ? "complete" : ""}><b>4</b><span>Import manuscript<small>{importErrors.length ? "Needs correction" : result ? "Complete" : "Waiting"}</small></span></div><div className={result ? "active" : ""}><b>5</b><span>Review order<small>{result ? `${result.sections.length} sections` : "Waiting"}</small></span></div><div><b>6</b><span>Design & export<small>Next</small></span></div></section>
     <div className="external-manuscript-grid"><section className="external-action-card prompt-card"><p className="eyebrow">STEP 1 · TAKE THIS TO YOUR AI</p><h2>Download the manuscript prompt</h2><p>Upload this prompt and <b>{project.source}</b> together in ChatGPT, Claude or DeepSeek. It returns the writing plus source-image and Sanskrit references in a manuscript ZIP. Book Studio prepares the new-illustration and source-image prompts after you approve the chapters.</p><div className="external-provider-row"><span>ChatGPT</span><span>Claude</span><span>DeepSeek</span></div><button className="primary" onClick={downloadPrompt}>Download manuscript prompt</button><button className="secondary" onClick={() => void copyPrompt()}>Copy manuscript prompt</button><details><summary>See what the prompt guarantees</summary><ul><li>Reads the complete source before writing</li><li>Preserves real chapter order and important IKS concepts</li><li>Writes for {project.audience}</li><li>Creates introduction, chapters, conclusion and glossary</li><li>Does not embed generic or placeholder artwork</li><li>Returns Markdown—not JSON</li></ul></details></section>
-      <section className="external-action-card import-card"><p className="eyebrow">STEP 2 · BRING BACK THE RESULT</p><h2>Upload or paste the finished manuscript</h2><label className="external-manuscript-upload"><input type="file" accept=".md,.markdown,.txt,.docx,.zip" disabled={busy} onChange={(event) => event.target.files?.[0] && void readManuscriptFile(event.target.files[0])}/><b>{busy ? "Reading manuscript…" : "Upload manuscript"}</b><span>Markdown, TXT, DOCX or a ZIP of numbered chapter files</span></label><span className="or-divider">OR PASTE IT</span><textarea value={manuscriptText} onChange={(event) => { setManuscriptText(event.target.value); setResult(null); }} placeholder="# BOOK TITLE\n\n# INTRODUCTION\n...\n\n# CHAPTER 01: ..."/><button className="secondary" disabled={busy || manuscriptText.trim().length < 200} onClick={inspectPaste}>Inspect pasted manuscript</button></section></div>
-    {result && <section className="manuscript-review"><header><div><p className="eyebrow">IMPORT REVIEW</p><h2>{result.title}</h2><p>{result.words.toLocaleString()} reader-facing words · {chapterCount} main chapters · {result.sections.length} total sections{result.sourceManifest ? ` · ${result.sourceManifest.verses.length} source verses · ${result.sourceManifest.sourceImages.length} source images` : ""}</p></div><div className={result.issues.length || sectionIssueCount ? "review-warning" : "review-ready"}><b>{result.issues.length + sectionIssueCount ? `${result.issues.length + sectionIssueCount} review note${result.issues.length + sectionIssueCount === 1 ? "" : "s"}` : "Structure ready"}</b><span>{result.issues.length + sectionIssueCount ? "You can still import and edit every section." : "Introduction, chapters and ending are in order."}</span></div></header>{result.issues.length > 0 && <div className="manuscript-global-issues">{result.issues.map((issue) => <span key={issue}>! {issue}</span>)}</div>}<div className="manuscript-section-list">{result.sections.map((section, index) => <article key={`${section.kind}-${index}`}><span>{section.kind === "chapter" ? `CH ${String(result.sections.slice(0, index + 1).filter((item) => item.kind === "chapter").length).padStart(2, "0")}` : section.kind.toUpperCase()}</span><div><b>{section.title}</b><small>{section.wordCount.toLocaleString()} words</small>{section.issues.map((issue) => <em key={issue}>{issue}</em>)}</div><div><button aria-label={`Move ${section.title} up`} disabled={index === 0} onClick={() => moveSection(index, -1)}>↑</button><button aria-label={`Move ${section.title} down`} disabled={index === result.sections.length - 1} onClick={() => moveSection(index, 1)}>↓</button></div></article>)}</div><footer><div><b>Source-fidelity reminder</b><span>Book Studio checks structure, length and teaching sections locally. Before publication, spot-check important claims against the source.</span></div><button className="primary" disabled={!chapterCount || busy} onClick={() => { setBusy(true); void onAccept(result, fileName).then(() => setShowManuscriptStage(false)).finally(() => setBusy(false)); }}>{busy ? "Importing…" : "Accept manuscript & create image prompt"}</button></footer></section>}
+      <section className="external-action-card import-card"><p className="eyebrow">STEP 2 · BRING BACK THE RESULT</p><h2>Upload or paste the finished manuscript</h2><label className="external-manuscript-upload"><input type="file" accept=".md,.markdown,.txt,.docx,.zip" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void readManuscriptFile(file); }}/><b>{busy ? "Reading manuscript…" : "Upload manuscript"}</b><span>Markdown, TXT, DOCX or a ZIP of numbered chapter files</span></label><span className="or-divider">OR PASTE IT</span><textarea value={manuscriptText} onChange={(event) => { setManuscriptText(event.target.value); setResult(null); setImportErrors([]); }} placeholder="# BOOK TITLE\n\n# INTRODUCTION\n...\n\n# CHAPTER 01: ..."/><button className="secondary" disabled={busy || manuscriptText.trim().length < 200} onClick={inspectPaste}>Inspect pasted manuscript</button></section></div>
+    {importErrors.length > 0 && <section className="manuscript-global-issues" role="alert"><h2>{result ? `${result.sections.length} sections detected — source corrections needed` : "Manuscript needs correction"}</h2><p>Correct the listed problems and upload the ZIP again. Your detected chapters are shown below; acceptance is available after validation passes.</p>{importErrors.map((error,index) => <p key={index} style={{whiteSpace:"pre-wrap"}}>{error}</p>)}<button className="secondary" onClick={() => void navigator.clipboard.writeText(manuscriptRepairRequest(importErrors)).then(() => onNotify("Correction request copied. Send it to your AI with the ZIP and source PDF.")).catch(() => onNotify("Clipboard unavailable. Copy the visible errors into your AI."))}>Copy correction request for AI</button></section>}
+    {result && <section className="manuscript-review"><header><div><p className="eyebrow">IMPORT REVIEW</p><h2>{result.title}</h2><p>{result.words.toLocaleString()} reader-facing words · {chapterCount} main chapters · {result.sections.length} total sections{result.sourceManifest ? ` · ${result.sourceManifest.verses.length} source verses · ${result.sourceManifest.sourceImages.length} source images` : ""}</p></div><div className={result.issues.length || sectionIssueCount ? "review-warning" : "review-ready"}><b>{result.issues.length + sectionIssueCount ? `${result.issues.length + sectionIssueCount} review note${result.issues.length + sectionIssueCount === 1 ? "" : "s"}` : "Structure ready"}</b><span>{result.issues.length + sectionIssueCount ? "You can still import and edit every section." : "Introduction, chapters and ending are in order."}</span></div></header>{result.issues.length > 0 && <div className="manuscript-global-issues">{result.issues.map((issue) => <span key={issue}>! {issue}</span>)}</div>}<div className="manuscript-section-list">{result.sections.map((section, index) => <article key={`${section.kind}-${index}`}><span>{section.kind === "chapter" ? `CH ${String(result.sections.slice(0, index + 1).filter((item) => item.kind === "chapter").length).padStart(2, "0")}` : section.kind.toUpperCase()}</span><div><b>{section.title}</b><small>{section.wordCount.toLocaleString()} words</small>{section.issues.map((issue) => <em key={issue}>{issue}</em>)}</div><div><button aria-label={`Move ${section.title} up`} disabled={importErrors.length > 0 || index === 0} onClick={() => moveSection(index, -1)}>↑</button><button aria-label={`Move ${section.title} down`} disabled={importErrors.length > 0 || index === result.sections.length - 1} onClick={() => moveSection(index, 1)}>↓</button></div></article>)}</div><footer><div><b>Source-fidelity reminder</b><span>Book Studio checks structure, length and teaching sections locally. Before publication, spot-check important claims against the source.</span></div><button className="primary" disabled={!chapterCount || busy || importErrors.length > 0} onClick={() => { if (importErrors.length) return; setBusy(true); void onAccept(result, fileName).then(() => setShowManuscriptStage(false)).finally(() => setBusy(false)); }}>{busy ? "Importing…" : "Accept manuscript & create image prompt"}</button></footer></section>}
   </main>;
 }
 
