@@ -36,7 +36,7 @@ test('source selection and real manuscript/image ZIP uploads produce a publishab
     await page.getByLabel('Describe your custom style').fill('Fine ink outlines with muted earth colours.');
     await page.getByLabel('Preserve Sanskrit ślokas from the source').check();
     await page.getByLabel('Roman transliteration').check();
-    await page.getByLabel('Translation in the book’s language').uncheck();
+    await page.getByLabel('Child-friendly translation in the book’s language').uncheck();
     if(process.env.IKS_EVIDENCE_DIR){mkdirSync(process.env.IKS_EVIDENCE_DIR,{recursive:true});await page.locator('.source-book-options').screenshot({path:resolve(process.env.IKS_EVIDENCE_DIR,'source-options.png')});}
     await page.getByRole('button',{name:'Continue →',exact:true}).click();
     assert.match(await page.getByRole('region',{name:'Source image and Sanskrit choices'}).innerText(), /Fine ink outlines/);

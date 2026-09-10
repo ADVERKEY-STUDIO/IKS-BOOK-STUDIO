@@ -588,7 +588,7 @@ seedProject = {
 
 const emptyProject: Project = {
   ...seedProject,
-  sourceBookOptions: normalizeSourceBookOptions({imageMode:"hybrid",enhancement:"clean",preserveSlokas:true}),
+  sourceBookOptions: normalizeSourceBookOptions({imageMode:"hybrid",enhancement:"restyle",preserveSlokas:true}),
   id: "",
   title: "Untitled adaptation",
   source: "No source selected",

@@ -13,7 +13,7 @@ export function SourceBookOptions({ value, onChange, chapters = [] }: Props) {
       <fieldset><legend>Illustrations</legend>
         <label>Image source<select aria-label="Image source" value={options.imageMode} onChange={e=>patch({imageMode:e.target.value as Options["imageMode"]})}>{sourceImageModes.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select></label>
         <label>Source image enhancement<select aria-label="Source image enhancement" disabled={options.imageMode === "generate"} value={options.enhancement} onChange={e=>patch({enhancement:e.target.value as Options["enhancement"]})}>{imageEnhancements.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select></label>
-        <p>Cleaning keeps labels, symbols and factual details intact. Restyling is a separate choice for selected images.</p>
+        <p>Choose mixed images to combine new illustrations with relevant pictures from the source. Style adaptation cleans and redraws those pictures in the book’s aesthetic while preserving what they teach, including labels and diagram relationships.</p>
         <label>Illustration style<select aria-label="Illustration style" value={options.imageStyle} onChange={e=>patch({imageStyle:e.target.value as Options["imageStyle"]})}>{sourceImageStyles.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select></label>
         <p>The style applies to new or deliberately restyled artwork. Originals stay unchanged when you choose to keep them.</p>
         {chapters.length>0 && <details><summary>Style exceptions by chapter</summary>{chapters.map(chapter=><label key={chapter.id}>{chapter.title}<select aria-label={`Illustration style for ${chapter.title}`} value={options.chapterStyles[String(chapter.id)] ?? "book"} onChange={e=>{const chapterStyles={...options.chapterStyles};if(e.target.value==="book")delete chapterStyles[String(chapter.id)];else chapterStyles[String(chapter.id)]=e.target.value as Options["chapterStyles"][string];patch({chapterStyles});}}><option value="book">Follow the whole-book choice</option>{sourceImageStyles.filter(o=>o.value!=="book").map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select></label>)}</details>}
@@ -21,10 +21,10 @@ export function SourceBookOptions({ value, onChange, chapters = [] }: Props) {
       </fieldset>
       <fieldset><legend>Sanskrit ślokas</legend>
         <label className="source-option-check"><input type="checkbox" checked={options.preserveSlokas} onChange={e=>patch({preserveSlokas:e.target.checked})}/>Preserve Sanskrit ślokas from the source</label>
-        <p>Keep the source verse, verse number and attribution. Unclear words must be flagged for review.</p>
+        <p>Include original Sanskrit in देवनागरी with its verse number and attribution. The optional versions below appear alongside it; they never replace the original.</p>
         <fieldset disabled={!options.preserveSlokas}><legend>Alongside each verse</legend>
           <label className="source-option-check"><input type="checkbox" checked={options.transliteration} onChange={e=>patch({transliteration:e.target.checked})}/>Roman transliteration</label>
-          <label className="source-option-check"><input type="checkbox" checked={options.translation} onChange={e=>patch({translation:e.target.checked})}/>Translation in the book’s language</label>
+          <label className="source-option-check"><input type="checkbox" checked={options.translation} onChange={e=>patch({translation:e.target.checked})}/>Child-friendly translation in the book’s language</label>
           <label className="source-option-check"><input type="checkbox" checked={options.explanation} onChange={e=>patch({explanation:e.target.checked})}/>Age-appropriate explanation</label>
         </fieldset>
       </fieldset>

@@ -13,6 +13,12 @@ export function parseSourceBookManifest(input:unknown):SourceBookManifest {
   const raw=record(input);if(raw.format!==SOURCE_PACKAGE_FORMAT)throw new Error(`Source manifest format must be ${SOURCE_PACKAGE_FORMAT}.`);
   if(!Array.isArray(raw.sourceImages)||!Array.isArray(raw.verses)||!Array.isArray(raw.extractionNotes))throw new Error('Source manifest needs sourceImages, verses and extractionNotes arrays.');
   if(raw.sourceImages.length>200||raw.verses.length>500)throw new Error('Source manifest is too large.');
+  const scriptErrors = raw.verses.flatMap(v => {
+    const verse = record(v);
+    return typeof verse.sanskrit === 'string' && !/[\u0900-\u097f]/u.test(verse.sanskrit)
+      ? [`Verse ${String(verse.id)} (source PDF page ${String(verse.sourcePage)}): the Sanskrit field contains Roman text instead of Devanagari. Ask your AI to read that page visually or use OCR, put the original देवनागरी in sanskrit and its matching manuscript block, and put Roman text only in transliteration when requested. Changing the status alone will not fix the missing Sanskrit.`] : [];
+  });
+  if (scriptErrors.length) throw new Error(scriptErrors.join('\n'));
   const seen=new Set<string>();const id=(v:unknown)=>{const s=required(v,'id');if(!/^[A-Za-z][A-Za-z0-9_-]{0,79}$/.test(s)||seen.has(s))throw new Error(`Source manifest: invalid or duplicate id ${s}.`);seen.add(s);return s;};
   const paths=new Set<string>();
   const sourceImages=raw.sourceImages.map(v=>{const r=record(v);const image:SourceImage={id:id(r.id),sourcePage:positive(r.sourcePage,'sourcePage'),originalPath:path(r.originalPath,'source-images'),cleanedPath:path(r.cleanedPath,'cleaned-source-images'),caption:required(r.caption,'caption'),alt:required(r.alt,'alt'),status:r.status==='unavailable'?'unavailable':'available',reason:optional(r.reason),placements:[]};
@@ -25,7 +31,7 @@ export function parseSourceBookManifest(input:unknown):SourceBookManifest {
     if(image.status==='unavailable'&&r.placements.length)throw new Error('Unavailable images cannot have active placements.');
     image.placements=r.placements.map(v=>{const p=record(v);return {id:id(p.id),sectionNumber:positive(p.sectionNumber,'sectionNumber'),anchorText:required(p.anchorText,'anchorText'),reason:required(p.reason,'placement relevance reason')};});return image;});
   const verses=raw.verses.map(v=>{const r=record(v);const verse:SourceVerse={id:id(r.id),sectionNumber:positive(r.sectionNumber,'sectionNumber'),sourcePage:positive(r.sourcePage,'sourcePage'),reference:required(r.reference,'verse reference'),sanskrit:required(r.sanskrit,'Sanskrit text'),transliteration:optional(r.transliteration),translation:optional(r.translation),explanation:optional(r.explanation),status:r.status==='uncertain'?'uncertain':'verified',reviewNote:optional(r.reviewNote)};
-    if(!['verified','uncertain'].includes(String(r.status)))throw new Error('Verse status must be verified or uncertain.');
+    if(!['verified','uncertain'].includes(String(r.status))){verse.status='uncertain';verse.reviewNote=[verse.reviewNote,`Imported status ${String(r.status)} is not a source verification. Compare with the original PDF before approval.`].filter(Boolean).join(' ');}
     if(!/[\u0900-\u097f]/u.test(verse.sanskrit))throw new Error(`Verse ${verse.id} needs Sanskrit in Devanagari.`);
     if(verse.status==='uncertain'&&!verse.reviewNote?.trim())throw new Error('Uncertain verses need a review note; never reconstruct missing words.');return verse;});
   return {format:SOURCE_PACKAGE_FORMAT,sourceImages,verses,extractionNotes:raw.extractionNotes.map(v=>required(v,'extraction note'))};

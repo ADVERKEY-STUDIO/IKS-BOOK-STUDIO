@@ -6,7 +6,7 @@ export const sourceImageModes = [
 export const imageEnhancements = [
   { value: "original", label: "Keep originals unchanged" },
   { value: "clean", label: "Clean and upscale" },
-  { value: "restyle", label: "Restyle selected images" },
+  { value: "restyle", label: "Clean and adapt source images to the book’s style" },
 ] as const;
 export const sourceImageStyles = [
   { value: "book", label: "Use the book’s visual style" },

@@ -25,7 +25,7 @@ export function SourceBookReviewPanel({project,onClose,onImage,onVerse}:Props){
       const approval=project.sourceReview?.images[image.id];const current=approval?.signature===sourceImageSignature(image,assets);
       return <article key={image.id} aria-label={`Review image ${image.id}`}><h3>{image.id} · source page {image.sourcePage}</h3><p>{image.caption}</p>
         {image.status==='unavailable'?<p>Extraction unavailable: {image.reason}</p>:<>
-          <div className="source-image-comparison"><SourceImagePreview label="Original" url={original?.url}/><SourceImagePreview label="Cleaned" url={cleaned?.url}/></div>
+          <div className="source-image-comparison"><SourceImagePreview label="Original" url={original?.url}/><SourceImagePreview label="Cleaned / style-adapted" url={cleaned?.url}/></div>
           <p>{current?`Approved: ${approval.variant}.`:'Source and placement review pending.'}</p>
           {image.placements.length?<ul>{image.placements.map(p=><li key={p.id}><b>Section {p.sectionNumber}</b><blockquote>{p.anchorText}</blockquote><p>Why it belongs here: {p.reason}</p></li>)}</ul>:<p>Kept in the source-image folder; not placed in the book.</p>}
           <label><input type="checkbox" checked={Boolean(confirmed[image.id])} onChange={e=>setConfirmed(c=>({...c,[image.id]:e.target.checked}))}/>I checked the source details, labels and relevance to the surrounding text.</label>

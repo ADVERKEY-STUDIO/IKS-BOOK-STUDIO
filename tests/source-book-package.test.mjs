@@ -5,6 +5,20 @@ import {parseExternalManuscript,upgradeExternalIllustrationSlots,buildExternalAi
 import {normalizeSourceBookOptions} from '../lib/source-book-options.ts';
 const verse='सत्यं वद ।\nधर्मं चर ।';
 const data=()=>({format:'iks-source-assets-v1',sourceImages:[{id:'SRC01',sourcePage:3,originalPath:'source-images/SRC01.png',cleanedPath:'cleaned-source-images/SRC01.png',caption:'Seeds in the source book',alt:'Seeds',status:'available',placements:[{id:'P1',sectionNumber:1,anchorText:'Observe the seeds carefully.',reason:'Shows the seeds being discussed.'},{id:'P2',sectionNumber:1,anchorText:'Observe the seeds carefully.',reason:'Another view linked to the same passage.'}]}],verses:[{id:'V01',sectionNumber:1,sourcePage:4,reference:'Source fixture verse',sanskrit:verse,translation:'Speak truth; practise dharma.',status:'verified'}],extractionNotes:[]});
+test('Roman-only verse errors identify all source pages before status validation',()=>{
+ const input=data();input.verses[0].sanskrit='satyam vada';input.verses[0].status='verified-transliteration-only';input.verses.push({...input.verses[0],id:'V02',sourcePage:9});
+ assert.throws(()=>parseSourceBookManifest(input),error=>/V01.*page 4/s.test(error.message)&&/V02.*page 9/s.test(error.message)&&/read that page visually or use OCR/.test(error.message));
+});
+test('unusual status on actual Devanagari is retained as uncertain, never silently verified',()=>{
+ const input=data();input.verses[0].status='checked';const parsed=parseSourceBookManifest(input);
+ assert.equal(parsed.verses[0].status,'uncertain');assert.match(parsed.verses[0].reviewNote,/checked/);assert.equal(parsed.verses[0].sanskrit,verse);
+});
+test('mixed restyled source pictures receive an aesthetic and derivative destinations',()=>{
+ const settings={title:'Garden',sourceName:'Garden.pdf',audience:'Ages 10–12',readingLevel:'Reader',language:'English',bookType:'Book',aesthetic:'Calm',illustrationStyle:'Soft ink and earth colours',learningFeatures:[],sourceBookOptions:normalizeSourceBookOptions({imageMode:'hybrid',enhancement:'restyle',preserveSlokas:true})};
+ const prompt=buildExternalAiPrompt(settings);assert.match(prompt,/never Roman text in the sanskrit field/);assert.match(prompt,/child-friendly translation/);assert.match(prompt,/declare originalPath.*cleanedPath/);
+ const pack=buildExternalIllustrationPromptPack({...settings,chapters:[],slots:[]});const source=pack.prompts.at(-1).content;
+ assert.match(source,/Generate the normal new illustrations AND/);assert.match(source,/Every source image selected for placement/);assert.match(source,/Source artwork aesthetic: Soft ink and earth colours/);assert.match(source,/exact anchorText and a relevance reason/);
+});
 test('source package preserves verse line breaks and multiple image occurrences at one context anchor',()=>{
  const manifest=parseSourceBookManifest(data());const result=attachSourceBookManifest(parseExternalManuscript('# INTRODUCTION\n\nObserve the seeds carefully.\n\n{{SLOKA:V01}}','Ages 10–12'),manifest);
  assert.match(result.sections[0].html,/सत्यं वद ।<br>धर्मं चर ।/);assert.doesNotMatch(result.sections[0].html,/\{\{SLOKA/);
