@@ -34,7 +34,13 @@ export function parseSourceBookManifest(input:unknown):SourceBookManifest {
     if(!['verified','uncertain'].includes(String(r.status))){verse.status='uncertain';verse.reviewNote=[verse.reviewNote,`Imported status ${String(r.status)} is not a source verification. Compare with the original PDF before approval.`].filter(Boolean).join(' ');}
     if(!/[\u0900-\u097f]/u.test(verse.sanskrit))throw new Error(`Verse ${verse.id} needs Sanskrit in Devanagari.`);
     if(verse.status==='uncertain'&&!verse.reviewNote?.trim())throw new Error('Uncertain verses need a review note; never reconstruct missing words.');return verse;});
-  return {format:SOURCE_PACKAGE_FORMAT,sourceImages,verses,extractionNotes:raw.extractionNotes.map(v=>required(v,'extraction note'))};
+  const extractionNotes=raw.extractionNotes.flatMap(v=>{
+    if(v==null)return [];
+    const note=typeof v==='string'?v:optional(record(v).note)??optional(record(v).message)??optional(record(v).text);
+    if(note!==undefined)return note.trim()?[note.trim()]:[];
+    return [`Source extraction note (review): ${JSON.stringify(v)}`];
+  });
+  return {format:SOURCE_PACKAGE_FORMAT,sourceImages,verses,extractionNotes};
 }
 const escape=(s:string)=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const comparable=(s:string)=>s.replace(/<[^>]*>/g,'').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/\s+/g,' ').trim();

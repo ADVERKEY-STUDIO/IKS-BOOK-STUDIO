@@ -250,7 +250,7 @@ function illustrationSceneBrief(section: ExternalManuscriptSection, imageIndex: 
   return supplied || `Create image ${imageIndex} of ${imageCount} for “${section.title}”, focusing on ${placementFocus}. Show a specific narrative moment with real people, a believable place, purposeful action, relevant objects, a clear focal point and meaningful background details grounded in this passage: ${context}`;
 }
 
-export function createExternalIllustrationSlots(result: ExternalManuscriptResult, fallbackTitle: string): ExternalIllustrationSlot[] {
+export function createExternalIllustrationSlots(result: ExternalManuscriptResult, fallbackTitle: string, sourceFirst = false): ExternalIllustrationSlot[] {
   return [
     {
       id: "COVER",
@@ -265,6 +265,7 @@ export function createExternalIllustrationSlots(result: ExternalManuscriptResult
       status: "pending",
     },
     ...result.sections.flatMap((section, sectionIndex) => {
+      if(sourceFirst && result.sourceManifest?.sourceImages.some(image=>image.status==='available' && image.placements.some(p=>p.sectionNumber===sectionIndex+1)))return [];
       if (!(["introduction", "chapter", "conclusion"] as ExternalManuscriptSection["kind"][]).includes(section.kind)) return [];
       const imageCount = 1;
       const placements = ["chapter-middle"];
@@ -294,6 +295,7 @@ export function createExternalIllustrationSlots(result: ExternalManuscriptResult
 export function upgradeExternalIllustrationSlots(
   chapters: Array<{ id: number; title: string; body?: string; wordCount?: number }>,
   existingSlots: ExternalIllustrationSlot[],
+  sourceFirst = false,
 ) {
   const sourceSlots = existingSlots.filter(slot => slot.sourceImageId);
   existingSlots = existingSlots.filter(slot => !slot.sourceImageId);
@@ -308,6 +310,10 @@ export function upgradeExternalIllustrationSlots(
   for (const chapter of chapters) {
     if (/^(?:glossary|appendix|activities|references|bibliography|index)\b/i.test(chapter.title.trim())) continue;
     const existing = existingSlots.filter((slot) => slot.role === "chapter" && slot.chapterId === chapter.id).sort((left, right) => (left.imageIndex || 1) - (right.imageIndex || 1));
+    if(sourceFirst && sourceSlots.some(slot=>slot.chapterId===chapter.id)){
+      upgraded.push(...existing.filter(slot=>slot.status==='ready' && slot.imageUrl));
+      continue;
+    }
     const plain = cleanLine((chapter.body || "").replace(/<[^>]+>/g, " "));
     const approvedExtras = existing.slice(1).filter((slot) => slot.status === "ready" && slot.imageUrl);
     const imageCount = 1 + approvedExtras.length;
@@ -474,7 +480,7 @@ ${sourceManifestContract()}
 
 ${sourceOptions.preserveSlokas ? `Include relevant Sanskrit ślokas that actually occur in the uploaded source, near the adapted passage they clarify. Use original Devanagari (देवनागरी), never Roman text in the sanskrit field. If the PDF text layer is unreadable, inspect the page image or use OCR; never substitute transliteration for the original. Use status verified only for legible source text, otherwise uncertain with a reviewNote; never invent status values such as verified-transliteration-only. Preserve their wording, line breaks, verse numbers and attribution. Do not add unrelated verses or sacred quotations from memory. Roman transliteration: ${sourceOptions.transliteration ? "include" : "omit"}. Translation into ${settings.language}: ${sourceOptions.translation ? "include a child-friendly translation suited to the selected audience" : "omit"}. Age-appropriate explanation: ${sourceOptions.explanation ? "include" : "omit"}. Keep all companion text separate from the Sanskrit.` : "Do not request extra Sanskrit verses. Preserve any source quotation needed for faithful prose; do not invent quotations."}
 
-Image policy: ${sourceOptions.imageMode === "generate" ? "Generate new illustrations; sourceImages may be empty when source reuse is not requested." : "Retain the normal new-illustration briefs AND catalogue relevant images from the uploaded source. Extract original raster images when your tools support it; do not redraw an original and label it extracted. The illustration stage adds original and cleaned-source folders alongside normal new illustrations. Select by meaning and nearby context, not decoration. Keep useful unplaced source pictures in their folder. If extraction is unavailable, report it explicitly."}
+Image policy: ${sourceOptions.imageMode === "source-first" ? "SOURCE-FIRST: inspect the entire source for pictures relevant to each chapter. Prefer those pictures, clean them and adapt them to the book aesthetic. Generate a new illustration only for a chapter without a suitable source picture. Catalogue exact placements and explain relevance. Record when no relevant image exists or extraction fails; never claim a generated image is a source original. Do not request an extra new illustration for a chapter already covered by source pictures." : sourceOptions.imageMode === "generate" ? "Generate new illustrations; sourceImages may be empty when source reuse is not requested." : "Retain the normal new-illustration briefs AND catalogue relevant images from the uploaded source. Extract original raster images when your tools support it; do not redraw an original and label it extracted. The illustration stage adds original and cleaned-source folders alongside normal new illustrations. Select by meaning and nearby context, not decoration. Keep useful unplaced source pictures in their folder. If extraction is unavailable, report it explicitly."}
 Source image treatment: ${sourceOptions.enhancement === "restyle" ? "Select relevant source pictures for cleaning AND adaptation to the book aesthetic. For each available selected image declare originalPath in source-images/ and cleanedPath in cleaned-source-images/ now; the latter will contain the style-adapted derivative produced during illustration. This is not merely scan cleaning." : sourceOptions.enhancement === "clean" ? "Declare originalPath and cleanedPath for originals and cleaned derivatives." : "Retain originalPath; original images stay unchanged."}
 
 ## QUALITY RULES
@@ -612,7 +618,7 @@ function requestedImageStyle(project: ExternalManuscriptSettings, chapterId?:num
 }
 function sourceImageInstructions(project:ExternalManuscriptSettings) {
   const o=normalizeSourceBookOptions(project.sourceBookOptions);
-  return `${o.imageMode === "generate" ? "Source reuse is not selected; keep the normal new-illustration queue." : "Generate the normal new illustrations AND return source-book images as a separate companion set. Upload the actual source PDF and manuscript manifest to this conversation. Reuse MULTIPLE relevant source images per chapter when they explain different passages; do not impose a one-picture limit. Retain unplaced extracted pictures in their own folder."}
+  return `${o.imageMode === "source-first" ? "SOURCE-FIRST PRIORITY: Use relevant pictures from the uploaded source PDF before creating any new artwork. Clean and adapt them to the requested book aesthetic. Follow source-image placements in the approved manifest. Generate chapter artwork only for chapters without suitable source pictures; do not add a new image to an already covered chapter. Keep all relevant source pictures and their originals. If extraction fails, report it rather than presenting a generated picture as an original. The cover can be generated separately." : o.imageMode === "generate" ? "Source reuse is not selected; keep the normal new-illustration queue." : "Generate the normal new illustrations AND return source-book images as a separate companion set. Upload the actual source PDF and manuscript manifest to this conversation. Reuse MULTIPLE relevant source images per chapter when they explain different passages; do not impose a one-picture limit. Retain unplaced extracted pictures in their own folder."}
 Treatment: ${o.enhancement === "original" ? "Keep original bytes unchanged; omit cleaned copies." : o.enhancement === "clean" ? "Keep originals unchanged and create gently cleaned/upscaled copies. Remove scanning noise and improve clarity only; preserve labels, numbers, symbols, geometry, faces and factual details." : "Keep originals unchanged as evidence. Every source image selected for placement in the approved manifest is selected for style adaptation: clean scanning defects AND adapt its palette, rendering, texture and linework to the requested book aesthetic. Preserve its subject, factual details, labels, numbers and diagram relationships. Save the derivative to cleanedPath; this folder holds style-adapted source artwork as well as cleaned images. Do not stop at upscaling. Never overwrite an original file."}
 Source artwork aesthetic: ${requestedImageStyle(project)}. New illustrations and adapted source pictures must form one coherent visual style. Chapter-specific styles are supplied in the individual source-image prompts.
 Source pictures must match the actual passage: record sourcePage, caption, alt, exact anchorText and a relevance reason. Do not insert unrelated artwork simply to fill space. Never substitute generated pictures for failed extractions. If source access, extraction or file export is unavailable, report it explicitly in extractionNotes.

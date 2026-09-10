@@ -3,6 +3,19 @@ import assert from 'node:assert/strict';
 import {parseSourceBookManifest,attachSourceBookManifest,sourceImageSlots} from '../lib/source-book-package.ts';
 import {parseExternalManuscript,upgradeExternalIllustrationSlots,buildExternalAiPrompt,buildExternalIllustrationPromptPack} from '../lib/external-manuscript.ts';
 import {normalizeSourceBookOptions} from '../lib/source-book-options.ts';
+import {createExternalIllustrationSlots} from '../lib/external-manuscript.ts';
+test('structured extraction notes preserve information without blocking chapters',()=>{
+ const m={format:'iks-source-assets-v1',sourceImages:[],verses:[],extractionNotes:[{type:'ocr',note:'Source text could not be extracted.'},'',null,{message:'Review source pages.'}]};
+ assert.deepEqual(parseSourceBookManifest(m).extractionNotes,['Source text could not be extracted.','Review source pages.']);
+});
+test('source-first planning and reopen retain source placements and generate only uncovered chapters',()=>{
+ const result=parseExternalManuscript('# INTRODUCTION\n\nWelcome.\n\n# CHAPTER 01: Seeds\n\nObserve seeds.\n\n# CHAPTER 02: Trees\n\nObserve trees.','Ages 10–12');
+ result.sourceManifest={format:'iks-source-assets-v1',verses:[],extractionNotes:[],sourceImages:[{id:'SRC1',sourcePage:1,originalPath:'source-images/SRC1.png',caption:'Seeds',alt:'Seeds',status:'available',placements:[{id:'P1',sectionNumber:2,anchorText:'Observe seeds.',reason:'Shows the discussed seeds'}]}]};
+ const slots=[...createExternalIllustrationSlots(result,'Book',true),...sourceImageSlots(result.sourceManifest,result.sections)];
+ assert.equal(slots.filter(s=>s.chapterId===2).length,1);assert.equal(slots.find(s=>s.chapterId===2).sourceImageId,'SRC1');assert.ok(slots.some(s=>s.chapterId===3&&!s.sourceImageId));
+ const reopened=upgradeExternalIllustrationSlots(result.sections.map((s,i)=>({id:i+1,title:s.title})),slots,true);
+ assert.equal(reopened.filter(s=>s.chapterId===2).length,1);
+});
 const verse='सत्यं वद ।\nधर्मं चर ।';
 const data=()=>({format:'iks-source-assets-v1',sourceImages:[{id:'SRC01',sourcePage:3,originalPath:'source-images/SRC01.png',cleanedPath:'cleaned-source-images/SRC01.png',caption:'Seeds in the source book',alt:'Seeds',status:'available',placements:[{id:'P1',sectionNumber:1,anchorText:'Observe the seeds carefully.',reason:'Shows the seeds being discussed.'},{id:'P2',sectionNumber:1,anchorText:'Observe the seeds carefully.',reason:'Another view linked to the same passage.'}]}],verses:[{id:'V01',sectionNumber:1,sourcePage:4,reference:'Source fixture verse',sanskrit:verse,translation:'Speak truth; practise dharma.',status:'verified'}],extractionNotes:[]});
 test('Roman-only verse errors identify all source pages before status validation',()=>{

@@ -588,7 +588,7 @@ seedProject = {
 
 const emptyProject: Project = {
   ...seedProject,
-  sourceBookOptions: normalizeSourceBookOptions({imageMode:"hybrid",enhancement:"restyle",preserveSlokas:true}),
+  sourceBookOptions: normalizeSourceBookOptions({imageMode:"source-first",enhancement:"restyle",preserveSlokas:true}),
   id: "",
   title: "Untitled adaptation",
   source: "No source selected",
@@ -1161,7 +1161,7 @@ function normalizeProject(saved: Project): Project {
   const illustratedChapters = fitChaptersToBookLimit(attachChapterVisuals(visualProject, hierarchy.chapters));
   const externalIllustrations = childFirstSaved.externalIllustrations ? {
     ...childFirstSaved.externalIllustrations,
-    slots: upgradeExternalIllustrationSlots(illustratedChapters, childFirstSaved.externalIllustrations.slots),
+    slots: upgradeExternalIllustrationSlots(illustratedChapters, childFirstSaved.externalIllustrations.slots, childFirstSaved.sourceBookOptions?.imageMode === "source-first"),
   } : undefined;
   return {
     ...emptyProject,
@@ -1689,7 +1689,7 @@ export default function Home() {
         generationRuns: [],
       };
     });
-    const illustrationSlots = [...createExternalIllustrationSlots(result, project.title), ...(result.sourceManifest ? sourceImageSlots(result.sourceManifest,result.sections) : [])];
+    const illustrationSlots = [...createExternalIllustrationSlots(result, project.title, project.sourceBookOptions?.imageMode === "source-first"), ...(result.sourceManifest ? sourceImageSlots(result.sourceManifest,result.sections) : [])];
     if(new Set(illustrationSlots.map(slot=>slot.id)).size!==illustrationSlots.length)throw new Error("Source placement IDs must not overlap the generated illustration IDs. Rename them in the source manifest.");
     const persona = inferBookPersona({ title: result.title || project.title, sourcePreview: result.sections.map((section) => `${section.title} ${section.raw.slice(0, 220)}`).join(" "), sourceHeadings: result.sections.map((section) => readerFacingChapterTitle(section.title)), bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
     const nextBase: Project = {

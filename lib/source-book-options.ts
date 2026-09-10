@@ -1,4 +1,5 @@
 export const sourceImageModes = [
+  { value: "source-first", label: "Prefer source-book images; generate only when missing" },
   { value: "generate", label: "Generate new illustrations" },
   { value: "reuse", label: "Reuse source-book images" },
   { value: "hybrid", label: "Mix source images and new illustrations" },
