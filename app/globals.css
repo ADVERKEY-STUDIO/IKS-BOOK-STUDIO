@@ -1,3 +1,4 @@
+@import "./book-inspiration.css";
 @import "tailwindcss";
 
 :root{--ink:#1f302b;--forest:#183b33;--forest-2:#285149;--terra:#a64f32;--gold:#d3a64c;--paper:#f3eee3;--cream:#fbf8f1;--line:#d9d0c1;--muted:#76817c;--white:#fff;--shadow:0 18px 50px rgba(32,45,40,.14)}

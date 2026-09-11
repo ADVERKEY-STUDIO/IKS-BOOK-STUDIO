@@ -1,9 +1,11 @@
+import { inspirationBrief, type BookInspiration } from "./book-inspiration.ts";
 import { normalizeSourceBookOptions, sourceImageStyles, type SourceBookOptions } from "./source-book-options.ts";
 import { sourceManifestContract, type SourceBookManifest } from "./source-book-package.ts";
 import { authorialReaderHtml, readerFacingChapterTitle } from "./child-summary.ts";
 import { readerSafeImageCaption } from "./publication.ts";
 
 export type ExternalManuscriptSettings = {
+  inspiration?: BookInspiration;
   sourceBookOptions?: SourceBookOptions;
   title: string;
   sourceName: string;
@@ -436,6 +438,7 @@ You are the author and developmental editor of a source-faithful illustrated chi
 - Book type: ${settings.bookType}
 - Book world: ${settings.aesthetic}
 - Illustration direction: ${settings.illustrationStyle}
+${inspirationBrief(settings.inspiration)}
 - Learning features: ${settings.learningFeatures.join(", ")}
 
 ## YOUR TASK
@@ -527,6 +530,8 @@ The manuscript for “${project.title}” is complete and approved. This file is
 ## SOURCE IMAGE COMPANION PACKAGE
 ${sourceImageInstructions(project)}
 
+${inspirationBrief(project.inspiration)}
+
 ## BOOK ART BIBLE
 - Reader: ${project.audience} (${project.readingLevel})
 - Language and cultural context: ${project.language}
@@ -587,6 +592,8 @@ READER: ${project.audience} (${project.readingLevel})
 SCENE: ${slot.sceneBrief}
 ${slot.role === "cover" ? `BOOK SUBJECT: ${project.title}` : `CHAPTER CONTEXT: ${context}`}
 CAPTION INTENT: ${slot.caption}
+
+${inspirationBrief(project.inspiration)}
 
 COMPOSITION REQUIREMENTS
 - Show one specific, believable moment with a clear focal subject, purposeful action, foreground, middle ground, background, natural lighting and culturally grounded material detail.

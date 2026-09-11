@@ -9,6 +9,8 @@ import { SourceBookReviewPanel } from "./components/source-book-review";
 import { compareSourceVerse, sourceImageSignature, sourceVerseSignature, sourceReviewIssues, inspectRenderedSourceVerses, inspectRenderedSourceImages, type SourceBookReview } from "../lib/source-book-review";
 import { strToU8, unzipSync, zipSync } from "fflate";
 import { jsPDF } from "jspdf";
+import { BookInspirationGallery, InspirationShelf } from "./components/book-inspiration";
+import { applyInspiration, inspirationBrief, inspirationPaletteStyle, normalizeInspiration, type BookInspiration } from "../lib/book-inspiration";
 import { placeBookIllustrations } from "../lib/book-illustrations";
 import { renderBookPageCanvas } from "../lib/book-raster";
 import { measureBookContent, pageFlowHtml, paginateFlowBlocks, refreshBookPageNumbers, assertFlowPreserved, inspectBookPage } from "../lib/book-layout";
@@ -22,7 +24,7 @@ import { assignIllustrationsToReaderPages, buildExternalAiPrompt, buildExternalI
 import { assessPublication, chapterRequiresIllustration, paginateContents, pdfRasterSettings, readerSafeImageCaption, sanitizeReaderHtml, sanitizeReaderImageHtml, type ContentsEntry } from "../lib/publication";
 import { BOOK_FORMATS, DEFAULT_NEW_BOOK_FORMAT, LEGACY_BOOK_FORMAT, assessBookFormatPreview, bookFormat, bookFormatCapacityRatio, bookFormatCssVariables, isBookFormatId, type BookFormatId, type BookFormatPreviewResult, type BookPageMetric } from "../lib/book-format";
 
-type View = "dashboard" | "wizard" | "external" | "analysis" | "brief" | "editor";
+type View = "inspiration" | "dashboard" | "wizard" | "external" | "analysis" | "brief" | "editor";
 type EditorWorkspace = "designer" | "workflow";
 
 type SourceSection = { title: string; page: number; excerpt: string };
@@ -211,6 +213,7 @@ type DesignerPageOverride = DesignerPageRevision & {
 type DesignerStylePreset = { id: string; name: string; style: Partial<DesignerPageRevision> };
 
 type Project = {
+  inspiration?: BookInspiration;
   sourceManifest?: SourceBookManifest;
   sourceReview?: SourceBookReview;
   sourceAssets?: SourceArchiveAsset[];
@@ -1070,6 +1073,7 @@ function normalizeProject(saved: Project): Project {
     ...emptyProject,
     ...cleanSaved,
     sourceBookOptions: normalizeSourceBookOptions(cleanSaved.sourceBookOptions),
+    inspiration: cleanSaved.inspiration ? normalizeInspiration(cleanSaved.inspiration) : undefined,
     adaptationPlanVersion: cleanSaved.adaptationPlanVersion ?? 1,
     audience: reader.value,
     readingLevel: reader.readingLevel,
@@ -1416,6 +1420,8 @@ function printableChapters(chapters: Chapter[]) {
 
 export default function Home() {
   const [view, setView] = useState<View>("dashboard");
+  const [inspirationReturn, setInspirationReturn] = useState<View>("dashboard");
+  const [inspirationProjectId, setInspirationProjectId] = useState<string>();
   const [project, setProject] = useState<Project>(seedProject);
   const [projects, setProjects] = useState<Project[]>([seedProject]);
   const [activeChapter, setActiveChapter] = useState(1);
@@ -1493,6 +1499,27 @@ export default function Home() {
     return next;
   });
 
+  async function openInspiration() {
+    if (view === "editor" && editorWorkspace === "designer") {
+      try { await designerStudioRef.current?.saveWholeBook(); }
+      catch (error) { notify(error instanceof Error ? error.message : "Save designer changes before opening inspiration."); return; }
+    }
+    setInspirationReturn(view);
+    setInspirationProjectId(view === "dashboard" ? undefined : project.id);
+    setView("inspiration");
+  }
+
+  async function saveInspiration(targetId: string, inspiration: BookInspiration, title: string) {
+    const target = targetId === "new"
+      ? { ...emptyProject, id: makeId(), title, editorialPreferences: [...designerPreferences], chapters: emptyProject.chapters.map(chapter => ({ ...chapter })) }
+      : targetId === project.id ? project : projects.find(item => item.id === targetId);
+    if (!target) throw new Error("That book is no longer available. Choose another project.");
+    const next = { ...target, ...applyInspiration(target.bookPersona, inspiration) };
+    await persistProject(next);
+    setInspirationProjectId(next.id);
+    if (targetId === "new") { setWizardStep(0); setEditorWorkspace("workflow"); setView("wizard"); }
+  }
+
   function startNewBook() {
     setProject({ ...emptyProject, id: makeId(), editorialPreferences: [...designerPreferences], chapters: emptyProject.chapters.map((chapter) => ({ ...chapter })) });
     setWizardStep(0);
@@ -1514,7 +1541,7 @@ export default function Home() {
     try {
       const source = await uploadSourceForAnalysis(file, project.id || makeId(), project.audience, setSourceProgress);
       const headings = source.headings;
-      const persona = inferBookPersona({ title: file.name.replace(/\.[^.]+$/, ""), sourcePreview: source.preview, sourceTerms: source.terms, sourceHeadings: headings, bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
+      const persona = project.inspiration && Object.keys(project.inspiration.references).length ? project.bookPersona : inferBookPersona({ title: file.name.replace(/\.[^.]+$/, ""), sourcePreview: source.preview, sourceTerms: source.terms, sourceHeadings: headings, bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
       const sourceChapters: Chapter[] = headings.map((title, index) => chapterFromContextPlan(title, index, source.sections[index], source.chapterPlans[index], project.audience));
       const personaProject = { ...project, ...bookPersonaPatch(persona), sourceTerms: source.terms };
       const chapters = attachChapterVisuals(personaProject, applyAutomaticAdaptationPlan(sourceChapters, project.audience, true));
@@ -1551,7 +1578,7 @@ export default function Home() {
     try {
       const source = await uploadSourceForAnalysis(file, project.id, project.audience, setSourceProgress);
       const titles = source.sourceIntelligence?.status === "ocr-required" ? [] : source.headings.length ? source.headings : project.sourceHeadings;
-      const persona = inferBookPersona({ title: project.title, sourcePreview: source.preview, sourceTerms: source.terms, sourceHeadings: titles, bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
+      const persona = project.inspiration && Object.keys(project.inspiration.references).length ? project.bookPersona : inferBookPersona({ title: project.title, sourcePreview: source.preview, sourceTerms: source.terms, sourceHeadings: titles, bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
       const personaProject = { ...project, ...bookPersonaPatch(persona), sourceTerms: source.terms };
       const next = {
         ...project,
@@ -1629,7 +1656,7 @@ export default function Home() {
       return { ...seed, recommendedPages: recommendedAdaptationPages(seed, project.audience) };
     });
     const sourceChapters = selected.map((item, index) => chapterFromContextPlan(item.title, index, undefined, plans[index], project.audience));
-    const persona = inferBookPersona({ title: project.title, sourcePreview: selected.map((item) => item.title).join(" "), sourceTerms: project.sourceTerms, sourceHeadings: selected.map((item) => item.title), bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
+    const persona = project.inspiration && Object.keys(project.inspiration.references).length ? project.bookPersona : inferBookPersona({ title: project.title, sourcePreview: selected.map((item) => item.title).join(" "), sourceTerms: project.sourceTerms, sourceHeadings: selected.map((item) => item.title), bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
     const personaProject = { ...project, ...bookPersonaPatch(persona) };
     patchProject({ sourceHeadings: selected.map((item) => item.title), chapters: attachChapterVisuals(personaProject, applyAutomaticAdaptationPlan(sourceChapters, project.audience, true)), sourceIntelligence: { ...project.sourceIntelligence, status: "ready", structureMode: mode, progress: 100, message: `${selected.length} verified ${mode === "parts" ? "Parts" : "chapters"} are ready for generation.` }, ...bookPersonaPatch(persona), adaptationPlanConfirmed: false, briefApproved: false });
     notify(`${selected.length} source-led chapters prepared from the verified outline`);
@@ -1691,7 +1718,7 @@ export default function Home() {
     });
     const illustrationSlots = [...createExternalIllustrationSlots(result, project.title, project.sourceBookOptions?.imageMode === "source-first"), ...(result.sourceManifest ? sourceImageSlots(result.sourceManifest,result.sections) : [])];
     if(new Set(illustrationSlots.map(slot=>slot.id)).size!==illustrationSlots.length)throw new Error("Source placement IDs must not overlap the generated illustration IDs. Rename them in the source manifest.");
-    const persona = inferBookPersona({ title: result.title || project.title, sourcePreview: result.sections.map((section) => `${section.title} ${section.raw.slice(0, 220)}`).join(" "), sourceHeadings: result.sections.map((section) => readerFacingChapterTitle(section.title)), bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
+    const persona = project.inspiration && Object.keys(project.inspiration.references).length ? project.bookPersona : inferBookPersona({ title: result.title || project.title, sourcePreview: result.sections.map((section) => `${section.title} ${section.raw.slice(0, 220)}`).join(" "), sourceHeadings: result.sections.map((section) => readerFacingChapterTitle(section.title)), bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
     const nextBase: Project = {
       ...project,
       title: project.title.trim() || result.title,
@@ -1851,7 +1878,7 @@ export default function Home() {
       if (!response.ok || !data.source) throw new Error(data.error || "Source re-check failed");
       const awaitingSourceOutline = Boolean(data.source.sourceIntelligence && data.source.sourceIntelligence.status !== "ready");
       const titles = awaitingSourceOutline ? [] : data.source.headings.length ? data.source.headings : next.sourceHeadings;
-      const persona = inferBookPersona({ title: next.title, sourcePreview: data.source.preview, sourceTerms: data.source.terms, sourceHeadings: titles, bookType: next.bookType }, projects.filter((item) => item.id !== next.id).map((item) => item.bookPersona?.signature).filter(Boolean));
+      const persona = next.inspiration && Object.keys(next.inspiration.references).length ? next.bookPersona : inferBookPersona({ title: next.title, sourcePreview: data.source.preview, sourceTerms: data.source.terms, sourceHeadings: titles, bookType: next.bookType }, projects.filter((item) => item.id !== next.id).map((item) => item.bookPersona?.signature).filter(Boolean));
       const personaProject = { ...next, ...bookPersonaPatch(persona), sourceTerms: data.source.terms };
       next = {
         ...next,
@@ -1912,6 +1939,8 @@ BOOK AND CHAPTER CONTEXT
 - Language: ${project.language}
 - Chapter focus: ${active.context || chapterText.slice(0, 1700)}
 - Essential concepts to represent: ${visualTerms.join(", ") || "the central idea of the chapter"}
+
+${inspirationBrief(project.inspiration)}
 
 BOOK PERSONA
 ${project.bookPersona.name} · ${project.bookPersona.family}
@@ -2677,7 +2706,9 @@ OUTPUT REQUIREMENTS
     else openPreview();
   }
 
-  if (view === "dashboard") return <Dashboard projects={projects} onNew={startNewBook} onOpen={openProject} onDuplicate={duplicateProject} onDelete={deleteProject} />;
+  if (view === "inspiration") return <BookInspirationGallery projects={[project, ...projects.filter(item => item.id !== project.id)]} initialProjectId={inspirationProjectId} onBack={() => setView(inspirationReturn)} onApply={saveInspiration}/>;
+
+  if (view === "dashboard") return <Dashboard onInspiration={() => void openInspiration()} projects={projects} onNew={startNewBook} onOpen={openProject} onDuplicate={duplicateProject} onDelete={deleteProject} />;
 
   return (
     <div className="studio-shell">
@@ -2685,6 +2716,7 @@ OUTPUT REQUIREMENTS
         <button className="brand" onClick={() => setView("dashboard")}><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></button>
         <div className="current-project"><i /> <span><strong>{project.title}</strong><small>{project.source}</small></span></div>
         <div className="top-actions">
+          <button className="inspiration-nav-button" onClick={() => void openInspiration()} disabled={draftBusy || sourceBusy}>Book inspiration</button>
           {view === "editor" && <><button className={editorWorkspace === "designer" ? "designer-nav-button active" : "designer-nav-button"} onClick={() => setEditorWorkspace("designer")}>{editorWorkspace === "workflow" ? "Return to Designer" : "Designer"}</button><button className="pdf-button" onClick={openWorkspacePreview}>Preview & PDF</button></>}
           {(view === "editor" || view === "brief") && <details className="advanced-tools"><summary>Advanced</summary><div>{view === "editor" && <><button onClick={() => void openProductionWorkflow("top")}>Production workflow</button><button onClick={() => void openProductionWorkflow("chapters")}>Chapters</button><button onClick={() => setShowReviewQueue(true)}>Review queue · {project.chapters.filter((chapter) => !isPublishApproved(chapter)).length || "complete"}</button><button onClick={() => void openProductionWorkflow("illustrations")}>Illustrations</button>{project.creationMode === "external" && <button onClick={() => setView("external")}>External illustration package</button>}<button onClick={() => setView("brief")}>Book plan</button></>}<label className="advanced-upload">{sourceBusy ? "Reading source…" : "Replace source book"}<input type="file" accept=".pdf,.docx,.txt,.md" disabled={sourceBusy || draftBusy} onChange={(event) => event.target.files?.[0] && refreshSource(event.target.files[0])}/></label>{project.sourceManifest && <button onClick={() => void openSourceReview()}>Review source images & Sanskrit</button>}<button onClick={openVersions}>Version history</button><button onClick={() => setShowOperations(true)}>Request history</button><button onClick={saveProject}>Save project now</button><button onClick={exportDoc} disabled={exportBusy}>{exportBusy ? "Preparing DOCX…" : "Download DOCX"}</button><button className="package-import-button" onClick={() => setShowPackageImport(true)}>ChatGPT ZIP workflow</button><small>Generation, review, source, versions and export tools</small></div></details>}
         </div>
@@ -2825,9 +2857,10 @@ function ThemeSwitcher(){
   return <div className="theme-switcher"><label>Theme</label><select value={theme} onChange={e=>setTheme((e.target as HTMLSelectElement).value)}><option value="original">Original Forest</option><option value="banyan">Banyan Library</option><option value="curious">Curious Lab</option><option value="scholar">Scholar&apos;s Desk</option></select></div>;
 }
 
-function Dashboard({ projects, onNew, onOpen, onDuplicate, onDelete }: { projects: Project[]; onNew: () => void; onOpen: (project: Project) => void; onDuplicate: (project: Project) => void; onDelete: (project: Project) => void }) {
+function Dashboard({ projects, onNew, onOpen, onDuplicate, onDelete, onInspiration }: { onInspiration: () => void; projects: Project[]; onNew: () => void; onOpen: (project: Project) => void; onDuplicate: (project: Project) => void; onDelete: (project: Project) => void }) {
   return <main className="dashboard">
     <header><div className="brand"><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></div><div style={{display:"flex",alignItems:"center",gap:"12px"}}><ThemeSwitcher/><button className="primary" onClick={onNew}>＋ New book</button></div></header>
+    <InspirationShelf onOpen={onInspiration}/>
     <section className="hero">
       <div><p className="eyebrow">CHILDREN’S ADAPTATION STUDIO</p><h1>Turn any source into a book<br/><em>children want to read.</em></h1><p className="hero-copy">Preserve every original chapter, then reshape the writing, activities and visual world for children aged 7–15.</p><button className="hero-cta" onClick={onNew}>Start a children’s adaptation <span>→</span></button><small>AGES 7–15 · PDF · DOCX · TXT · NATURAL LENGTH · 100-PAGE CEILING</small></div>
       <div className="hero-books" aria-hidden="true"><div className="book back"><span>THE SOURCE</span></div><div className="book front"><span>A BOOK FOR</span><strong>CURIOUS<br/>YOUNG MINDS</strong><i>READ · DISCOVER · CREATE</i><b>✦</b></div></div>
@@ -2953,6 +2986,7 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
     bookType: project.bookType,
     aesthetic: project.aesthetic,
     illustrationStyle: project.illustrationStyle,
+    inspiration: project.inspiration,
     sourceBookOptions: project.sourceBookOptions,
     learningFeatures: project.learningFeatures,
     chapters: project.chapters.map((chapter) => ({ id: chapter.id, title: chapter.title, body: chapter.body, context: chapter.context })),
@@ -3104,7 +3138,7 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
 }
 
 function ExternalAiManuscript({ project, onBack, onAccept, onImportIllustrations, onOpenDesigner, onNotify }: { project: Project; onBack: () => void; onAccept: (result: ExternalManuscriptResult, fileName: string) => Promise<void>; onImportIllustrations: (candidates: ExternalIllustrationCandidate[], issues: string[], sourceFiles?: SourceImageUpload[]) => Promise<void>; onOpenDesigner: () => void; onNotify: (message: string) => void }) {
-  const prompt = useMemo(() => buildExternalAiPrompt({ title: project.title, sourceName: project.source, audience: project.audience, readingLevel: project.readingLevel, language: project.language, bookType: project.bookType, aesthetic: project.aesthetic, illustrationStyle: project.illustrationStyle, sourceBookOptions: project.sourceBookOptions, learningFeatures: project.learningFeatures }), [project]);
+  const prompt = useMemo(() => buildExternalAiPrompt({ inspiration: project.inspiration, title: project.title, sourceName: project.source, audience: project.audience, readingLevel: project.readingLevel, language: project.language, bookType: project.bookType, aesthetic: project.aesthetic, illustrationStyle: project.illustrationStyle, sourceBookOptions: project.sourceBookOptions, learningFeatures: project.learningFeatures }), [project]);
   const [showManuscriptStage, setShowManuscriptStage] = useState(!project.externalManuscript);
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [manuscriptText, setManuscriptText] = useState("");
@@ -3781,7 +3815,7 @@ function renderBookPage(project: Project, page: DesignerPageOverride, key: strin
     inset: `${page.borderInset}px`, border: `${page.borderWidth}px ${page.borderStyle} ${page.borderColor}`, borderRadius: `${page.borderRadius}px` };
   return <article key={key} data-page-slot={page.slotId} data-book-format={project.bookFormat}
     className={`designer-canvas-page book-sheet ${designerBookClasses(project, page.borderStyle === "inherit" ? project.bookBorder : "No Border")} ${designerPageClasses(project, page)} book-align-${project.bookAlignment || "left"}${page.backgroundImageUrl ? " has-background" : ""}${page.intentionalBlank ? " blank" : ""}${canva ? " canva-custom-sheet" : ""}${options.draftProof ? " draft-proof" : ""}`}
-    style={{ ...bookFormatCssVariables(project.bookFormat), backgroundColor: page.backgroundColor } as CSSProperties} onMouseDown={options.onMouseDown}>
+    style={{ ...bookFormatCssVariables(project.bookFormat), ...(project.inspiration ? inspirationPaletteStyle(project.bookPersona) : {}), backgroundColor: page.backgroundColor } as CSSProperties} onMouseDown={options.onMouseDown}>
     {canva ? <img src={canva.current.imageUrl} alt={`${page.label} designed in Canva`}/> : <>
       <div className="designer-background-layer" style={background}/><div className="designer-border-layer" style={border}/>
       <div className={`designer-watermark-layer${page.watermarkRepeat ? " repeat" : ""}`} style={{ opacity: page.watermarkOpacity, left: `${page.watermarkX}%`, top: `${page.watermarkY}%`, transform: `translate(-50%,-50%) rotate(${page.watermarkRotation}deg)`, display: page.watermarkVisible ? "grid" : "none" }}>
