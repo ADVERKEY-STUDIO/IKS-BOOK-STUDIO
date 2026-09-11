@@ -1,3 +1,4 @@
+import { newEdition, applyEditionAction, editionHtml, type Edition, type EditionAction } from "../lib/devotional-edition";
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
@@ -755,6 +756,58 @@ function makeSections(headings: string[], pageTexts: string[], fallbackText: str
   });
 }
 
+async function editionApi(request: Request, env: Env) {
+  const url = new URL(request.url), owner = ownerKey(request);
+  if (request.method !== "POST" && request.method !== "GET") return json({ error: "Method not allowed" }, 405);
+  const upload = url.pathname.endsWith("/source");
+  const form = upload && request.method === "POST" ? await request.formData() : null;
+  const body = request.method === "POST" && !form ? await request.json() as { projectId: string; expectedRevision: number; action: EditionAction } : null;
+  const id = body?.projectId || String(form?.get("projectId") || url.searchParams.get("projectId") || "");
+  const row = await env.DB.prepare("SELECT data_json FROM book_projects WHERE id = ? AND owner_key = ?").bind(id, owner).first<{ data_json: string }>();
+  if (!row) return json({ error: "Edition not found" }, 404);
+  const project = JSON.parse(row.data_json) as Record<string, unknown> & { edition?: Edition };
+  if (!project.edition) return json({ error: "This project uses the existing adaptation workflow." }, 400);
+  if (request.method === "GET") {
+    if (!url.pathname.endsWith("/export")) return json({ project });
+    try { return new Response(editionHtml(project.edition, `${url.origin}/fonts/book-sanskrit.ttf`), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } }); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : "Review the edition before export." }, 422); }
+  }
+  const expected = body?.expectedRevision ?? Number(form?.get("expectedRevision"));
+  if (expected !== project.edition.revision) return json({ error: "This edition changed elsewhere. Reload it before applying your correction." }, 409);
+  let storedKey: string | undefined;
+  try {
+    let action = body?.action;
+    if (form) {
+      const file = form.get("file");
+      if (!(file instanceof File) || !file.size || file.size > 10 * 1024 * 1024) throw new Error("Choose a TXT, DOCX, or text PDF up to 10 MB.");
+      const extension = sourceExtension(file.name);
+      if (!["txt", "docx", "pdf"].includes(extension)) throw new Error("Use TXT, DOCX, or a text PDF.");
+      const bytes = await file.arrayBuffer();
+      const extracted = await extractSourcePages(bytes, extension);
+      // Bound long extraction segments without trimming or normalizing original characters.
+      const pages = extracted.pageTexts.flatMap(text => { const parts: string[] = []; for (let i = 0; i < text.length; i += 40000) parts.push(text.slice(i, i + 40000)); return parts; });
+      storedKey = `sources/${owner}/${id}/${crypto.randomUUID()}.${extension}`;
+      action = { type: "import", pages, source: { key: storedKey, name: file.name, size: file.size, importedAt: new Date().toISOString() } };
+      const edition = applyEditionAction(project.edition, action);
+      await env.BUCKET.put(storedKey, bytes, { httpMetadata: { contentType: file.type || "application/octet-stream" }, customMetadata: { originalName: file.name } });
+      project.edition = edition;
+    } else {
+      if (!action || action.type === "import") throw new Error("Use the source upload to import a file.");
+      project.edition = applyEditionAction(project.edition, action);
+    }
+    project.title = project.edition.metadata.title;
+    project.audience = project.edition.metadata.audience;
+    project.updatedAt = "Just now";
+    const result = await env.DB.prepare("UPDATE book_projects SET data_json = ?, title = ?, updated_at = ? WHERE id = ? AND owner_key = ? AND data_json = ?")
+      .bind(JSON.stringify(project), project.title, new Date().toISOString(), id, owner, row.data_json).run();
+    if (!result.meta.changes) { if (storedKey) await env.BUCKET.delete(storedKey); return json({ error: "The book changed during this save. Reload and try again." }, 409); }
+    return json({ project });
+  } catch (error) {
+    if (storedKey) await env.BUCKET.delete(storedKey);
+    return json({ error: error instanceof Error ? error.message : "Could not update the edition." }, 400);
+  }
+}
+
 async function projectsApi(request: Request, env: Env) {
   const owner = ownerKey(request);
   if (request.method === "GET") {
@@ -763,10 +816,28 @@ async function projectsApi(request: Request, env: Env) {
   }
   if (request.method === "POST") {
     const incoming = await request.json() as { id?: string; title?: string; source?: string; chapters?: DraftChapterInput[] } & Record<string, unknown>;
+    const existing = incoming.id ? await env.DB.prepare("SELECT data_json FROM book_projects WHERE id = ? AND owner_key = ?").bind(incoming.id, owner).first<{ data_json: string }>() : null;
+    const old = existing ? JSON.parse(existing.data_json) : null;
+    if (old?.edition && JSON.stringify(old.edition) !== JSON.stringify(incoming.edition)) return json({ error: "Protected content must be changed in the source desk. Reload this project." }, 409);
+    if (!old?.edition && incoming.edition) {
+      if (typeof incoming.editionCopyFrom === "string") {
+        const original = await env.DB.prepare("SELECT data_json FROM book_projects WHERE id = ? AND owner_key = ?").bind(incoming.editionCopyFrom, owner).first<{ data_json: string }>();
+        const originalEdition = original ? JSON.parse(original.data_json).edition as Edition : null;
+        if (!originalEdition) return json({ error: "Original edition not found" }, 404);
+        incoming.edition = applyEditionAction(originalEdition, { type: "metadata", metadata: { ...originalEdition.metadata, title: String(incoming.title) } });
+      } else incoming.edition = newEdition();
+    }
+    delete incoming.editionCopyFrom;
     const project = { ...incoming, chapters: incoming.chapters ? fitDraftChaptersToBookLimit(incoming.chapters) : incoming.chapters };
     if (!project.id || !project.title || !project.source) return json({ error: "Incomplete book project" }, 400);
     const saved = { ...project, updatedAt: "Just now" };
     const now = new Date().toISOString();
+    if (old?.edition) {
+      const result = await env.DB.prepare("UPDATE book_projects SET title = ?, source_name = ?, data_json = ?, updated_at = ? WHERE id = ? AND owner_key = ? AND data_json = ?")
+        .bind(project.title, project.source, JSON.stringify(saved), now, project.id, owner, existing!.data_json).run();
+      if (!result.meta.changes) return json({ error: "The edition changed while saving. Reload the book." }, 409);
+      return json({ project: saved });
+    }
     await env.DB.prepare(`INSERT INTO book_projects (id, owner_key, title, source_name, data_json, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET title = excluded.title, source_name = excluded.source_name,
@@ -1345,6 +1416,7 @@ const worker = {
 
     try {
       if (url.pathname.startsWith("/api/")) await ensureSchema(env);
+      if (["/api/edition", "/api/edition/source", "/api/edition/export"].includes(url.pathname)) return await editionApi(request, env);
       if (url.pathname === "/api/projects") return await projectsApi(request, env);
       if (url.pathname === "/api/versions") return await versionsApi(request, env);
       if (url.pathname === "/api/preferences") return await preferencesApi(request, env);

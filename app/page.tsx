@@ -9,6 +9,8 @@ import { SourceBookReviewPanel } from "./components/source-book-review";
 import { compareSourceVerse, sourceImageSignature, sourceVerseSignature, sourceReviewIssues, inspectRenderedSourceVerses, inspectRenderedSourceImages, type SourceBookReview } from "../lib/source-book-review";
 import { strToU8, unzipSync, zipSync } from "fflate";
 import { jsPDF } from "jspdf";
+import { EditionDesk } from "./components/edition-desk";
+import { newEdition, type Edition, type EditionAction } from "../lib/devotional-edition";
 import { BookInspirationGallery, InspirationShelf } from "./components/book-inspiration";
 import { applyInspiration, inspirationBrief, inspirationPaletteStyle, normalizeInspiration, type BookInspiration } from "../lib/book-inspiration";
 import { placeBookIllustrations } from "../lib/book-illustrations";
@@ -24,7 +26,7 @@ import { assignIllustrationsToReaderPages, buildExternalAiPrompt, buildExternalI
 import { assessPublication, chapterRequiresIllustration, paginateContents, pdfRasterSettings, readerSafeImageCaption, sanitizeReaderHtml, sanitizeReaderImageHtml, type ContentsEntry } from "../lib/publication";
 import { BOOK_FORMATS, DEFAULT_NEW_BOOK_FORMAT, LEGACY_BOOK_FORMAT, assessBookFormatPreview, bookFormat, bookFormatCapacityRatio, bookFormatCssVariables, isBookFormatId, type BookFormatId, type BookFormatPreviewResult, type BookPageMetric } from "../lib/book-format";
 
-type View = "inspiration" | "dashboard" | "wizard" | "external" | "analysis" | "brief" | "editor";
+type View = "edition" | "inspiration" | "dashboard" | "wizard" | "external" | "analysis" | "brief" | "editor";
 type EditorWorkspace = "designer" | "workflow";
 
 type SourceSection = { title: string; page: number; excerpt: string };
@@ -213,6 +215,7 @@ type DesignerPageOverride = DesignerPageRevision & {
 type DesignerStylePreset = { id: string; name: string; style: Partial<DesignerPageRevision> };
 
 type Project = {
+  edition?: Edition;
   inspiration?: BookInspiration;
   sourceManifest?: SourceBookManifest;
   sourceReview?: SourceBookReview;
@@ -1055,6 +1058,7 @@ function repairChapterHierarchy(chapters: Chapter[]) {
 }
 
 function normalizeProject(saved: Project): Project {
+  if (saved.edition) return { ...emptyProject, ...saved, audience: saved.edition.metadata.audience };
   const { maxPages: _removedLegacyPageLimit, ...savedWithoutPageLimit } = saved as Project & { maxPages?: number };
   void _removedLegacyPageLimit;
   const cleanSaved = savedWithoutPageLimit as Project;
@@ -1520,6 +1524,18 @@ export default function Home() {
     if (targetId === "new") { setWizardStep(0); setEditorWorkspace("workflow"); setView("wizard"); }
   }
 
+  async function startEdition() {
+    const next = { ...emptyProject, id: makeId(), title: "Untitled devotional edition", edition: newEdition(), chapters: [] };
+    try { await persistProject(next); setView("edition"); } catch (error) { notify(error instanceof Error ? error.message : "Could not create edition"); }
+  }
+  async function editionRequest(action?: EditionAction, file?: File) {
+    let response: Response;
+    if (file) { const form = new FormData(); form.set("projectId", project.id); form.set("expectedRevision", String(project.edition?.revision)); form.set("file", file); response = await fetch("/api/edition/source", { method: "POST", headers: ownerHeaders(), body: form }); }
+    else response = await fetch("/api/edition", { method: "POST", headers: requestHeaders(), body: JSON.stringify({ projectId: project.id, expectedRevision: project.edition?.revision, action }) });
+    const data = await response.json() as { project: Project; error?: string };
+    if (!response.ok) throw new Error(data.error || "Could not save edition");
+    setProject(data.project); setProjects(current => [data.project, ...current.filter(p => p.id !== data.project.id)]);
+  }
   function startNewBook() {
     setProject({ ...emptyProject, id: makeId(), editorialPreferences: [...designerPreferences], chapters: emptyProject.chapters.map((chapter) => ({ ...chapter })) });
     setWizardStep(0);
@@ -1858,6 +1874,7 @@ export default function Home() {
   async function openProject(selected: Project) {
     let next = normalizeProject(selected);
     setProject(next);
+    if (next.edition) { setView("edition"); return; }
     setActiveChapter(next.chapters[0]?.id ?? 1);
     const needsContextPlan = Boolean(next.sourceObjectKey) && (next.adaptationPlanVersion !== ADAPTATION_PLAN_VERSION || next.chapters.some((chapter) => !chapter.sourceWordCount || !chapter.sourcePageCount || !chapter.recommendedPages));
     if (next.adaptationPlanConfirmed && !needsContextPlan) {
@@ -2151,7 +2168,7 @@ OUTPUT REQUIREMENTS
 
   async function duplicateProject(source: Project) {
     const copy = normalizeProject({ ...source, id: makeId(), title: `${source.title} — Copy`, updatedAt: "Just now" });
-    try { await persistProject(copy); notify("Project duplicated"); } catch { notify("Could not duplicate project"); }
+    try { await persistProject(source.edition ? { ...copy, ...{ editionCopyFrom: source.id } } : copy); notify("Project duplicated"); } catch { notify("Could not duplicate project"); }
   }
 
   async function deleteProject(source: Project) {
@@ -2706,9 +2723,10 @@ OUTPUT REQUIREMENTS
     else openPreview();
   }
 
+  if (view === "edition" && project.edition) return <EditionDesk key={project.id} edition={project.edition} onBack={() => setView("dashboard")} onAction={action => editionRequest(action)} onUpload={file => editionRequest(undefined, file)} onReload={async () => { const response = await fetch(`/api/edition?projectId=${encodeURIComponent(project.id)}`, { headers: ownerHeaders() }); const data = await response.json() as { project: Project; error?: string }; if (!response.ok) throw new Error(data.error); setProject(data.project); setProjects(current => [data.project, ...current.filter(p => p.id !== data.project.id)]); }} onDownload={async (key, name) => { const response = await fetch(`/api/source/download?key=${encodeURIComponent(key)}`, { headers: ownerHeaders() }); if (!response.ok) throw new Error("Could not retrieve original source."); const url = URL.createObjectURL(await response.blob()); const a = document.createElement("a"); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 30000); }} onExport={async () => { const response = await fetch(`/api/edition/export?projectId=${encodeURIComponent(project.id)}`, { headers: ownerHeaders() }); if (!response.ok) { const data = await response.json() as { error?: string }; throw new Error(data.error || "Review the edition before export."); } return response.text(); }}/>;
   if (view === "inspiration") return <BookInspirationGallery projects={[project, ...projects.filter(item => item.id !== project.id)]} initialProjectId={inspirationProjectId} onBack={() => setView(inspirationReturn)} onApply={saveInspiration}/>;
 
-  if (view === "dashboard") return <Dashboard onInspiration={() => void openInspiration()} projects={projects} onNew={startNewBook} onOpen={openProject} onDuplicate={duplicateProject} onDelete={deleteProject} />;
+  if (view === "dashboard") return <Dashboard onNewEdition={() => void startEdition()} onInspiration={() => void openInspiration()} projects={projects} onNew={startNewBook} onOpen={openProject} onDuplicate={duplicateProject} onDelete={deleteProject} />;
 
   return (
     <div className="studio-shell">
@@ -2857,9 +2875,9 @@ function ThemeSwitcher(){
   return <div className="theme-switcher"><label>Theme</label><select value={theme} onChange={e=>setTheme((e.target as HTMLSelectElement).value)}><option value="original">Original Forest</option><option value="banyan">Banyan Library</option><option value="curious">Curious Lab</option><option value="scholar">Scholar&apos;s Desk</option></select></div>;
 }
 
-function Dashboard({ projects, onNew, onOpen, onDuplicate, onDelete, onInspiration }: { onInspiration: () => void; projects: Project[]; onNew: () => void; onOpen: (project: Project) => void; onDuplicate: (project: Project) => void; onDelete: (project: Project) => void }) {
+function Dashboard({ onNewEdition, projects, onNew, onOpen, onDuplicate, onDelete, onInspiration }: { onNewEdition: () => void; onInspiration: () => void; projects: Project[]; onNew: () => void; onOpen: (project: Project) => void; onDuplicate: (project: Project) => void; onDelete: (project: Project) => void }) {
   return <main className="dashboard">
-    <header><div className="brand"><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></div><div style={{display:"flex",alignItems:"center",gap:"12px"}}><ThemeSwitcher/><button className="primary" onClick={onNew}>＋ New book</button></div></header>
+    <header><div className="brand"><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></div><div style={{display:"flex",alignItems:"center",gap:"12px"}}><ThemeSwitcher/><button className="secondary" onClick={onNewEdition}>New devotional edition</button><button className="primary" onClick={onNew}>＋ New book</button></div></header>
     <InspirationShelf onOpen={onInspiration}/>
     <section className="hero">
       <div><p className="eyebrow">CHILDREN’S ADAPTATION STUDIO</p><h1>Turn any source into a book<br/><em>children want to read.</em></h1><p className="hero-copy">Preserve every original chapter, then reshape the writing, activities and visual world for children aged 7–15.</p><button className="hero-cta" onClick={onNew}>Start a children’s adaptation <span>→</span></button><small>AGES 7–15 · PDF · DOCX · TXT · NATURAL LENGTH · 100-PAGE CEILING</small></div>
@@ -2869,7 +2887,7 @@ function Dashboard({ projects, onNew, onOpen, onDuplicate, onDelete, onInspirati
       <div className="section-title"><div><p className="eyebrow">YOUR LIBRARY</p><h2>Continue where you left off</h2></div><span>{projects.length} {projects.length === 1 ? "project" : "projects"}</span></div>
       <div className="project-grid">
         <button className="new-card" onClick={onNew}><b>＋</b><strong>New adaptation</strong><small>Begin with any source book</small></button>
-        {projects.map((project) => <article className="project-card" key={project.id}><button className="project-open" onClick={() => onOpen(project)}><div className="mini-cover"><span>{project.chapters.length}</span><small>CHAPTERS</small></div><div><span className="status">IN EDITING</span><h3>{project.title}</h3><p>{project.source}</p><footer><span>{project.updatedAt}</span><strong>Open project →</strong></footer></div></button><div className="project-menu"><button onClick={() => onDuplicate(project)}>Duplicate</button>{project.id !== "arthashastra-sample" && <button onClick={() => onDelete(project)}>Delete</button>}</div></article>)}
+        {projects.map((project) => <article className="project-card" key={project.id}><button className="project-open" onClick={() => onOpen(project)}><div className="mini-cover"><span>{project.edition ? project.edition.passages.filter(p => !p.retired).length : project.chapters.length}</span><small>{project.edition ? "PASSAGES" : "CHAPTERS"}</small></div><div><span className="status">IN EDITING</span><h3>{project.title}</h3><p>{project.edition ? `${project.edition.metadata.type} · ${project.edition.metadata.audience}` : project.source}</p><footer><span>{project.updatedAt}</span><strong>Open project →</strong></footer></div></button><div className="project-menu"><button onClick={() => onDuplicate(project)}>Duplicate</button>{project.id !== "arthashastra-sample" && <button onClick={() => onDelete(project)}>Delete</button>}</div></article>)}
       </div>
     </section>
     <section className="workflow"><div><span>01</span><b>Upload</b><small>Any source book</small></div><i>→</i><div><span>02</span><b>Choose</b><small>Age, language and book world</small></div><i>→</i><div><span>03</span><b>Adapt</b><small>Child-friendly text and visuals</small></div><i>→</i><div><span>04</span><b>Publish</b><small>PDF or editable file</small></div></section>
