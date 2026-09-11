@@ -741,3 +741,37 @@ html[data-theme="scholar"] .paper{padding-left:84px !important;padding-right:84p
 .source-review-panel .sanskrit-verse { white-space: pre-line; }
 .source-preflight-results { background: #fff2d5; padding: 14px 24px; }
 @media(max-width:700px) { .source-image-comparison { grid-template-columns: 1fr; } .source-review-backdrop {padding:8px;} }
+
+/* Dashboard sections share a gutter; the header participates in document flow. */
+.dashboard { --dashboard-gutter: clamp(20px, 6vw, 96px); }
+.dashboard > header {
+  position: relative;
+  height: auto;
+  min-height: 80px;
+  padding: 18px var(--dashboard-gutter);
+  gap: 20px;
+  background: var(--cream);
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+}
+.dashboard > header .brand { flex-shrink: 0; }
+.dashboard > header .brand-mark { background: var(--forest); color: var(--gold); }
+.dashboard > header .brand small { color: var(--muted); }
+.dashboard > header .primary { background: var(--forest); color: white; white-space: nowrap; }
+.dashboard > header select { color: var(--ink); background: white; }
+.dashboard > .inspiration-shelf { padding: 40px var(--dashboard-gutter) 48px; }
+.dashboard .inspiration-shelf-heading { align-items: flex-end; }
+.dashboard .inspiration-shelf-heading h2 { font-size: clamp(26px, 2.5vw, 38px); }
+.dashboard .inspiration-shelf-images .reference-image { aspect-ratio: 4 / 3; }
+.dashboard > .hero { padding: 64px var(--dashboard-gutter) 90px; min-height: 430px; }
+@media (max-width: 800px) {
+  .dashboard > header { flex-wrap: wrap; gap: 16px; }
+  .dashboard > header > div:last-child { flex-wrap: wrap; }
+  .dashboard > .inspiration-shelf { padding-top: 28px; padding-bottom: 32px; }
+  .dashboard .inspiration-shelf-heading { align-items: flex-start; }
+  .dashboard > .hero { padding-top: 44px; }
+}
+@media (max-width: 480px) {
+  .dashboard > header > div:last-child { width: 100%; justify-content: space-between; }
+  .dashboard .inspiration-shelf-heading > button { white-space: normal; text-align: left; }
+}
