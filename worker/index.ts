@@ -1,3 +1,4 @@
+import { artDirectionBrief } from "../lib/art-direction";
 import { newEdition, applyEditionAction, editionHtml, type Edition, type EditionAction } from "../lib/devotional-edition";
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
@@ -768,6 +769,10 @@ async function editionApi(request: Request, env: Env) {
   const project = JSON.parse(row.data_json) as Record<string, unknown> & { edition?: Edition };
   if (!project.edition) return json({ error: "This project uses the existing adaptation workflow." }, 400);
   if (request.method === "GET") {
+    if (url.pathname.endsWith("/art-brief")) {
+      try { return new Response(artDirectionBrief(project.edition), { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } }); }
+      catch (error) { return json({ error: error instanceof Error ? error.message : "Approve the current guide." }, 422); }
+    }
     if (!url.pathname.endsWith("/export")) return json({ project });
     try { return new Response(editionHtml(project.edition, `${url.origin}/fonts/book-sanskrit.ttf`), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } }); }
     catch (error) { return json({ error: error instanceof Error ? error.message : "Review the edition before export." }, 422); }
@@ -1416,7 +1421,7 @@ const worker = {
 
     try {
       if (url.pathname.startsWith("/api/")) await ensureSchema(env);
-      if (["/api/edition", "/api/edition/source", "/api/edition/export"].includes(url.pathname)) return await editionApi(request, env);
+      if (["/api/edition", "/api/edition/source", "/api/edition/export", "/api/edition/art-brief"].includes(url.pathname)) return await editionApi(request, env);
       if (url.pathname === "/api/projects") return await projectsApi(request, env);
       if (url.pathname === "/api/versions") return await versionsApi(request, env);
       if (url.pathname === "/api/preferences") return await preferencesApi(request, env);

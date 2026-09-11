@@ -1,3 +1,4 @@
+import { artGuideProofCss, validateGuide, guideContext, latestGuide, type ArtDirection, type ArtGuide } from './art-direction.ts';
 /** Protected editorial content is changed only through explicit revision commands. */
 export const editionTypes = ['Original verses', 'Scripture with commentary', 'Illustrated devotional edition', 'Devotional narrative or retelling', 'Children’s or family adaptation'] as const;
 export const editionAudiences = ['Adults', 'Families', 'Children'] as const;
@@ -8,8 +9,10 @@ export type EditorialField = { text: string; provenance: Provenance; status: 'dr
 export type PassageSnapshot = { revision: number; fields: Record<PassageField, EditorialField>; location: string; reason: string; at: string };
 export type Passage = { id: string; revision: number; location: string; fields: Record<PassageField, EditorialField>; history: PassageSnapshot[]; derivedFrom: string[]; retired?: boolean };
 export type EditionMetadata = { title: string; type: typeof editionTypes[number]; audience: typeof editionAudiences[number]; sourceEdition: string; attribution: string; translator: string; language: string; script: string; sourceLocation: string };
-export type Edition = { version: 1; revision: number; metadata: EditionMetadata; metadataHistory?: { metadata: EditionMetadata; at: string; revision: number }[]; passages: Passage[]; sources: { key: string; name: string; size: number; importedAt: string }[]; affectedTargets: { passageId: string; targetId: string; at: string }[]; bindings: { passageId: string; targetId: string }[] };
+export type Edition = { version: 1; revision: number; artDirection?: ArtDirection; artGuideUsage?: { targetId: string; version: number }[]; metadata: EditionMetadata; metadataHistory?: { metadata: EditionMetadata; at: string; revision: number }[]; passages: Passage[]; sources: { key: string; name: string; size: number; importedAt: string }[]; affectedTargets: { passageId: string; targetId: string; at: string }[]; bindings: { passageId: string; targetId: string }[] };
 export type EditionAction =
+  | { type: 'save-art-guide'; guide: ArtGuide; reason: string }
+  | { type: 'approve-art-guide'; version: number }
   | { type: 'metadata'; metadata: EditionMetadata }
   | { type: 'add'; text: string; location: string; provenance: Provenance }
   | { type: 'edit'; id: string; field: PassageField; text: string; provenance: Provenance; reason: string; location: string }
@@ -48,7 +51,20 @@ export function applyEditionAction(current: Edition, action: EditionAction, at =
     for (const f of ['transliteration', 'translation', 'commentary'] as const) if (p.fields[f].text) { p.fields[f].status = 'stale'; delete p.fields[f].approvedAt; }
     for (const binding of next.bindings.filter(b => b.passageId === p.id)) next.affectedTargets.push({ ...binding, at });
   }
-  if (action.type === 'metadata') {
+  if (action.type === 'save-art-guide') {
+    if (!next.passages.some(p => !p.retired)) throw new Error('Add source passages before proposing a visual direction.');
+    const guide = validateGuide(action.guide);
+    if (!bounded(action.reason, 'Guide revision reason', 2000).trim()) throw new Error('Describe this guide revision.');
+    const versions = next.artDirection?.versions || [];
+    if (versions.length >= 100) throw new Error('This edition has reached the 100 art-guide version limit.');
+    next.artDirection = { versions: [...versions, { version: (versions.at(-1)?.version || 0)+1, guide, sourceContext: guideContext(next), createdAt: at, reason: action.reason }] };
+  } else if (action.type === 'approve-art-guide') {
+    const version = latestGuide(next);
+    if (!version || version.version !== action.version) throw new Error('Only the latest saved guide can be approved.');
+    if (version.sourceContext !== guideContext(next)) throw new Error('The manuscript changed. Save a reviewed guide version before approval.');
+    if (next.passages.some(p => !p.retired && p.fields.original.status !== 'approved')) throw new Error('Approve original passages in the source desk before approving the art guide.');
+    version.approvedAt = at;
+  } else if (action.type === 'metadata') {
     const m = action.metadata;
     if (!editionTypes.includes(m.type) || !editionAudiences.includes(m.audience)) throw new Error('Choose a valid edition type and audience.');
     for (const key of Object.keys(newEdition().metadata) as (keyof EditionMetadata)[]) bounded(m[key], key, 2000);
@@ -103,5 +119,5 @@ const escape = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '
 export function editionHtml(edition: Edition, fontUrl: string): string {
   const issues = editionExportIssues(edition); if (issues.length) throw new Error(issues.join('\n'));
   const m = edition.metadata;
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${escape(m.title)}</title><style>@font-face{font-family:Edition;src:url('${escape(fontUrl)}')}@page{size:A4;margin:22mm}body{max-width:170mm;margin:30px auto;padding:20px;font:16px/1.8 Edition,serif;color:#203d34}h1{font-size:30px}article{margin:24px 0;border-top:1px solid #ddd;padding-top:20px}p{white-space:pre-wrap;overflow-wrap:anywhere;orphans:3;widows:3}.original{font-size:22px;line-height:2}h2{font-size:14px}small{color:#52645c}@media print{body{margin:0;padding:0}h2{break-after:avoid}}</style></head><body><h1>${escape(m.title)}</h1><p>${escape([m.sourceEdition,m.attribution,m.translator].filter(Boolean).join('\n'))}</p>${edition.passages.filter(p => !p.retired).map(p => `<article><small>${escape(p.location)}</small>${passageFields.filter(f => f !== 'notes' && p.fields[f].text).map(f => `${f === 'original' ? '' : `<h2>${f[0].toUpperCase()+f.slice(1)}</h2>`}<p class="${f}" ${f === 'original' ? `lang="${escape(m.language === 'Sanskrit' ? 'sa' : m.language === 'Hindi' ? 'hi' : 'und')}"` : ''}>${escape(p.fields[f].text)}</p>`).join('')}</article>`).join('')}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escape(m.title)}</title><style>@font-face{font-family:Edition;src:url('${escape(fontUrl)}')}@page{size:A4;margin:22mm}body{max-width:170mm;margin:30px auto;padding:20px;font:16px/1.8 Edition,serif;color:#203d34}h1{font-size:30px}article{margin:24px 0;border-top:1px solid #ddd;padding-top:20px}p{white-space:pre-wrap;overflow-wrap:anywhere;orphans:3;widows:3}.original{font-size:22px;line-height:2}h2{font-size:14px}small{color:#52645c}@media print{body{margin:0;padding:0}h2{break-after:avoid}}${artGuideProofCss(edition, "body")}</style></head><body><h1>${escape(m.title)}</h1><p>${escape([m.sourceEdition,m.attribution,m.translator].filter(Boolean).join('\n'))}</p>${edition.passages.filter(p => !p.retired).map(p => `<article><small>${escape(p.location)}</small>${passageFields.filter(f => f !== 'notes' && p.fields[f].text).map(f => `${f === 'original' ? '' : `<h2>${f[0].toUpperCase()+f.slice(1)}</h2>`}<p class="${f}" ${f === 'original' ? `lang="${escape(m.language === 'Sanskrit' ? 'sa' : m.language === 'Hindi' ? 'hi' : 'und')}"` : ''}>${escape(p.fields[f].text)}</p>`).join('')}</article>`).join('')}</body></html>`;
 }
