@@ -1,4 +1,5 @@
 "use client";
+import { StoryboardWorkspace } from "./storyboard-workspace";
 import { useEffect, useRef, useState } from 'react';
 import { artGuideProofCss } from "../../lib/art-direction";
 import { VisualReferenceWorkspace, type ReferenceUpload } from "./visual-reference-workspace";
@@ -8,7 +9,7 @@ import { editionTypes, editionAudiences, passageFields, editionExportIssues, typ
 
 type Props = { onReferenceUpload: (input: ReferenceUpload) => Promise<void>; onReferenceImage: (key: string) => Promise<Blob>; onReferencePackage: (id: string) => Promise<void>; inspiration?: BookInspiration; onInspiration: () => void; onBrief: () => Promise<string>; edition: Edition; onAction: (action: EditionAction) => Promise<void>; onUpload: (file: File) => Promise<void>; onDownload: (key: string, name: string) => Promise<void>; onExport: () => Promise<string>; onBack: () => void; onReload: () => Promise<void> };
 export function EditionDesk({ onReferenceUpload, onReferenceImage, onReferencePackage, inspiration, onInspiration, onBrief, edition, onAction, onUpload, onDownload, onExport, onBack, onReload }: Props) {
-  const [tab, setTab] = useState<'setup' | 'source' | 'art' | 'references' | 'proof'>(edition.passages.length ? 'source' : 'setup');
+  const [tab, setTab] = useState<'setup' | 'source' | 'art' | 'references' | 'storyboard' | 'proof'>(edition.passages.length ? 'source' : 'setup');
   const [metadata, setMetadata] = useState(edition.metadata);
   const [newText, setNewText] = useState('');
   const [location, setLocation] = useState('');
@@ -43,7 +44,7 @@ export function EditionDesk({ onReferenceUpload, onReferenceImage, onReferencePa
   }
   return <main className="edition-desk">
     <header><button disabled={busy || dirty} onClick={onBack}>← Library</button><strong>{edition.metadata.title}</strong><span>Saved revision {edition.revision}</span></header>
-    <nav aria-label="Edition workspace">{(['setup', 'source', 'art', 'references', 'proof'] as const).map(t => <button key={t} disabled={busy || dirty} aria-current={tab === t ? 'page' : undefined} onClick={() => setTab(t)}>{t === 'setup' ? 'Edition setup' : t === 'source' ? 'Source desk' : t === 'art' ? 'Art direction' : t === 'references' ? 'Visual references' : 'Reading proof'}</button>)}</nav>
+    <nav aria-label="Edition workspace">{(['setup', 'source', 'art', 'references', 'storyboard', 'proof'] as const).map(t => <button key={t} disabled={busy || dirty} aria-current={tab === t ? 'page' : undefined} onClick={() => setTab(t)}>{t === 'setup' ? 'Edition setup' : t === 'source' ? 'Source desk' : t === 'art' ? 'Art direction' : t === 'references' ? 'Visual references' : t === 'storyboard' ? 'Storyboard' : 'Reading proof'}</button>)}</nav>
     {dirty && <p role="status">Save or cancel your edits before switching workspaces.</p>}
     {error && <div role="alert" className="edition-error">{error}<button disabled={busy} onClick={() => void run(onReload, 'Latest saved edition loaded.')}>Reload saved edition</button></div>}
     {message && <p role="status">{message}</p>}
@@ -61,6 +62,7 @@ export function EditionDesk({ onReferenceUpload, onReferenceImage, onReferencePa
       <details className="edition-panel"><summary>Retired passages and lineage ({edition.passages.filter(p => p.retired).length})</summary>{edition.passages.filter(p => p.retired).map(p => <article key={p.id}><h3>{p.location || p.id}</h3><p className="edition-original">{p.fields.original.text}</p><p>Retired by a split or merge. Earlier translations and notes remain in this record.</p>{passageFields.filter(f => f !== 'original' && p.fields[f].text).map(f => <p key={f}>{f}: {p.fields[f].text}</p>)}</article>)}</details></>}
     {tab === 'art' && <ArtDirectionWorkspace edition={edition} inspiration={inspiration} busy={busy} onDirty={setPassageDirty} onInspiration={onInspiration} onBrief={onBrief} onAction={action => run(() => onAction(action), action.type === 'approve-art-guide' ? 'Art guide approved for production.' : 'Art guide version saved.')} />}
     {tab === 'references' && <VisualReferenceWorkspace edition={edition} busy={busy} onDirty={setPassageDirty} onAction={action => run(() => onAction(action), 'Reference version saved.')} onUpload={input => run(() => onReferenceUpload(input), 'Image added as a new draft.')} onImage={onReferenceImage} onPackage={async id => { await run(() => onReferencePackage(id), 'Reference request package downloaded.'); }} />}
+    {tab === 'storyboard' && <StoryboardWorkspace edition={edition} busy={busy} onDirty={setPassageDirty} onAction={action => run(() => onAction(action), 'Storyboard saved.')} />}
     {tab === 'proof' && <section className="edition-panel"><h1>Reading proof</h1><p>This is a text proof for source review. Spread design and finished illustrations follow in later phases. Private editorial notes are excluded.</p>{issues.length > 0 && <div className="edition-error"><strong>Before export</strong><ul>{issues.map(i => <li key={i}>{i}</li>)}</ul></div>}<div className="edition-actions"><button disabled={busy || !!issues.length} onClick={() => void run(() => exportProof(true), 'Print proof opened. Choose Save as PDF in the print dialog.')}>Print / Save as PDF</button><button disabled={busy || !!issues.length} onClick={() => void run(() => exportProof(false), 'Reading proof downloaded.')}>Download HTML proof</button></div><style>{artGuideProofCss(edition)}</style><div className="edition-proof"><h2>{edition.metadata.title}</h2><p>{[edition.metadata.sourceEdition,edition.metadata.attribution,edition.metadata.translator].filter(Boolean).join(' · ')}</p>{passages.map(p => <article key={p.id}><small>{p.location}</small>{passageFields.filter(f => f !== 'notes' && p.fields[f].text).map(f => <div key={f}>{f !== 'original' && <h3>{f}</h3>}<p className={f === 'original' ? 'edition-original' : f}>{p.fields[f].text}</p></div>)}</article>)}</div></section>}
     {!!edition.affectedTargets.length && <section className="edition-panel"><h2>Dependent work needs review</h2>{edition.affectedTargets.map((t,i) => <p key={i}>{t.targetId} · source passage {t.passageId} changed</p>)}</section>}
   </main>;

@@ -796,7 +796,7 @@ async function editionApi(request: Request, env: Env) {
           const object = await env.BUCKET.get(image.key);
           if (!object || object.customMetadata?.owner !== owner) throw new Error("A reference image is missing. Restore it before downloading the package.");
           total += object.size;
-          if (total > 40 * 1024 * 1024) throw new Error("The package exceeds 40 MB. Save a draft with fewer or smaller reference images.");
+          if (total > 40 * 1024 * 1024) throw new Error("The package exceeds 40 MB. Approve a reference version with fewer or smaller images, then download again.");
           const path = `references/${image.id}.${image.mime === "image/png" ? "png" : image.mime === "image/webp" ? "webp" : "jpg"}`;
           files[path] = new Uint8Array(await object.arrayBuffer()); manifest.inputs.push({ id: image.id, path, view: image.view, credit: image.credit });
         }

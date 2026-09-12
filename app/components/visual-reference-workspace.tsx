@@ -20,14 +20,14 @@ export function VisualReferenceWorkspace({edition,busy,onAction,onUpload,onImage
  const [provenance,setProvenance]=useState<ReferenceImage['provenance']>('uploaded');
  const [left,setLeft]=useState(0),[right,setRight]=useState(0);
  const [note,setNote]=useState('');
- const dirty=JSON.stringify(draft)!==JSON.stringify(latest?.spec||emptyReferenceSpec())||JSON.stringify(images)!==JSON.stringify(latest?.images.map(i=>i.id)||[])||!!file;
+ const existingChanged=JSON.stringify(draft)!==JSON.stringify(latest?.spec||emptyReferenceSpec())||JSON.stringify(images)!==JSON.stringify(latest?.images.map(i=>i.id)||[]);
+ const dirty=existingChanged||!!file;
  const guide=latestGuide(edition);
  const known=[...new Map((ref?.versions.flatMap(v=>v.images)||[]).map(i=>[i.id,i])).values()];
  useEffect(()=>{setDraft(latest?.spec||emptyReferenceSpec());setImages(latest?.images.map(i=>i.id)||[]);setReason('');setFile(null);setCaption('');setLeft(approved?.version||latest?.version||0);setRight(latest?.version||0);},[selected,latest?.version]);
  useEffect(()=>{onDirty(dirty);return()=>onDirty(false);},[dirty,onDirty]);
  async function save(){const ok=await onAction({type:'save-reference',id:ref?.id,spec:draft,imageIds:images,reason});if(ok&&!ref){setDraft(emptyReferenceSpec());setImages([]);setReason('');setNote('Reference created. Select it from the library to upload images.');}}
  async function upload(){if(!ref||!file)return;const ok=await onUpload({referenceId:ref.id,file,view,caption,credit,provenance});if(ok){setFile(null);setCaption('');}}
- const existingChanged=JSON.stringify(draft)!==JSON.stringify(latest?.spec||emptyReferenceSpec())||JSON.stringify(images)!==JSON.stringify(latest?.images.map(i=>i.id)||[]);
  return <div className="reference-workspace"><section className="edition-panel"><h1>Characters and visual references</h1><p>Keep recurring figures, environments, and objects consistent. A new draft leaves the approved identity intact until you approve its replacement.</p><p>Current art guide: {guide?`version ${guide.version} · ${guideStatus(edition)}`:'not yet saved'}</p>{note&&<p role="status">{note}</p>}</section>
  <div className="reference-layout"><aside className="edition-panel reference-library"><button disabled={busy||dirty} onClick={()=>setSelected('new')}>New reference</button>{refs.map(r=><button key={r.id} disabled={busy||dirty} aria-current={r.id===selected?'true':undefined} onClick={()=>setSelected(r.id)}><strong>{r.versions.at(-1)?.spec.name}</strong><span>{r.versions.at(-1)?.spec.kind} · {r.archived?'archived':r.approvedVersion?`approved v${r.approvedVersion}`:'draft'}</span></button>)}</aside>
  <section className="edition-panel"><h2>{ref?'Reference details':'Create a reference'}</h2>{ref&&<p>Draft version {latest?.version} · {approved?`Production identity: version ${approved.version}`:'No approved identity yet'}</p>}
