@@ -1,0 +1,20 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {createRequire} from 'node:module';
+import {resolve,dirname} from 'node:path';
+const require=createRequire(import.meta.url),ts=require('typescript'),cache=new Map();
+function load(path){if(cache.has(path))return cache.get(path).exports;const module={exports:{}};cache.set(path,module);new Function('require','module','exports',ts.transpileModule(readFileSync(path,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(name=>name.startsWith('.')?load(resolve(dirname(path),name)):require(name),module,module.exports);return module.exports;}
+const {blankSpread}=load(resolve('lib/storyboard.ts'));
+const {newEdition}=load(resolve('lib/devotional-edition.ts'));
+const {bookPageSequence,bookDocument,bookExportIssues}=load(resolve('lib/book-export.ts'));
+const {reviewContext}=load(resolve('lib/book-review.ts'));
+const {backupKeys,restoredEdition}=load(resolve('lib/book-backup.ts'));
+function fixture(){const e=newEdition();e.storyboard=[{id:'cover',kind:'cover'},{id:'a',kind:'spread'},{id:'b',kind:'single'},{id:'c',kind:'spread'}];e.storyboard=e.storyboard.map(p=>({...blankSpread(),...p}));e.compositions=e.storyboard.map(p=>({planId:p.id,paper:'#fffdf7',layers:[]}));e.bookReview={manual:[],decisions:[],human:[],render:{context:reviewContext(e),at:'test',results:e.storyboard.map(p=>({planId:p.id,problems:[]}))}};return e;}
+test('single page order retains required blanks and excludes cover',()=>{assert.deepEqual(bookPageSequence(fixture()).map(p=>[p.number,p.planId,p.side]),[[1,'',0],[2,'a',0],[3,'a',1],[4,'b',0],[5,'',0],[6,'c',0],[7,'c',1]]);});
+test('print adds bleed, digital crops bleed, multipage renderer has no fixed repeating spread',()=>{const e=fixture(),print=bookDocument(e,{},'data:font/ttf;base64,AA==','print'),digital=bookDocument(e,{},'data:font/ttf;base64,AA==','digital');assert.match(print,/@page\{size:216mm 256mm/);assert.match(digital,/@page\{size:210mm 250mm/);assert.match(print,/left:-210mm/);assert.match(digital,/left:-213mm;top:-3mm/);assert.equal((print.match(/class="book-page"/g)||[]).length,7);assert.ok(!print.includes('position:fixed'));assert.match(print,/WORKING PROOF/);});
+test('mixed interior dimensions and missing compositions block output',()=>{const e=fixture();e.compositions[1].format={width:180,height:230,bleed:3,margin:15,gutter:8};assert.ok(bookExportIssues(e).some(s=>s.includes('one trim')));e.compositions=[];assert.ok(bookExportIssues(e).some(s=>s.includes('save a composition')));});
+test('backup includes all registered asset versions and excludes external inspiration previews',()=>{const e=newEdition();e.sources=[{key:'source'}];e.visualReferences=[{versions:[{images:[{key:'old'},{key:'new'}]}]}];e.artProduction={requests:[{referenceImages:[{key:'old'},{key:'request-only'}]}],spreads:[]};e.inspiration={url:'external-preview'};assert.deepEqual(backupKeys(e),['source','old','new','request-only']);});
+test('restore remaps asset identifiers and stales all current review evidence without losing text',()=>{const e=fixture();e.sources=[{key:'original'}];e.bookReview.human=[{context:'old',note:'historical'}];e.bookProduction={reviews:[{context:'old'}]};e.compositions[0].layers=[{imageKey:'original',text:'कर्मण्येवाधिकारस्ते'}];const copy=restoredEdition(e,new Map([['original','restored']]));assert.equal(copy.sources[0].key,'restored');assert.equal(copy.compositions[0].layers[0].text,'कर्मण्येवाधिकारस्ते');assert.equal(copy.bookReview.human[0].note,'historical');assert.notEqual(copy.bookReview.render.context,reviewContext(copy));assert.equal(e.sources[0].key,'original');});
+
+test('asset-key remapping never rewrites passage or layer text',()=>{const e=fixture();e.compositions[0].layers=[{text:'original',imageKey:'original'}];const copy=restoredEdition(e,new Map([['original','new-key']]));assert.equal(copy.compositions[0].layers[0].text,'original');assert.equal(copy.compositions[0].layers[0].imageKey,'new-key');});

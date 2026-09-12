@@ -1,3 +1,4 @@
+import { bookReleaseApi } from './book-release';
 import { openReviewFindings, releaseReviewIssues, renderReviewCurrent } from '../lib/book-review';
 import { editionImages } from '../lib/art-production';
 import { inspectReferenceImage, approvedReference, referenceSpecFields, type ReferenceImage } from "../lib/visual-references";
@@ -16,7 +17,7 @@ import { efficientChapterPrompt, evaluateChapterOneGate, evaluateTeachingChapter
 import type { BookPersona } from "../lib/book-persona";
 import { classifySource, ocrEstimate, recoverOcrPageTexts, SAFE_OCR_CHUNK_BYTES, validateOutline, type SourceIntelligence, type SourceOutlineItem } from "../lib/source-intelligence";
 
-interface Env {
+export interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
   BUCKET: R2Bucket;
@@ -1481,7 +1482,8 @@ const worker = {
 
     try {
       if (url.pathname.startsWith("/api/")) await ensureSchema(env);
-      if (["/api/edition", "/api/edition/review", "/api/edition/source", "/api/edition/export", "/api/edition/art-brief", "/api/edition/reference-image", "/api/edition/reference-asset", "/api/edition/reference-package", "/api/edition/art-image", "/api/edition/art-package"].includes(url.pathname)) return await editionApi(request, env);
+      if (["/api/edition/backup", "/api/edition/restore", "/api/edition/release-snapshot"].includes(url.pathname)) return bookReleaseApi(request, env, ownerKey(request));
+    if (["/api/edition", "/api/edition/review", "/api/edition/source", "/api/edition/export", "/api/edition/art-brief", "/api/edition/reference-image", "/api/edition/reference-asset", "/api/edition/reference-package", "/api/edition/art-image", "/api/edition/art-package"].includes(url.pathname)) return await editionApi(request, env);
       if (url.pathname === "/api/projects") return await projectsApi(request, env);
       if (url.pathname === "/api/versions") return await versionsApi(request, env);
       if (url.pathname === "/api/preferences") return await preferencesApi(request, env);
