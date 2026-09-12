@@ -1,0 +1,23 @@
+[
+  {
+    "file": "journey.jpg",
+    "sha256": "d5ebc51849cd559e1806c67101e4f2c1bb7ecb367e91ccf83655b4953cf174c7",
+    "museumObject": "https://www.metmuseum.org/art/collection/search/819647",
+    "rights": "Public domain; verified against museum object page and API",
+    "use": "Contextual artwork in a draft review pilot, not exact-scene illustration"
+  },
+  {
+    "file": "lamp.jpg",
+    "sha256": "1876aa5395b02c505daaeade55357c6576bbedacd72484c22ca611e9ac767e07",
+    "museumObject": "https://www.metmuseum.org/art/collection/search/447421",
+    "rights": "Public domain; verified against museum object page and API",
+    "use": "Contextual artwork in a draft review pilot, not exact-scene illustration"
+  },
+  {
+    "file": "composite.jpg",
+    "sha256": "6e7127ecf5a095b2e1973d4e73db997d0b0b8d3424f5d7e2c2614a9a732c4e82",
+    "museumObject": "https://www.metmuseum.org/art/collection/search/73296",
+    "rights": "Public domain; verified against museum object page and API",
+    "use": "Contextual artwork in a draft review pilot, not exact-scene illustration"
+  }
+]
