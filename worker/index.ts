@@ -1,3 +1,4 @@
+import { editionImages } from '../lib/art-production';
 import { inspectReferenceImage, approvedReference, referenceSpecFields, type ReferenceImage } from "../lib/visual-references";
 import { zipSync, strToU8 } from "fflate";
 import { artDirectionBrief } from "../lib/art-direction";
@@ -762,8 +763,9 @@ function makeSections(headings: string[], pageTexts: string[], fallbackText: str
 async function editionApi(request: Request, env: Env) {
   const url = new URL(request.url), owner = ownerKey(request);
   if (request.method !== "POST" && request.method !== "GET") return json({ error: "Method not allowed" }, 405);
+  const artUpload = url.pathname.endsWith("/art-image");
   const referenceUpload = url.pathname.endsWith("/reference-image");
-  const upload = url.pathname.endsWith("/source") || referenceUpload;
+  const upload = url.pathname.endsWith("/source") || referenceUpload || artUpload;
   const form = upload && request.method === "POST" ? await request.formData() : null;
   const body = request.method === "POST" && !form ? await request.json() as { projectId: string; expectedRevision: number; action: EditionAction } : null;
   const id = body?.projectId || String(form?.get("projectId") || url.searchParams.get("projectId") || "");
@@ -774,12 +776,21 @@ async function editionApi(request: Request, env: Env) {
   if (request.method === "GET") {
     if (url.pathname.endsWith("/reference-asset")) {
       const key = url.searchParams.get("key") || "";
-      const registered = project.edition.visualReferences?.some(r => r.versions.some(v => v.images.some(i => i.key === key)));
+      const registered = editionImages(project.edition).some(i=>i.key===key);
       if (!registered) return json({ error: "Reference image not found in this edition" }, 404);
       const image = await env.BUCKET.get(key);
       if (!image || image.customMetadata?.owner !== owner) return json({ error: "Reference image unavailable" }, 404);
       const headers = new Headers({ "cache-control": "private, no-store", "x-content-type-options": "nosniff" }); image.writeHttpMetadata(headers);
       return new Response(image.body, { headers });
+    }
+    if (url.pathname.endsWith("/art-package")) {
+      try {
+        const saved = project.edition.artProduction?.requests.find(r=>r.id===url.searchParams.get("requestId"));
+        if (!saved) throw new Error("Choose a saved production request.");
+        const files:Record<string,Uint8Array>={"REQUEST.md":strToU8(saved.prompt),"manifest.json":strToU8(JSON.stringify(saved,null,2))};let total=0;
+        for(const image of saved.referenceImages){const object=await env.BUCKET.get(image.key);if(!object||object.customMetadata?.owner!==owner)throw new Error("A saved reference image is unavailable.");total+=object.size;if(total>40*1024*1024)throw new Error("Reference package exceeds 40 MB. Create a new request after approving smaller reference inputs.");files[`references/${image.id}.${image.mime==='image/png'?'png':image.mime==='image/webp'?'webp':'jpg'}`]=new Uint8Array(await object.arrayBuffer());}
+        return new Response(zipSync(files,{level:0}) as unknown as BodyInit,{headers:{"content-type":"application/zip","cache-control":"no-store","content-disposition":`attachment; filename="art-request-${saved.id}.zip"`}});
+      }catch(error){return json({error:error instanceof Error?error.message:"Could not package artwork request."},422);}
     }
     if (url.pathname.endsWith("/reference-package")) {
       try {
@@ -818,15 +829,15 @@ async function editionApi(request: Request, env: Env) {
   let storedKey: string | undefined;
   try {
     let action = body?.action;
-    if (form && referenceUpload) {
+    if (form && (referenceUpload || artUpload)) {
       const file = form.get("file");
       if (!(file instanceof File) || !file.size || file.size > 10 * 1024 * 1024) throw new Error("Choose a PNG, JPEG, or WebP image up to 10 MB.");
       const bytes = new Uint8Array(await file.arrayBuffer());
       const info = inspectReferenceImage(bytes);
       const imageId = crypto.randomUUID();
-      storedKey = `edition-references/${id}/${imageId}.${info.extension}`;
-      const image: ReferenceImage = { id: imageId, key: storedKey, name: file.name, mime: info.mime, width: info.width, height: info.height, view: String(form.get("view")) as ReferenceImage["view"], caption: String(form.get("caption") || ""), credit: String(form.get("credit") || ""), provenance: String(form.get("provenance")) as ReferenceImage["provenance"], uploadedAt: new Date().toISOString() };
-      const edition = applyEditionAction(project.edition, { type: "reference-image", id: String(form.get("referenceId") || ""), image });
+      storedKey = `${artUpload ? "edition-art" : "edition-references"}/${id}/${imageId}.${info.extension}`;
+      const image: ReferenceImage = { id: imageId, key: storedKey, name: file.name, mime: info.mime, width: info.width, height: info.height, view: (artUpload ? "environment" : String(form.get("view"))) as ReferenceImage["view"], caption: String(form.get("caption") || ""), credit: String(form.get("credit") || ""), provenance: String(form.get("provenance")) as ReferenceImage["provenance"], uploadedAt: new Date().toISOString() };
+      const edition = applyEditionAction(project.edition, artUpload ? {type:"import-art-result",requestId:String(form.get("requestId")||""),image,note:String(form.get("note")||"")} : { type: "reference-image", id: String(form.get("referenceId") || ""), image });
       await env.BUCKET.put(storedKey, bytes, { httpMetadata: { contentType: info.mime }, customMetadata: { originalName: file.name, owner } });
       project.edition = edition;
     } else if (form) {
@@ -844,7 +855,7 @@ async function editionApi(request: Request, env: Env) {
       await env.BUCKET.put(storedKey, bytes, { httpMetadata: { contentType: file.type || "application/octet-stream" }, customMetadata: { originalName: file.name } });
       project.edition = edition;
     } else {
-      if (!action || action.type === "import" || action.type === "reference-image") throw new Error("Use the file upload to import source material or reference images.");
+      if (!action || action.type === "import" || action.type === "reference-image" || action.type === "import-art-result") throw new Error("Use the file upload to import source material or reference images.");
       project.edition = applyEditionAction(project.edition, action);
     }
     project.title = project.edition.metadata.title;
@@ -1468,7 +1479,7 @@ const worker = {
 
     try {
       if (url.pathname.startsWith("/api/")) await ensureSchema(env);
-      if (["/api/edition", "/api/edition/source", "/api/edition/export", "/api/edition/art-brief", "/api/edition/reference-image", "/api/edition/reference-asset", "/api/edition/reference-package"].includes(url.pathname)) return await editionApi(request, env);
+      if (["/api/edition", "/api/edition/source", "/api/edition/export", "/api/edition/art-brief", "/api/edition/reference-image", "/api/edition/reference-asset", "/api/edition/reference-package", "/api/edition/art-image", "/api/edition/art-package"].includes(url.pathname)) return await editionApi(request, env);
       if (url.pathname === "/api/projects") return await projectsApi(request, env);
       if (url.pathname === "/api/versions") return await versionsApi(request, env);
       if (url.pathname === "/api/preferences") return await preferencesApi(request, env);

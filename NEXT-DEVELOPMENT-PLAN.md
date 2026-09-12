@@ -1,6 +1,6 @@
 # Full next development plan — IKS Book Studio
 
-Status: A–E core workspaces implemented; F–J and discovery expansion remain pending
+Status: A–E core workspaces and Phase F imports/review implemented; Phase F paid generation deferred by user; G–J and discovery expansion remain pending
 Updated: 12 September 2026
 
 Phase E implementation and PDF verification: `docs/development/PHASE-E-COMPLETED.md`.
@@ -201,6 +201,8 @@ Typeset verses as editable text. Do not generate scripture lettering inside illu
 A composition has matching positions, crops, text, and dimensions in designer, preview, and PDF. Overflow is visible and actionable. Text and important imagery avoid the gutter and unsafe trim regions. Saving and reopening preserves edits.
 
 ## 10. Phase F — Finished-art production and revisions
+
+Imports and revision review implemented. The user selected “Build imports first; no paid generation yet.” Provider integration and generation jobs remain deferred. See [Phase F report](docs/development/PHASE-F-IMPORTS-COMPLETED.md).
 
 ### Build
 
