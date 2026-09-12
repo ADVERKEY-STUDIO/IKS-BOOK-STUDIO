@@ -1,6 +1,6 @@
 # Full next development plan — IKS Book Studio
 
-Status: A–F core/import workspaces and Phase H–I production/review workspaces implemented; Phase G review studies ready with acceptance checks pending; paid generation deferred; Phase J and discovery expansion pending
+Status: A–F core/import workspaces and Phase H–I production/review workspaces implemented; Phase G review studies ready with acceptance checks pending; paid generation deferred; Phase J export/restore workspace implemented with browser/backup limits; staging release and discovery expansion pending
 Updated: 12 September 2026
 
 Phase E implementation and PDF verification: `docs/development/PHASE-E-COMPLETED.md`.
@@ -287,6 +287,8 @@ Issues should point to the affected passage, element, or spread and allow a corr
 A reviewer can identify and resolve issues without searching the whole book manually. Final export makes unresolved critical problems explicit. Passing technical checks is not presented as proof of artistic excellence.
 
 ## 14. Phase J — Export and release
+
+Implementation report: [Phase J export and restore](docs/development/PHASE-J-EXPORT-AND-RESTORE.md). Working print/digital PDFs and same-installation backup restoration verified. Staging/production deployment, portable backups, and final editorial approval remain pending.
 
 ### Build
 
