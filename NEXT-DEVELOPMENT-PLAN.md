@@ -225,6 +225,8 @@ Failed jobs can be retried without losing the brief or replacing approved art. A
 
 ## 11. Phase G — Three-spread pilot
 
+Three heritage-art review studies and an editable draft workflow are available at `/pilot`. User acceptance and native PDF verification remain pending; see [Phase G review report](docs/development/PHASE-G-REVIEW-READY.md).
+
 Before full-book production, choose a representative devotional work and produce three finished spreads:
 
 1. A quiet devotional or verse-led composition.

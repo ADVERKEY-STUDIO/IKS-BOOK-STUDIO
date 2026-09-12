@@ -17,6 +17,7 @@ export function InspirationShelf({ onOpen }: { onOpen: () => void }) {
   return <section className="inspiration-shelf" aria-labelledby="inspiration-shelf-title">
     <div className="inspiration-shelf-heading"><div><p>REAL BOOKS. DISTINCT PERSPECTIVES.</p><h2 id="inspiration-shelf-title">Find your book’s visual direction</h2><span>Explore published books, study their pages, and collect the details you love.</span></div><button onClick={onOpen}>Explore book inspiration <span aria-hidden="true">↗</span></button></div>
     <div className="inspiration-shelf-images">{[inspirationBooks[0], inspirationBooks[1], inspirationBooks[2], inspirationBooks[3]].map(book => <button onClick={onOpen} key={book.id} aria-label={`Explore inspiration including ${book.title}`}><ReferenceImage image={book.images[0]} title={book.title}/><span>{book.title}</span><small>{book.publisher}</small></button>)}</div>
+    <p><a href="/pilot">Review our three-spread Bhagavad Gita pilot →</a></p>
   </section>;
 }
 
