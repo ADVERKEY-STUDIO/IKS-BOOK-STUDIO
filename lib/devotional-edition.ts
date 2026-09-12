@@ -1,3 +1,4 @@
+import { applyProductionAction, type ArtProduction, type ProductionAction } from './art-production.ts';
 import { applyCompositionAction, type CompositionAction, type PrintFormat, type SpreadComposition } from './spread-composition.ts';
 import { applyStoryboardAction, type SpreadPlan, type StoryboardAction } from './storyboard.ts';
 import { applyReferenceAction, type VisualReference, type ReferenceAction } from "./visual-references.ts";
@@ -12,8 +13,8 @@ export type EditorialField = { text: string; provenance: Provenance; status: 'dr
 export type PassageSnapshot = { revision: number; fields: Record<PassageField, EditorialField>; location: string; reason: string; at: string };
 export type Passage = { id: string; revision: number; location: string; fields: Record<PassageField, EditorialField>; history: PassageSnapshot[]; derivedFrom: string[]; retired?: boolean };
 export type EditionMetadata = { title: string; type: typeof editionTypes[number]; audience: typeof editionAudiences[number]; sourceEdition: string; attribution: string; translator: string; language: string; script: string; sourceLocation: string };
-export type Edition = { version: 1; revision: number; storyboard?: SpreadPlan[]; printFormat?: PrintFormat; compositions?: SpreadComposition[]; visualReferences?: VisualReference[]; artDirection?: ArtDirection; artGuideUsage?: { targetId: string; version: number }[]; metadata: EditionMetadata; metadataHistory?: { metadata: EditionMetadata; at: string; revision: number }[]; passages: Passage[]; sources: { key: string; name: string; size: number; importedAt: string }[]; affectedTargets: { passageId: string; targetId: string; at: string }[]; bindings: { passageId: string; targetId: string }[] };
-export type EditionAction = ReferenceAction | StoryboardAction | CompositionAction
+export type Edition = { version: 1; revision: number; artProduction?: ArtProduction; storyboard?: SpreadPlan[]; printFormat?: PrintFormat; compositions?: SpreadComposition[]; visualReferences?: VisualReference[]; artDirection?: ArtDirection; artGuideUsage?: { targetId: string; version: number }[]; metadata: EditionMetadata; metadataHistory?: { metadata: EditionMetadata; at: string; revision: number }[]; passages: Passage[]; sources: { key: string; name: string; size: number; importedAt: string }[]; affectedTargets: { passageId: string; targetId: string; at: string }[]; bindings: { passageId: string; targetId: string }[] };
+export type EditionAction = ReferenceAction | StoryboardAction | CompositionAction | ProductionAction
   | { type: 'save-art-guide'; guide: ArtGuide; reason: string }
   | { type: 'approve-art-guide'; version: number }
   | { type: 'metadata'; metadata: EditionMetadata }
@@ -54,7 +55,9 @@ export function applyEditionAction(current: Edition, action: EditionAction, at =
     for (const f of ['transliteration', 'translation', 'commentary'] as const) if (p.fields[f].text) { p.fields[f].status = 'stale'; delete p.fields[f].approvedAt; }
     for (const binding of next.bindings.filter(b => b.passageId === p.id)) next.affectedTargets.push({ ...binding, at });
   }
-  if (action.type === 'save-composition' || action.type === 'save-print-format') {
+  if (['create-art-request','import-art-result','approve-art'].includes(action.type)) {
+    applyProductionAction(next, action as ProductionAction, at, makeId);
+  } else if (action.type === 'save-composition' || action.type === 'save-print-format') {
     applyCompositionAction(next, action);
   } else if (['save-spread','delete-spread','reorder-spreads','approve-spread'].includes(action.type)) {
     applyStoryboardAction(next, action as StoryboardAction, makeId);

@@ -1,4 +1,5 @@
 "use client";
+import { artStatus } from "../../lib/art-production";
 import { useEffect, useState } from 'react';
 import type { Edition, PassageField } from '../../lib/devotional-edition';
 import { blankSpread, compositionFamilies, pageKinds, spreadStatus, storyboardIssues, storyboardPages, type SpreadPlan, type StoryboardAction } from '../../lib/storyboard';
@@ -16,7 +17,7 @@ export function StoryboardWorkspace({edition,busy,onAction,onDirty}:{edition:Edi
   return <section className="storyboard-workspace">
     <header className="edition-panel"><h1>Whole-book storyboard</h1><p>Plan the reading rhythm before making finished pages. Thumbnails represent facing-page structure, not final artwork.</p><p>{plans.length} plans · {issues.filter(i=>i.blocking).length} content issues · {issues.filter(i=>!i.blocking).length} review suggestions</p></header>
     <div className="storyboard-overview" aria-label="Storyboard overview">{plans.map((plan,index)=><article key={plan.id} draggable={!busy&&!dirty} onDragStart={()=>setDragged(plan.id)} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();if(dragged&&!busy&&!dirty)void reorder(dragged,plan.id);setDragged('');}}>
-      <button disabled={busy||dirty} onClick={()=>select(plan)} aria-current={selected===plan.id?'true':undefined}><div className={`storyboard-thumb ${plan.kind}`}><span>{plan.family}</span>{plan.kind==='spread'&&<span>{plan.allocations.length} allocations</span>}</div><strong>{plan.title}</strong><small>{plan.kind==='cover'?'Cover (unnumbered)':`Pages ${pages[index].pages.join('–')}`}{pages[index].blankBefore?` · blank p${pages[index].blankBefore} before`:''}</small><small>{spreadStatus(edition,plan)} · Artwork not started</small></button>
+      <button disabled={busy||dirty} onClick={()=>select(plan)} aria-current={selected===plan.id?'true':undefined}><div className={`storyboard-thumb ${plan.kind}`}><span>{plan.family}</span>{plan.kind==='spread'&&<span>{plan.allocations.length} allocations</span>}</div><strong>{plan.title}</strong><small>{plan.kind==='cover'?'Cover (unnumbered)':`Pages ${pages[index].pages.join('–')}`}{pages[index].blankBefore?` · blank p${pages[index].blankBefore} before`:''}</small><small>{spreadStatus(edition,plan)} · {artStatus(edition,plan.id)}</small></button>
       <div className="edition-actions"><button aria-label={`Move ${plan.title} earlier`} disabled={busy||dirty||index===0} onClick={()=>void reorder(plan.id,plans[index-1].id)}>← Earlier</button><button aria-label={`Move ${plan.title} later`} disabled={busy||dirty||index===plans.length-1} onClick={()=>void reorder(plan.id,plans[index+1].id)}>Later →</button></div>
     </article>)}</div>
     <div className="storyboard-columns"><section className="edition-panel"><div className="edition-actions"><h2>{saved?'Edit plan':'New page or spread'}</h2><button disabled={busy||dirty} onClick={()=>select()}>New plan</button></div><fieldset disabled={busy}>

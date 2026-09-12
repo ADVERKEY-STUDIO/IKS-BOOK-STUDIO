@@ -1,3 +1,4 @@
+import { editionImages, approvedArt, artStatus } from './art-production.ts';
 import type { Edition, PassageField } from './devotional-edition.ts';
 import type { SpreadPlan } from './storyboard.ts';
 
@@ -57,7 +58,7 @@ export function applyCompositionAction(edition: Edition, action: CompositionActi
     if(Math.abs(l.x)>1000||Math.abs(l.y)>1000||l.width<1||l.width>1000||l.height<1||l.height>1000||l.opacity<0||l.opacity>1||l.fontSize<6||l.fontSize>100||l.lineHeight<1||l.lineHeight>3||l.inset<0||l.inset>30||l.focalX<0||l.focalX>100||l.focalY<0||l.focalY>100||l.softEdge<0||l.softEdge>30)throw new Error('Layer settings exceed supported limits.');
     if(l.fontFamily && !['serif','sans'].includes(l.fontFamily))throw new Error('Choose a supported font family.');
     if(typeof l.hidden!=='boolean'||typeof l.locked!=='boolean'||!color(l.color)||!color(l.background)||!['left','center','right'].includes(l.align)||!['cover','contain'].includes(l.fit)||typeof l.text!=='string'||l.text.length>50000||typeof l.imageKey!=='string')throw new Error('Invalid layer settings.');
-    if(l.kind==='image'&&!edition.visualReferences?.some(r=>r.versions.some(v=>v.images.some(i=>i.key===l.imageKey))))throw new Error('Choose artwork registered in this edition.');
+    if(l.kind==='image'&&!editionImages(edition).some(i=>i.key===l.imageKey))throw new Error('Choose artwork registered in this edition.');
     if(l.binding){const b=l.binding,p=edition.passages.find(p=>p.id===b.passageId&&!p.retired);if(l.kind!=='text'||!p||!['original','transliteration','translation','commentary'].includes(b.field)||!Number.isInteger(b.start)||!Number.isInteger(b.end)||b.start<0||b.end<=b.start||b.end>p.fields[b.field].text.length)throw new Error('Invalid protected text binding.');}
   }
   if(c.planRevision!==plan.revision)throw new Error('Storyboard changed. Rebuild the composition from the current plan before saving.');
@@ -83,8 +84,10 @@ export function compositionIssues(edition: Edition,c: SpreadComposition): string
       if(l.binding){const p=edition.passages.find(p=>p.id===l.binding!.passageId&&!p.retired);if(!p||l.binding.end>p.fields[l.binding.field].text.length||p.fields[l.binding.field].status!=='approved')issues.push(`${l.id}: source text needs review.`);}
     }
     if(l.kind==='image'){
-      const image=edition.visualReferences?.flatMap(r=>r.versions.flatMap(v=>v.images)).find(i=>i.key===l.imageKey);
+      const image=editionImages(edition).find(i=>i.key===l.imageKey);
       if(plan.kind==='spread' && l.x+l.width*l.focalX/100>f.width-f.gutter && l.x+l.width*l.focalX/100<f.width+f.gutter)issues.push(`${l.id}: image focal point is in the gutter safety area. Adjust the crop or placement.`);
+      const production=edition.artProduction?.spreads.find(s=>s.versions.some(v=>v.image.key===l.imageKey));
+      if(production && (approvedArt(edition,production.planId)?.image.key!==l.imageKey || artStatus(edition,production.planId)!=='Approved artwork'))issues.push(`${l.id}: production artwork is unapproved or needs review.`);
       if(!image)issues.push(`${l.id}: missing artwork.`);
       else if((l.fit==='cover'?Math.min:Math.max)(image.width/(l.width/25.4),image.height/(l.height/25.4))<300)issues.push(`${l.id}: image resolution is below 300 dpi at this size.`);
     }
