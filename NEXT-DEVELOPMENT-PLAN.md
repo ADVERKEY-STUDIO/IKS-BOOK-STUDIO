@@ -1,6 +1,6 @@
 # Full next development plan — IKS Book Studio
 
-Status: A–F core/import workspaces and Phase H production workspace implemented; Phase G review studies ready with acceptance checks pending; paid generation deferred; I–J and discovery expansion pending
+Status: A–F core/import workspaces and Phase H–I production/review workspaces implemented; Phase G review studies ready with acceptance checks pending; paid generation deferred; Phase J and discovery expansion pending
 Updated: 12 September 2026
 
 Phase E implementation and PDF verification: `docs/development/PHASE-E-COMPLETED.md`.
@@ -260,6 +260,8 @@ Add cover design using the book’s approved identity. Derive spine and cover di
 All required content is accounted for, each spread uses approved assets, and the complete book reads coherently. Changing a single spread leaves unrelated approved work intact.
 
 ## 13. Phase I — Editorial, visual, and print review
+
+Review workspace implemented and pilot browser audit completed. Publication sign-off and native PDF inspection remain pending. See [Phase I report](docs/development/PHASE-I-WORKSPACE-COMPLETED.md).
 
 ### Automated review
 

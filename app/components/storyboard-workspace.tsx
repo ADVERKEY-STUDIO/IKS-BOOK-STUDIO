@@ -4,9 +4,10 @@ import { useEffect, useState } from 'react';
 import type { Edition, PassageField } from '../../lib/devotional-edition';
 import { blankSpread, compositionFamilies, pageKinds, spreadStatus, storyboardIssues, storyboardPages, type SpreadPlan, type StoryboardAction } from '../../lib/storyboard';
 
-export function StoryboardWorkspace({edition,busy,onAction,onDirty}:{edition:Edition;busy:boolean;onAction:(action:StoryboardAction)=>Promise<boolean>;onDirty:(dirty:boolean)=>void}) {
+export function StoryboardWorkspace({initialPlanId,edition,busy,onAction,onDirty}:{initialPlanId?:string;edition:Edition;busy:boolean;onAction:(action:StoryboardAction)=>Promise<boolean>;onDirty:(dirty:boolean)=>void}) {
   const plans=edition.storyboard||[], pages=storyboardPages(plans), issues=storyboardIssues(edition);
-  const [selected,setSelected]=useState(''), [draft,setDraft]=useState<SpreadPlan>(blankSpread), [dragged,setDragged]=useState('');
+  const initial=plans.find(p=>p.id===initialPlanId);
+  const [selected,setSelected]=useState(initial?.id||''), [draft,setDraft]=useState<SpreadPlan>(()=>structuredClone(initial||blankSpread())), [dragged,setDragged]=useState('');
   const saved=plans.find(p=>p.id===selected);
   const dirty=JSON.stringify(draft)!==JSON.stringify(saved||blankSpread());
   useEffect(()=>{onDirty(dirty);return()=>onDirty(false);},[dirty,onDirty]);

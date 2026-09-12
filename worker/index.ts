@@ -1,3 +1,4 @@
+import { openReviewFindings, releaseReviewIssues, renderReviewCurrent } from '../lib/book-review';
 import { editionImages } from '../lib/art-production';
 import { inspectReferenceImage, approvedReference, referenceSpecFields, type ReferenceImage } from "../lib/visual-references";
 import { zipSync, strToU8 } from "fflate";
@@ -820,6 +821,7 @@ async function editionApi(request: Request, env: Env) {
       try { return new Response(artDirectionBrief(project.edition), { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } }); }
       catch (error) { return json({ error: error instanceof Error ? error.message : "Approve the current guide." }, 422); }
     }
+    if (url.pathname.endsWith("/review")) { const edition=project.edition; const blockers=releaseReviewIssues(edition); return json({revision:edition.revision,renderCurrent:renderReviewCurrent(edition),findings:openReviewFindings(edition),releaseReady:blockers.length===0,blockers}); }
     if (!url.pathname.endsWith("/export")) return json({ project });
     try { return new Response(editionHtml(project.edition, `${url.origin}/fonts/book-sanskrit.ttf`), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } }); }
     catch (error) { return json({ error: error instanceof Error ? error.message : "Review the edition before export." }, 422); }
@@ -1479,7 +1481,7 @@ const worker = {
 
     try {
       if (url.pathname.startsWith("/api/")) await ensureSchema(env);
-      if (["/api/edition", "/api/edition/source", "/api/edition/export", "/api/edition/art-brief", "/api/edition/reference-image", "/api/edition/reference-asset", "/api/edition/reference-package", "/api/edition/art-image", "/api/edition/art-package"].includes(url.pathname)) return await editionApi(request, env);
+      if (["/api/edition", "/api/edition/review", "/api/edition/source", "/api/edition/export", "/api/edition/art-brief", "/api/edition/reference-image", "/api/edition/reference-asset", "/api/edition/reference-package", "/api/edition/art-image", "/api/edition/art-package"].includes(url.pathname)) return await editionApi(request, env);
       if (url.pathname === "/api/projects") return await projectsApi(request, env);
       if (url.pathname === "/api/versions") return await versionsApi(request, env);
       if (url.pathname === "/api/preferences") return await preferencesApi(request, env);
