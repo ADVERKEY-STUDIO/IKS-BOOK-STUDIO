@@ -1,3 +1,4 @@
+import { referenceProductionBrief } from "./visual-references.ts";
 import { normalizeInspiration, inspirationBrief, inspirationBook, type BookInspiration } from './book-inspiration.ts';
 import type { Edition } from './devotional-edition.ts';
 
@@ -72,11 +73,11 @@ export function proposeArtDirections(edition: Edition, references?: BookInspirat
   };
   return [base, {...structuredClone(base),name:`${m.title} · ${commentary ? 'Verse and interpretation' : 'Open verse'}`,layout:'parallel',spacing:commentary?'Place the original and its interpretation in separate, clearly labeled reading zones. Let long commentary continue naturally.':'Separate successive passages with generous space; do not invent explanations to fill the page.',palette:{paper:'#f6f9fb',ink:'#233744',accent:'#355e79',support:'#8ba6af'},ornaments:'Use a fine separating rule and restrained page furniture; no ornamental frame.'}, {...structuredClone(base),name:`${m.title} · Illustrated frame`,layout:'framed',medium:imageRef?.direction.illustration || 'Original painted vignettes with soft edges; artwork follows the passage rather than filling a fixed slot.',spacing:'A protected reading area with artwork planned around its edges. Alternate framed moments with open reading pages.',palette:{paper:'#fff8ef',ink:'#482f29',accent:'#a4462b',support:'#b3a175'},ornaments:'A restrained frame on selected passages; omit it when a scene needs open space.'}];
 }
-export function artDirectionBrief(edition: Edition): string {
+export function artDirectionBrief(edition: Edition, includeReferences = true): string {
   const version = latestGuide(edition);
   if (!version || guideStatus(edition,version) !== 'approved') throw new Error('Approve the latest art guide against the current manuscript before production.');
   const g=version.guide;
-  return `APPROVED ART GUIDE — VERSION ${version.version}\nBook: ${edition.metadata.title}\nAudience: ${edition.metadata.audience}\nApproved: ${version.approvedAt}\nManuscript context: ${version.sourceContext}\n\n${guideTextFields.map(key => `${key.toUpperCase()}: ${g[key]}`).join('\n\n')}\n\nPALETTE\n${JSON.stringify(g.palette)}\n\nTYPOGRAPHY (points)\n${guideLayers.map(l => `${l}: ${g.typography[l].family}, ${g.typography[l].size} pt, line height ${g.typography[l].lineHeight}`).join('\n')}\n\nSAMPLE COMPOSITION: ${g.layout}\n\n${inspirationBrief(g.references)}\n\nPRODUCTION REQUIREMENTS\nRecord artGuideVersion=${version.version} on produced assets and spread compositions. Keep source passages as separately typeset text. Treat this brief as design guidance, never as authorization to rewrite the source. Review this guide again after manuscript changes.`;
+  return `APPROVED ART GUIDE — VERSION ${version.version}\nBook: ${edition.metadata.title}\nAudience: ${edition.metadata.audience}\nApproved: ${version.approvedAt}\nManuscript context: ${version.sourceContext}\n\n${guideTextFields.map(key => `${key.toUpperCase()}: ${g[key]}`).join('\n\n')}\n\nPALETTE\n${JSON.stringify(g.palette)}\n\nTYPOGRAPHY (points)\n${guideLayers.map(l => `${l}: ${g.typography[l].family}, ${g.typography[l].size} pt, line height ${g.typography[l].lineHeight}`).join('\n')}\n\nSAMPLE COMPOSITION: ${g.layout}\n\n${inspirationBrief(g.references)}\n\nPRODUCTION REQUIREMENTS\nRecord artGuideVersion=${version.version} on produced assets and spread compositions. Keep source passages as separately typeset text. Treat this brief as design guidance, never as authorization to rewrite the source. Review this guide again after manuscript changes.${includeReferences ? referenceProductionBrief(edition, version.version) : ""}`;
 }
 export function outdatedGuideWork(edition: Edition): {targetId:string;version:number}[] {
   const current=latestGuide(edition);

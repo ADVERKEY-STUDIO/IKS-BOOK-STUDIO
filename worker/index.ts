@@ -1,3 +1,5 @@
+import { inspectReferenceImage, approvedReference, referenceSpecFields, type ReferenceImage } from "../lib/visual-references";
+import { zipSync, strToU8 } from "fflate";
 import { artDirectionBrief } from "../lib/art-direction";
 import { newEdition, applyEditionAction, editionHtml, type Edition, type EditionAction } from "../lib/devotional-edition";
 /** Cloudflare Worker entry point for the vinext-starter template. */
@@ -760,7 +762,8 @@ function makeSections(headings: string[], pageTexts: string[], fallbackText: str
 async function editionApi(request: Request, env: Env) {
   const url = new URL(request.url), owner = ownerKey(request);
   if (request.method !== "POST" && request.method !== "GET") return json({ error: "Method not allowed" }, 405);
-  const upload = url.pathname.endsWith("/source");
+  const referenceUpload = url.pathname.endsWith("/reference-image");
+  const upload = url.pathname.endsWith("/source") || referenceUpload;
   const form = upload && request.method === "POST" ? await request.formData() : null;
   const body = request.method === "POST" && !form ? await request.json() as { projectId: string; expectedRevision: number; action: EditionAction } : null;
   const id = body?.projectId || String(form?.get("projectId") || url.searchParams.get("projectId") || "");
@@ -769,6 +772,39 @@ async function editionApi(request: Request, env: Env) {
   const project = JSON.parse(row.data_json) as Record<string, unknown> & { edition?: Edition };
   if (!project.edition) return json({ error: "This project uses the existing adaptation workflow." }, 400);
   if (request.method === "GET") {
+    if (url.pathname.endsWith("/reference-asset")) {
+      const key = url.searchParams.get("key") || "";
+      const registered = project.edition.visualReferences?.some(r => r.versions.some(v => v.images.some(i => i.key === key)));
+      if (!registered) return json({ error: "Reference image not found in this edition" }, 404);
+      const image = await env.BUCKET.get(key);
+      if (!image || image.customMetadata?.owner !== owner) return json({ error: "Reference image unavailable" }, 404);
+      const headers = new Headers({ "cache-control": "private, no-store", "x-content-type-options": "nosniff" }); image.writeHttpMetadata(headers);
+      return new Response(image.body, { headers });
+    }
+    if (url.pathname.endsWith("/reference-package")) {
+      try {
+        const guide = artDirectionBrief(project.edition, false);
+        const ref = project.edition.visualReferences?.find(r => r.id === url.searchParams.get("referenceId") && !r.archived);
+        const draft = ref?.versions.at(-1);
+        if (!ref || !draft) throw new Error("Save an active reference before requesting a package.");
+        const approved = approvedReference(ref);
+        const inputs = approved?.images || draft.images;
+        const files: Record<string, Uint8Array> = {};
+        let total = 0;
+        const manifest = { purpose: "reference-development", referenceId: ref.id, draftVersion: draft.version, approvedVersion: approved?.version || null, artGuideVersion: project.edition.artDirection?.versions.at(-1)?.version, specification: draft.spec, inputs: [] as { id: string; path: string; view: string; credit: string }[] };
+        for (const image of inputs) {
+          const object = await env.BUCKET.get(image.key);
+          if (!object || object.customMetadata?.owner !== owner) throw new Error("A reference image is missing. Restore it before downloading the package.");
+          total += object.size;
+          if (total > 40 * 1024 * 1024) throw new Error("The package exceeds 40 MB. Save a draft with fewer or smaller reference images.");
+          const path = `references/${image.id}.${image.mime === "image/png" ? "png" : image.mime === "image/webp" ? "webp" : "jpg"}`;
+          files[path] = new Uint8Array(await object.arrayBuffer()); manifest.inputs.push({ id: image.id, path, view: image.view, credit: image.credit });
+        }
+        files["manifest.json"] = strToU8(JSON.stringify(manifest, null, 2));
+        files["REQUEST.md"] = strToU8(`${guide}\n\nREFERENCE DEVELOPMENT REQUEST\nReference: ${ref.id}\nDraft version: ${draft.version}\nApproved identity version: ${approved?.version || "None yet — all results require review"}\n${referenceSpecFields.map(k => `${k}: ${draft.spec[k]}`).join("\n")}\n\nCreate reference views appropriate to this ${draft.spec.kind}. Use the included images as ${approved ? "approved identity anchors; do not change identifying attributes without a separately reviewed proposal" : "provisional study inputs, not approved identities"}. Keep individual views legible and separated. Return actual PNG/JPEG/WebP images, with views and credit identified. Do not render scripture or fabricate missing cultural attributes. Import results into the reference library as external-generation drafts; this package does not approve them for book production.`);
+        return new Response(zipSync(files, { level: 0 }) as unknown as BodyInit, { headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="reference-${ref.id}-v${draft.version}.zip"`, "cache-control": "no-store" } });
+      } catch (error) { return json({ error: error instanceof Error ? error.message : "Could not build the reference package." }, 422); }
+    }
     if (url.pathname.endsWith("/art-brief")) {
       try { return new Response(artDirectionBrief(project.edition), { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } }); }
       catch (error) { return json({ error: error instanceof Error ? error.message : "Approve the current guide." }, 422); }
@@ -782,7 +818,18 @@ async function editionApi(request: Request, env: Env) {
   let storedKey: string | undefined;
   try {
     let action = body?.action;
-    if (form) {
+    if (form && referenceUpload) {
+      const file = form.get("file");
+      if (!(file instanceof File) || !file.size || file.size > 10 * 1024 * 1024) throw new Error("Choose a PNG, JPEG, or WebP image up to 10 MB.");
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const info = inspectReferenceImage(bytes);
+      const imageId = crypto.randomUUID();
+      storedKey = `edition-references/${id}/${imageId}.${info.extension}`;
+      const image: ReferenceImage = { id: imageId, key: storedKey, name: file.name, mime: info.mime, width: info.width, height: info.height, view: String(form.get("view")) as ReferenceImage["view"], caption: String(form.get("caption") || ""), credit: String(form.get("credit") || ""), provenance: String(form.get("provenance")) as ReferenceImage["provenance"], uploadedAt: new Date().toISOString() };
+      const edition = applyEditionAction(project.edition, { type: "reference-image", id: String(form.get("referenceId") || ""), image });
+      await env.BUCKET.put(storedKey, bytes, { httpMetadata: { contentType: info.mime }, customMetadata: { originalName: file.name, owner } });
+      project.edition = edition;
+    } else if (form) {
       const file = form.get("file");
       if (!(file instanceof File) || !file.size || file.size > 10 * 1024 * 1024) throw new Error("Choose a TXT, DOCX, or text PDF up to 10 MB.");
       const extension = sourceExtension(file.name);
@@ -797,7 +844,7 @@ async function editionApi(request: Request, env: Env) {
       await env.BUCKET.put(storedKey, bytes, { httpMetadata: { contentType: file.type || "application/octet-stream" }, customMetadata: { originalName: file.name } });
       project.edition = edition;
     } else {
-      if (!action || action.type === "import") throw new Error("Use the source upload to import a file.");
+      if (!action || action.type === "import" || action.type === "reference-image") throw new Error("Use the file upload to import source material or reference images.");
       project.edition = applyEditionAction(project.edition, action);
     }
     project.title = project.edition.metadata.title;
@@ -1421,7 +1468,7 @@ const worker = {
 
     try {
       if (url.pathname.startsWith("/api/")) await ensureSchema(env);
-      if (["/api/edition", "/api/edition/source", "/api/edition/export", "/api/edition/art-brief"].includes(url.pathname)) return await editionApi(request, env);
+      if (["/api/edition", "/api/edition/source", "/api/edition/export", "/api/edition/art-brief", "/api/edition/reference-image", "/api/edition/reference-asset", "/api/edition/reference-package"].includes(url.pathname)) return await editionApi(request, env);
       if (url.pathname === "/api/projects") return await projectsApi(request, env);
       if (url.pathname === "/api/versions") return await versionsApi(request, env);
       if (url.pathname === "/api/preferences") return await preferencesApi(request, env);

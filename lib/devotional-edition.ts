@@ -1,4 +1,5 @@
-import { artGuideProofCss, validateGuide, guideContext, latestGuide, type ArtDirection, type ArtGuide } from './art-direction.ts';
+import { applyReferenceAction, type VisualReference, type ReferenceAction } from "./visual-references.ts";
+import { artGuideProofCss, validateGuide, guideContext, guideStatus, latestGuide, type ArtDirection, type ArtGuide } from './art-direction.ts';
 /** Protected editorial content is changed only through explicit revision commands. */
 export const editionTypes = ['Original verses', 'Scripture with commentary', 'Illustrated devotional edition', 'Devotional narrative or retelling', 'Children’s or family adaptation'] as const;
 export const editionAudiences = ['Adults', 'Families', 'Children'] as const;
@@ -9,8 +10,8 @@ export type EditorialField = { text: string; provenance: Provenance; status: 'dr
 export type PassageSnapshot = { revision: number; fields: Record<PassageField, EditorialField>; location: string; reason: string; at: string };
 export type Passage = { id: string; revision: number; location: string; fields: Record<PassageField, EditorialField>; history: PassageSnapshot[]; derivedFrom: string[]; retired?: boolean };
 export type EditionMetadata = { title: string; type: typeof editionTypes[number]; audience: typeof editionAudiences[number]; sourceEdition: string; attribution: string; translator: string; language: string; script: string; sourceLocation: string };
-export type Edition = { version: 1; revision: number; artDirection?: ArtDirection; artGuideUsage?: { targetId: string; version: number }[]; metadata: EditionMetadata; metadataHistory?: { metadata: EditionMetadata; at: string; revision: number }[]; passages: Passage[]; sources: { key: string; name: string; size: number; importedAt: string }[]; affectedTargets: { passageId: string; targetId: string; at: string }[]; bindings: { passageId: string; targetId: string }[] };
-export type EditionAction =
+export type Edition = { version: 1; revision: number; visualReferences?: VisualReference[]; artDirection?: ArtDirection; artGuideUsage?: { targetId: string; version: number }[]; metadata: EditionMetadata; metadataHistory?: { metadata: EditionMetadata; at: string; revision: number }[]; passages: Passage[]; sources: { key: string; name: string; size: number; importedAt: string }[]; affectedTargets: { passageId: string; targetId: string; at: string }[]; bindings: { passageId: string; targetId: string }[] };
+export type EditionAction = ReferenceAction
   | { type: 'save-art-guide'; guide: ArtGuide; reason: string }
   | { type: 'approve-art-guide'; version: number }
   | { type: 'metadata'; metadata: EditionMetadata }
@@ -51,7 +52,9 @@ export function applyEditionAction(current: Edition, action: EditionAction, at =
     for (const f of ['transliteration', 'translation', 'commentary'] as const) if (p.fields[f].text) { p.fields[f].status = 'stale'; delete p.fields[f].approvedAt; }
     for (const binding of next.bindings.filter(b => b.passageId === p.id)) next.affectedTargets.push({ ...binding, at });
   }
-  if (action.type === 'save-art-guide') {
+  if (['save-reference','approve-reference','archive-reference','reference-image'].includes(action.type)) {
+    applyReferenceAction(next, action as ReferenceAction, latestGuide(next)?.version || 0, guideStatus(next) === 'approved', at, makeId);
+  } else if (action.type === 'save-art-guide') {
     if (!next.passages.some(p => !p.retired)) throw new Error('Add source passages before proposing a visual direction.');
     const guide = validateGuide(action.guide);
     if (!bounded(action.reason, 'Guide revision reason', 2000).trim()) throw new Error('Describe this guide revision.');

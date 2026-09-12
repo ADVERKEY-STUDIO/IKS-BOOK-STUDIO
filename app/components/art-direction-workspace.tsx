@@ -9,7 +9,7 @@ export function ArtDirectionWorkspace({edition,inspiration,busy,onAction,onDirty
   const current=latestGuide(edition);
   const proposals=useMemo(()=>proposeArtDirections(edition,inspiration),[edition,inspiration]);
   const status=useMemo(()=>guideStatus(edition),[edition]);
-  const productionBrief=useMemo(()=>status==='approved'?artDirectionBrief(edition):'',[edition,status]);
+  const productionBrief=useMemo(()=>status==='approved'?artDirectionBrief(edition,false):'',[edition,status]);
   const [draft,setDraft]=useState<ArtGuide | undefined>(current?.guide);
   const [base,setBase]=useState<ArtGuide | undefined>(current?.guide);
   const [reason,setReason]=useState('');
