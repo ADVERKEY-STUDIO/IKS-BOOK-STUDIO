@@ -15,7 +15,7 @@ test("seven distinct source-led book identities are available", () => {
 });
 
 test("source upload selects and persists a complete Book Persona", () => {
-  assert.match(page, /const persona = inferBookPersona/);
+  assert.match(page, /const persona = project\.inspiration.*inferBookPersona/);
   assert.match(page, /\.\.\.bookPersonaPatch\(persona\)/);
   assert.match(page, /bookPersona: persona/);
   assert.match(page, /SOURCE-LED BOOK IDENTITY/);

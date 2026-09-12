@@ -9,6 +9,11 @@ import { SourceBookReviewPanel } from "./components/source-book-review";
 import { compareSourceVerse, sourceImageSignature, sourceVerseSignature, sourceReviewIssues, inspectRenderedSourceVerses, inspectRenderedSourceImages, type SourceBookReview } from "../lib/source-book-review";
 import { strToU8, unzipSync, zipSync } from "fflate";
 import { jsPDF } from "jspdf";
+import type { ReferenceUpload } from "./components/visual-reference-workspace";
+import { EditionDesk } from "./components/edition-desk";
+import { newEdition, type Edition, type EditionAction } from "../lib/devotional-edition";
+import { BookInspirationGallery, InspirationShelf } from "./components/book-inspiration";
+import { applyInspiration, inspirationBrief, inspirationPaletteStyle, normalizeInspiration, type BookInspiration } from "../lib/book-inspiration";
 import { placeBookIllustrations } from "../lib/book-illustrations";
 import { renderBookPageCanvas } from "../lib/book-raster";
 import { measureBookContent, pageFlowHtml, paginateFlowBlocks, refreshBookPageNumbers, assertFlowPreserved, inspectBookPage } from "../lib/book-layout";
@@ -22,7 +27,7 @@ import { assignIllustrationsToReaderPages, buildExternalAiPrompt, buildExternalI
 import { assessPublication, chapterRequiresIllustration, paginateContents, pdfRasterSettings, readerSafeImageCaption, sanitizeReaderHtml, sanitizeReaderImageHtml, type ContentsEntry } from "../lib/publication";
 import { BOOK_FORMATS, DEFAULT_NEW_BOOK_FORMAT, LEGACY_BOOK_FORMAT, assessBookFormatPreview, bookFormat, bookFormatCapacityRatio, bookFormatCssVariables, isBookFormatId, type BookFormatId, type BookFormatPreviewResult, type BookPageMetric } from "../lib/book-format";
 
-type View = "dashboard" | "wizard" | "external" | "analysis" | "brief" | "editor";
+type View = "edition" | "inspiration" | "dashboard" | "wizard" | "external" | "analysis" | "brief" | "editor";
 type EditorWorkspace = "designer" | "workflow";
 
 type SourceSection = { title: string; page: number; excerpt: string };
@@ -211,6 +216,8 @@ type DesignerPageOverride = DesignerPageRevision & {
 type DesignerStylePreset = { id: string; name: string; style: Partial<DesignerPageRevision> };
 
 type Project = {
+  edition?: Edition;
+  inspiration?: BookInspiration;
   sourceManifest?: SourceBookManifest;
   sourceReview?: SourceBookReview;
   sourceAssets?: SourceArchiveAsset[];
@@ -1052,6 +1059,7 @@ function repairChapterHierarchy(chapters: Chapter[]) {
 }
 
 function normalizeProject(saved: Project): Project {
+  if (saved.edition) return { ...emptyProject, ...saved, audience: saved.edition.metadata.audience };
   const { maxPages: _removedLegacyPageLimit, ...savedWithoutPageLimit } = saved as Project & { maxPages?: number };
   void _removedLegacyPageLimit;
   const cleanSaved = savedWithoutPageLimit as Project;
@@ -1070,6 +1078,7 @@ function normalizeProject(saved: Project): Project {
     ...emptyProject,
     ...cleanSaved,
     sourceBookOptions: normalizeSourceBookOptions(cleanSaved.sourceBookOptions),
+    inspiration: cleanSaved.inspiration ? normalizeInspiration(cleanSaved.inspiration) : undefined,
     adaptationPlanVersion: cleanSaved.adaptationPlanVersion ?? 1,
     audience: reader.value,
     readingLevel: reader.readingLevel,
@@ -1416,6 +1425,8 @@ function printableChapters(chapters: Chapter[]) {
 
 export default function Home() {
   const [view, setView] = useState<View>("dashboard");
+  const [inspirationReturn, setInspirationReturn] = useState<View>("dashboard");
+  const [inspirationProjectId, setInspirationProjectId] = useState<string>();
   const [project, setProject] = useState<Project>(seedProject);
   const [projects, setProjects] = useState<Project[]>([seedProject]);
   const [activeChapter, setActiveChapter] = useState(1);
@@ -1493,6 +1504,39 @@ export default function Home() {
     return next;
   });
 
+  async function openInspiration() {
+    if (view === "editor" && editorWorkspace === "designer") {
+      try { await designerStudioRef.current?.saveWholeBook(); }
+      catch (error) { notify(error instanceof Error ? error.message : "Save designer changes before opening inspiration."); return; }
+    }
+    setInspirationReturn(view);
+    setInspirationProjectId(view === "dashboard" ? undefined : project.id);
+    setView("inspiration");
+  }
+
+  async function saveInspiration(targetId: string, inspiration: BookInspiration, title: string) {
+    const target = targetId === "new"
+      ? { ...emptyProject, id: makeId(), title, editorialPreferences: [...designerPreferences], chapters: emptyProject.chapters.map(chapter => ({ ...chapter })) }
+      : targetId === project.id ? project : projects.find(item => item.id === targetId);
+    if (!target) throw new Error("That book is no longer available. Choose another project.");
+    const next = { ...target, ...applyInspiration(target.bookPersona, inspiration) };
+    await persistProject(next);
+    setInspirationProjectId(next.id);
+    if (targetId === "new") { setWizardStep(0); setEditorWorkspace("workflow"); setView("wizard"); }
+  }
+
+  async function startEdition() {
+    const next = { ...emptyProject, id: makeId(), title: "Untitled devotional edition", edition: newEdition(), chapters: [] };
+    try { await persistProject(next); setView("edition"); } catch (error) { notify(error instanceof Error ? error.message : "Could not create edition"); }
+  }
+  async function editionRequest(action?: EditionAction, file?: File, reference?: ReferenceUpload) {
+    let response: Response;
+    if (file) { const form = new FormData(); form.set("projectId", project.id); form.set("expectedRevision", String(project.edition?.revision)); form.set("file", file); if (reference) { form.set("referenceId", reference.referenceId); form.set("view", reference.view); form.set("caption", reference.caption); form.set("credit", reference.credit); form.set("provenance", reference.provenance); } response = await fetch(reference ? "/api/edition/reference-image" : "/api/edition/source", { method: "POST", headers: ownerHeaders(), body: form }); }
+    else response = await fetch("/api/edition", { method: "POST", headers: requestHeaders(), body: JSON.stringify({ projectId: project.id, expectedRevision: project.edition?.revision, action }) });
+    const data = await response.json() as { project: Project; error?: string };
+    if (!response.ok) throw new Error(data.error || "Could not save edition");
+    setProject(data.project); setProjects(current => [data.project, ...current.filter(p => p.id !== data.project.id)]);
+  }
   function startNewBook() {
     setProject({ ...emptyProject, id: makeId(), editorialPreferences: [...designerPreferences], chapters: emptyProject.chapters.map((chapter) => ({ ...chapter })) });
     setWizardStep(0);
@@ -1514,7 +1558,7 @@ export default function Home() {
     try {
       const source = await uploadSourceForAnalysis(file, project.id || makeId(), project.audience, setSourceProgress);
       const headings = source.headings;
-      const persona = inferBookPersona({ title: file.name.replace(/\.[^.]+$/, ""), sourcePreview: source.preview, sourceTerms: source.terms, sourceHeadings: headings, bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
+      const persona = project.inspiration && Object.keys(project.inspiration.references).length ? project.bookPersona : inferBookPersona({ title: file.name.replace(/\.[^.]+$/, ""), sourcePreview: source.preview, sourceTerms: source.terms, sourceHeadings: headings, bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
       const sourceChapters: Chapter[] = headings.map((title, index) => chapterFromContextPlan(title, index, source.sections[index], source.chapterPlans[index], project.audience));
       const personaProject = { ...project, ...bookPersonaPatch(persona), sourceTerms: source.terms };
       const chapters = attachChapterVisuals(personaProject, applyAutomaticAdaptationPlan(sourceChapters, project.audience, true));
@@ -1551,7 +1595,7 @@ export default function Home() {
     try {
       const source = await uploadSourceForAnalysis(file, project.id, project.audience, setSourceProgress);
       const titles = source.sourceIntelligence?.status === "ocr-required" ? [] : source.headings.length ? source.headings : project.sourceHeadings;
-      const persona = inferBookPersona({ title: project.title, sourcePreview: source.preview, sourceTerms: source.terms, sourceHeadings: titles, bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
+      const persona = project.inspiration && Object.keys(project.inspiration.references).length ? project.bookPersona : inferBookPersona({ title: project.title, sourcePreview: source.preview, sourceTerms: source.terms, sourceHeadings: titles, bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
       const personaProject = { ...project, ...bookPersonaPatch(persona), sourceTerms: source.terms };
       const next = {
         ...project,
@@ -1629,7 +1673,7 @@ export default function Home() {
       return { ...seed, recommendedPages: recommendedAdaptationPages(seed, project.audience) };
     });
     const sourceChapters = selected.map((item, index) => chapterFromContextPlan(item.title, index, undefined, plans[index], project.audience));
-    const persona = inferBookPersona({ title: project.title, sourcePreview: selected.map((item) => item.title).join(" "), sourceTerms: project.sourceTerms, sourceHeadings: selected.map((item) => item.title), bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
+    const persona = project.inspiration && Object.keys(project.inspiration.references).length ? project.bookPersona : inferBookPersona({ title: project.title, sourcePreview: selected.map((item) => item.title).join(" "), sourceTerms: project.sourceTerms, sourceHeadings: selected.map((item) => item.title), bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
     const personaProject = { ...project, ...bookPersonaPatch(persona) };
     patchProject({ sourceHeadings: selected.map((item) => item.title), chapters: attachChapterVisuals(personaProject, applyAutomaticAdaptationPlan(sourceChapters, project.audience, true)), sourceIntelligence: { ...project.sourceIntelligence, status: "ready", structureMode: mode, progress: 100, message: `${selected.length} verified ${mode === "parts" ? "Parts" : "chapters"} are ready for generation.` }, ...bookPersonaPatch(persona), adaptationPlanConfirmed: false, briefApproved: false });
     notify(`${selected.length} source-led chapters prepared from the verified outline`);
@@ -1691,7 +1735,7 @@ export default function Home() {
     });
     const illustrationSlots = [...createExternalIllustrationSlots(result, project.title, project.sourceBookOptions?.imageMode === "source-first"), ...(result.sourceManifest ? sourceImageSlots(result.sourceManifest,result.sections) : [])];
     if(new Set(illustrationSlots.map(slot=>slot.id)).size!==illustrationSlots.length)throw new Error("Source placement IDs must not overlap the generated illustration IDs. Rename them in the source manifest.");
-    const persona = inferBookPersona({ title: result.title || project.title, sourcePreview: result.sections.map((section) => `${section.title} ${section.raw.slice(0, 220)}`).join(" "), sourceHeadings: result.sections.map((section) => readerFacingChapterTitle(section.title)), bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
+    const persona = project.inspiration && Object.keys(project.inspiration.references).length ? project.bookPersona : inferBookPersona({ title: result.title || project.title, sourcePreview: result.sections.map((section) => `${section.title} ${section.raw.slice(0, 220)}`).join(" "), sourceHeadings: result.sections.map((section) => readerFacingChapterTitle(section.title)), bookType: project.bookType }, projects.filter((item) => item.id !== project.id).map((item) => item.bookPersona?.signature).filter(Boolean));
     const nextBase: Project = {
       ...project,
       title: project.title.trim() || result.title,
@@ -1831,6 +1875,7 @@ export default function Home() {
   async function openProject(selected: Project) {
     let next = normalizeProject(selected);
     setProject(next);
+    if (next.edition) { setView("edition"); return; }
     setActiveChapter(next.chapters[0]?.id ?? 1);
     const needsContextPlan = Boolean(next.sourceObjectKey) && (next.adaptationPlanVersion !== ADAPTATION_PLAN_VERSION || next.chapters.some((chapter) => !chapter.sourceWordCount || !chapter.sourcePageCount || !chapter.recommendedPages));
     if (next.adaptationPlanConfirmed && !needsContextPlan) {
@@ -1851,7 +1896,7 @@ export default function Home() {
       if (!response.ok || !data.source) throw new Error(data.error || "Source re-check failed");
       const awaitingSourceOutline = Boolean(data.source.sourceIntelligence && data.source.sourceIntelligence.status !== "ready");
       const titles = awaitingSourceOutline ? [] : data.source.headings.length ? data.source.headings : next.sourceHeadings;
-      const persona = inferBookPersona({ title: next.title, sourcePreview: data.source.preview, sourceTerms: data.source.terms, sourceHeadings: titles, bookType: next.bookType }, projects.filter((item) => item.id !== next.id).map((item) => item.bookPersona?.signature).filter(Boolean));
+      const persona = next.inspiration && Object.keys(next.inspiration.references).length ? next.bookPersona : inferBookPersona({ title: next.title, sourcePreview: data.source.preview, sourceTerms: data.source.terms, sourceHeadings: titles, bookType: next.bookType }, projects.filter((item) => item.id !== next.id).map((item) => item.bookPersona?.signature).filter(Boolean));
       const personaProject = { ...next, ...bookPersonaPatch(persona), sourceTerms: data.source.terms };
       next = {
         ...next,
@@ -1912,6 +1957,8 @@ BOOK AND CHAPTER CONTEXT
 - Language: ${project.language}
 - Chapter focus: ${active.context || chapterText.slice(0, 1700)}
 - Essential concepts to represent: ${visualTerms.join(", ") || "the central idea of the chapter"}
+
+${inspirationBrief(project.inspiration)}
 
 BOOK PERSONA
 ${project.bookPersona.name} · ${project.bookPersona.family}
@@ -2122,7 +2169,7 @@ OUTPUT REQUIREMENTS
 
   async function duplicateProject(source: Project) {
     const copy = normalizeProject({ ...source, id: makeId(), title: `${source.title} — Copy`, updatedAt: "Just now" });
-    try { await persistProject(copy); notify("Project duplicated"); } catch { notify("Could not duplicate project"); }
+    try { await persistProject(source.edition ? { ...copy, ...{ editionCopyFrom: source.id } } : copy); notify("Project duplicated"); } catch { notify("Could not duplicate project"); }
   }
 
   async function deleteProject(source: Project) {
@@ -2677,7 +2724,10 @@ OUTPUT REQUIREMENTS
     else openPreview();
   }
 
-  if (view === "dashboard") return <Dashboard projects={projects} onNew={startNewBook} onOpen={openProject} onDuplicate={duplicateProject} onDelete={deleteProject} />;
+  if (view === "edition" && project.edition) return <EditionDesk key={project.id} edition={project.edition} onReferenceUpload={async input => { if (input.file.size > 10 * 1024 * 1024) throw new Error("Choose an image up to 10 MB."); let bitmap: ImageBitmap; try { bitmap = await createImageBitmap(input.file); } catch { throw new Error("This image could not be decoded. Use a valid PNG, JPEG, or WebP file."); } const oversized = bitmap.width * bitmap.height > 64000000; bitmap.close(); if (oversized) throw new Error("Use a reference image up to 64 megapixels."); await editionRequest(undefined, input.file, input); }} onReferenceImage={async key => { const response = await fetch(`/api/edition/reference-asset?projectId=${encodeURIComponent(project.id)}&key=${encodeURIComponent(key)}`, { headers: ownerHeaders() }); if (!response.ok) throw new Error("Reference image unavailable."); return response.blob(); }} onReferencePackage={async id => { const response = await fetch(`/api/edition/reference-package?projectId=${encodeURIComponent(project.id)}&referenceId=${encodeURIComponent(id)}`, { headers: ownerHeaders() }); if (!response.ok) { const error = await response.json() as { error?: string }; throw new Error(error.error || "Could not build reference package."); } const url = URL.createObjectURL(await response.blob()); const a = document.createElement("a"); a.href = url; a.download = `reference-${id}.zip`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 30000); }} inspiration={project.inspiration} onInspiration={() => void openInspiration()} onBrief={async () => { const response = await fetch(`/api/edition/art-brief?projectId=${encodeURIComponent(project.id)}`, { headers: ownerHeaders() }); if (!response.ok) { const data = await response.json() as { error?: string }; throw new Error(data.error || "Approve the current art guide before production."); } return response.text(); }} onBack={() => setView("dashboard")} onAction={action => editionRequest(action)} onUpload={file => editionRequest(undefined, file)} onReload={async () => { const response = await fetch(`/api/edition?projectId=${encodeURIComponent(project.id)}`, { headers: ownerHeaders() }); const data = await response.json() as { project: Project; error?: string }; if (!response.ok) throw new Error(data.error); setProject(data.project); setProjects(current => [data.project, ...current.filter(p => p.id !== data.project.id)]); }} onDownload={async (key, name) => { const response = await fetch(`/api/source/download?key=${encodeURIComponent(key)}`, { headers: ownerHeaders() }); if (!response.ok) throw new Error("Could not retrieve original source."); const url = URL.createObjectURL(await response.blob()); const a = document.createElement("a"); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 30000); }} onExport={async () => { const response = await fetch(`/api/edition/export?projectId=${encodeURIComponent(project.id)}`, { headers: ownerHeaders() }); if (!response.ok) { const data = await response.json() as { error?: string }; throw new Error(data.error || "Review the edition before export."); } return response.text(); }}/>;
+  if (view === "inspiration") return <BookInspirationGallery projects={[project, ...projects.filter(item => item.id !== project.id)]} initialProjectId={inspirationProjectId} onBack={() => setView(inspirationReturn)} onApply={saveInspiration}/>;
+
+  if (view === "dashboard") return <Dashboard onNewEdition={() => void startEdition()} onInspiration={() => void openInspiration()} projects={projects} onNew={startNewBook} onOpen={openProject} onDuplicate={duplicateProject} onDelete={deleteProject} />;
 
   return (
     <div className="studio-shell">
@@ -2685,6 +2735,7 @@ OUTPUT REQUIREMENTS
         <button className="brand" onClick={() => setView("dashboard")}><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></button>
         <div className="current-project"><i /> <span><strong>{project.title}</strong><small>{project.source}</small></span></div>
         <div className="top-actions">
+          <button className="inspiration-nav-button" onClick={() => void openInspiration()} disabled={draftBusy || sourceBusy}>Book inspiration</button>
           {view === "editor" && <><button className={editorWorkspace === "designer" ? "designer-nav-button active" : "designer-nav-button"} onClick={() => setEditorWorkspace("designer")}>{editorWorkspace === "workflow" ? "Return to Designer" : "Designer"}</button><button className="pdf-button" onClick={openWorkspacePreview}>Preview & PDF</button></>}
           {(view === "editor" || view === "brief") && <details className="advanced-tools"><summary>Advanced</summary><div>{view === "editor" && <><button onClick={() => void openProductionWorkflow("top")}>Production workflow</button><button onClick={() => void openProductionWorkflow("chapters")}>Chapters</button><button onClick={() => setShowReviewQueue(true)}>Review queue · {project.chapters.filter((chapter) => !isPublishApproved(chapter)).length || "complete"}</button><button onClick={() => void openProductionWorkflow("illustrations")}>Illustrations</button>{project.creationMode === "external" && <button onClick={() => setView("external")}>External illustration package</button>}<button onClick={() => setView("brief")}>Book plan</button></>}<label className="advanced-upload">{sourceBusy ? "Reading source…" : "Replace source book"}<input type="file" accept=".pdf,.docx,.txt,.md" disabled={sourceBusy || draftBusy} onChange={(event) => event.target.files?.[0] && refreshSource(event.target.files[0])}/></label>{project.sourceManifest && <button onClick={() => void openSourceReview()}>Review source images & Sanskrit</button>}<button onClick={openVersions}>Version history</button><button onClick={() => setShowOperations(true)}>Request history</button><button onClick={saveProject}>Save project now</button><button onClick={exportDoc} disabled={exportBusy}>{exportBusy ? "Preparing DOCX…" : "Download DOCX"}</button><button className="package-import-button" onClick={() => setShowPackageImport(true)}>ChatGPT ZIP workflow</button><small>Generation, review, source, versions and export tools</small></div></details>}
         </div>
@@ -2825,9 +2876,10 @@ function ThemeSwitcher(){
   return <div className="theme-switcher"><label>Theme</label><select value={theme} onChange={e=>setTheme((e.target as HTMLSelectElement).value)}><option value="original">Original Forest</option><option value="banyan">Banyan Library</option><option value="curious">Curious Lab</option><option value="scholar">Scholar&apos;s Desk</option></select></div>;
 }
 
-function Dashboard({ projects, onNew, onOpen, onDuplicate, onDelete }: { projects: Project[]; onNew: () => void; onOpen: (project: Project) => void; onDuplicate: (project: Project) => void; onDelete: (project: Project) => void }) {
+function Dashboard({ onNewEdition, projects, onNew, onOpen, onDuplicate, onDelete, onInspiration }: { onNewEdition: () => void; onInspiration: () => void; projects: Project[]; onNew: () => void; onOpen: (project: Project) => void; onDuplicate: (project: Project) => void; onDelete: (project: Project) => void }) {
   return <main className="dashboard">
-    <header><div className="brand"><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></div><div style={{display:"flex",alignItems:"center",gap:"12px"}}><ThemeSwitcher/><button className="primary" onClick={onNew}>＋ New book</button></div></header>
+    <header><div className="brand"><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></div><div style={{display:"flex",alignItems:"center",gap:"12px"}}><ThemeSwitcher/><button className="secondary" onClick={onNewEdition}>New devotional edition</button><button className="primary" onClick={onNew}>＋ New book</button></div></header>
+    <InspirationShelf onOpen={onInspiration}/>
     <section className="hero">
       <div><p className="eyebrow">CHILDREN’S ADAPTATION STUDIO</p><h1>Turn any source into a book<br/><em>children want to read.</em></h1><p className="hero-copy">Preserve every original chapter, then reshape the writing, activities and visual world for children aged 7–15.</p><button className="hero-cta" onClick={onNew}>Start a children’s adaptation <span>→</span></button><small>AGES 7–15 · PDF · DOCX · TXT · NATURAL LENGTH · 100-PAGE CEILING</small></div>
       <div className="hero-books" aria-hidden="true"><div className="book back"><span>THE SOURCE</span></div><div className="book front"><span>A BOOK FOR</span><strong>CURIOUS<br/>YOUNG MINDS</strong><i>READ · DISCOVER · CREATE</i><b>✦</b></div></div>
@@ -2836,7 +2888,7 @@ function Dashboard({ projects, onNew, onOpen, onDuplicate, onDelete }: { project
       <div className="section-title"><div><p className="eyebrow">YOUR LIBRARY</p><h2>Continue where you left off</h2></div><span>{projects.length} {projects.length === 1 ? "project" : "projects"}</span></div>
       <div className="project-grid">
         <button className="new-card" onClick={onNew}><b>＋</b><strong>New adaptation</strong><small>Begin with any source book</small></button>
-        {projects.map((project) => <article className="project-card" key={project.id}><button className="project-open" onClick={() => onOpen(project)}><div className="mini-cover"><span>{project.chapters.length}</span><small>CHAPTERS</small></div><div><span className="status">IN EDITING</span><h3>{project.title}</h3><p>{project.source}</p><footer><span>{project.updatedAt}</span><strong>Open project →</strong></footer></div></button><div className="project-menu"><button onClick={() => onDuplicate(project)}>Duplicate</button>{project.id !== "arthashastra-sample" && <button onClick={() => onDelete(project)}>Delete</button>}</div></article>)}
+        {projects.map((project) => <article className="project-card" key={project.id}><button className="project-open" onClick={() => onOpen(project)}><div className="mini-cover"><span>{project.edition ? project.edition.passages.filter(p => !p.retired).length : project.chapters.length}</span><small>{project.edition ? "PASSAGES" : "CHAPTERS"}</small></div><div><span className="status">IN EDITING</span><h3>{project.title}</h3><p>{project.edition ? `${project.edition.metadata.type} · ${project.edition.metadata.audience}` : project.source}</p><footer><span>{project.updatedAt}</span><strong>Open project →</strong></footer></div></button><div className="project-menu"><button onClick={() => onDuplicate(project)}>Duplicate</button>{project.id !== "arthashastra-sample" && <button onClick={() => onDelete(project)}>Delete</button>}</div></article>)}
       </div>
     </section>
     <section className="workflow"><div><span>01</span><b>Upload</b><small>Any source book</small></div><i>→</i><div><span>02</span><b>Choose</b><small>Age, language and book world</small></div><i>→</i><div><span>03</span><b>Adapt</b><small>Child-friendly text and visuals</small></div><i>→</i><div><span>04</span><b>Publish</b><small>PDF or editable file</small></div></section>
@@ -2953,6 +3005,8 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
     bookType: project.bookType,
     aesthetic: project.aesthetic,
     illustrationStyle: project.illustrationStyle,
+    edition: project.edition,
+    inspiration: project.inspiration,
     sourceBookOptions: project.sourceBookOptions,
     learningFeatures: project.learningFeatures,
     chapters: project.chapters.map((chapter) => ({ id: chapter.id, title: chapter.title, body: chapter.body, context: chapter.context })),
@@ -3104,7 +3158,7 @@ function ExternalIllustrationWorkflow({ project, onBack, onReplaceManuscript, on
 }
 
 function ExternalAiManuscript({ project, onBack, onAccept, onImportIllustrations, onOpenDesigner, onNotify }: { project: Project; onBack: () => void; onAccept: (result: ExternalManuscriptResult, fileName: string) => Promise<void>; onImportIllustrations: (candidates: ExternalIllustrationCandidate[], issues: string[], sourceFiles?: SourceImageUpload[]) => Promise<void>; onOpenDesigner: () => void; onNotify: (message: string) => void }) {
-  const prompt = useMemo(() => buildExternalAiPrompt({ title: project.title, sourceName: project.source, audience: project.audience, readingLevel: project.readingLevel, language: project.language, bookType: project.bookType, aesthetic: project.aesthetic, illustrationStyle: project.illustrationStyle, sourceBookOptions: project.sourceBookOptions, learningFeatures: project.learningFeatures }), [project]);
+  const prompt = useMemo(() => buildExternalAiPrompt({ edition: project.edition, inspiration: project.inspiration, title: project.title, sourceName: project.source, audience: project.audience, readingLevel: project.readingLevel, language: project.language, bookType: project.bookType, aesthetic: project.aesthetic, illustrationStyle: project.illustrationStyle, sourceBookOptions: project.sourceBookOptions, learningFeatures: project.learningFeatures }), [project]);
   const [showManuscriptStage, setShowManuscriptStage] = useState(!project.externalManuscript);
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [manuscriptText, setManuscriptText] = useState("");
@@ -3781,7 +3835,7 @@ function renderBookPage(project: Project, page: DesignerPageOverride, key: strin
     inset: `${page.borderInset}px`, border: `${page.borderWidth}px ${page.borderStyle} ${page.borderColor}`, borderRadius: `${page.borderRadius}px` };
   return <article key={key} data-page-slot={page.slotId} data-book-format={project.bookFormat}
     className={`designer-canvas-page book-sheet ${designerBookClasses(project, page.borderStyle === "inherit" ? project.bookBorder : "No Border")} ${designerPageClasses(project, page)} book-align-${project.bookAlignment || "left"}${page.backgroundImageUrl ? " has-background" : ""}${page.intentionalBlank ? " blank" : ""}${canva ? " canva-custom-sheet" : ""}${options.draftProof ? " draft-proof" : ""}`}
-    style={{ ...bookFormatCssVariables(project.bookFormat), backgroundColor: page.backgroundColor } as CSSProperties} onMouseDown={options.onMouseDown}>
+    style={{ ...bookFormatCssVariables(project.bookFormat), ...(project.inspiration ? inspirationPaletteStyle(project.bookPersona) : {}), backgroundColor: page.backgroundColor } as CSSProperties} onMouseDown={options.onMouseDown}>
     {canva ? <img src={canva.current.imageUrl} alt={`${page.label} designed in Canva`}/> : <>
       <div className="designer-background-layer" style={background}/><div className="designer-border-layer" style={border}/>
       <div className={`designer-watermark-layer${page.watermarkRepeat ? " repeat" : ""}`} style={{ opacity: page.watermarkOpacity, left: `${page.watermarkX}%`, top: `${page.watermarkY}%`, transform: `translate(-50%,-50%) rotate(${page.watermarkRotation}deg)`, display: page.watermarkVisible ? "grid" : "none" }}>
