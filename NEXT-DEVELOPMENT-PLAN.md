@@ -1,7 +1,9 @@
 # Full next development plan — IKS Book Studio
 
-Status: A–D core workspaces implemented; E–J and discovery expansion remain pending
+Status: A–E core workspaces implemented; F–J and discovery expansion remain pending
 Updated: 12 September 2026
+
+Phase E implementation and PDF verification: `docs/development/PHASE-E-COMPLETED.md`.
 
 Progress and qualified acceptance status: see `docs/development/REVIEW-A-THROUGH-D.md` and the phase completion reports. Scene comparison and artwork production remain later dependencies; the full product is not complete.
 
