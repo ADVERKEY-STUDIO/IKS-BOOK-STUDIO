@@ -1,6 +1,6 @@
 # Full next development plan — IKS Book Studio
 
-Status: A–E core workspaces and Phase F imports/review implemented; Phase F paid generation deferred by user; G–J and discovery expansion remain pending
+Status: A–F core/import workspaces and Phase H production workspace implemented; Phase G review studies ready with acceptance checks pending; paid generation deferred; I–J and discovery expansion pending
 Updated: 12 September 2026
 
 Phase E implementation and PDF verification: `docs/development/PHASE-E-COMPLETED.md`.
@@ -242,6 +242,8 @@ Review together for source accuracy, typography, cultural appropriateness, conti
 The user approves the sample direction before remaining spreads are produced. Problems discovered in the pilot are fixed in the guide or compositor, rather than repeated throughout the book.
 
 ## 12. Phase H — Full-book production
+
+Workspace implementation complete; finished-book acceptance remains pending. See [Phase H report](docs/development/PHASE-H-WORKSPACE-COMPLETED.md). The user authorized starting H after the G review milestone without closing outstanding pilot checks.
 
 ### Build
 

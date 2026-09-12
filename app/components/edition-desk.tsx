@@ -1,4 +1,5 @@
 "use client";
+import { BookProductionWorkspace } from "./book-production-workspace";
 import { ArtProductionWorkspace, type ArtUpload } from "./art-production-workspace";
 import { SpreadDesigner } from "./spread-designer";
 import { StoryboardWorkspace } from "./storyboard-workspace";
@@ -11,7 +12,8 @@ import { editionTypes, editionAudiences, passageFields, editionExportIssues, typ
 
 type Props = { onArtUpload:(input:ArtUpload)=>Promise<void>; onArtPackage:(id:string)=>Promise<void>; onReferenceUpload: (input: ReferenceUpload) => Promise<void>; onReferenceImage: (key: string) => Promise<Blob>; onReferencePackage: (id: string) => Promise<void>; inspiration?: BookInspiration; onInspiration: () => void; onBrief: () => Promise<string>; edition: Edition; onAction: (action: EditionAction) => Promise<void>; onUpload: (file: File) => Promise<void>; onDownload: (key: string, name: string) => Promise<void>; onExport: () => Promise<string>; onBack: () => void; onReload: () => Promise<void> };
 export function EditionDesk({ onArtUpload, onArtPackage, onReferenceUpload, onReferenceImage, onReferencePackage, inspiration, onInspiration, onBrief, edition, onAction, onUpload, onDownload, onExport, onBack, onReload }: Props) {
-  const [tab, setTab] = useState<'setup' | 'source' | 'art' | 'references' | 'storyboard' | 'designer' | 'production' | 'proof'>(edition.passages.length ? 'source' : 'setup');
+  const [tab, setTab] = useState<'setup' | 'source' | 'art' | 'references' | 'storyboard' | 'designer' | 'production' | 'book' | 'proof'>(edition.passages.length ? 'source' : 'setup');
+  const [designPlan,setDesignPlan] = useState('');
   const [metadata, setMetadata] = useState(edition.metadata);
   const [newText, setNewText] = useState('');
   const [location, setLocation] = useState('');
@@ -46,7 +48,7 @@ export function EditionDesk({ onArtUpload, onArtPackage, onReferenceUpload, onRe
   }
   return <main className="edition-desk">
     <header><button disabled={busy || dirty} onClick={onBack}>← Library</button><strong>{edition.metadata.title}</strong><span>Saved revision {edition.revision}</span></header>
-    <nav aria-label="Edition workspace">{(['setup', 'source', 'art', 'references', 'storyboard', 'production', 'designer', 'proof'] as const).map(t => <button key={t} disabled={busy || dirty} aria-current={tab === t ? 'page' : undefined} onClick={() => setTab(t)}>{t === 'setup' ? 'Edition setup' : t === 'source' ? 'Source desk' : t === 'art' ? 'Art direction' : t === 'references' ? 'Visual references' : t === 'storyboard' ? 'Storyboard' : t === 'designer' ? 'Designer' : t === 'production' ? 'Production' : 'Reading proof'}</button>)}</nav>
+    <nav aria-label="Edition workspace">{(['setup', 'source', 'art', 'references', 'storyboard', 'production', 'book', 'designer', 'proof'] as const).map(t => <button key={t} disabled={busy || dirty} aria-current={tab === t ? 'page' : undefined} onClick={() => setTab(t)}>{t === 'setup' ? 'Edition setup' : t === 'source' ? 'Source desk' : t === 'art' ? 'Art direction' : t === 'references' ? 'Visual references' : t === 'storyboard' ? 'Storyboard' : t === 'designer' ? 'Designer' : t === 'production' ? 'Production' : t === 'book' ? 'Full book' : 'Reading proof'}</button>)}</nav>
     {dirty && <p role="status">Save or cancel your edits before switching workspaces.</p>}
     {error && <div role="alert" className="edition-error">{error}<button disabled={busy} onClick={() => void run(onReload, 'Latest saved edition loaded.')}>Reload saved edition</button></div>}
     {message && <p role="status">{message}</p>}
@@ -66,7 +68,8 @@ export function EditionDesk({ onArtUpload, onArtPackage, onReferenceUpload, onRe
     {tab === 'references' && <VisualReferenceWorkspace edition={edition} busy={busy} onDirty={setPassageDirty} onAction={action => run(() => onAction(action), 'Reference version saved.')} onUpload={input => run(() => onReferenceUpload(input), 'Image added as a new draft.')} onImage={onReferenceImage} onPackage={async id => { await run(() => onReferencePackage(id), 'Reference request package downloaded.'); }} />}
     {tab === 'storyboard' && <StoryboardWorkspace edition={edition} busy={busy} onDirty={setPassageDirty} onAction={action => run(() => onAction(action), 'Storyboard saved.')} />}
     {tab === 'production' && <ArtProductionWorkspace edition={edition} busy={busy} onDirty={setPassageDirty} onImage={onReferenceImage} onAction={action=>run(()=>onAction(action),'Production record saved.')} onUpload={input=>run(()=>onArtUpload(input),'Artwork imported as a new version.')} onPackage={async id=>{await run(()=>onArtPackage(id),'Production package downloaded.');}} />}
-    {tab === 'designer' && <SpreadDesigner edition={edition} busy={busy} onDirty={setPassageDirty} onImage={onReferenceImage} onAction={action => run(() => onAction(action), 'Composition saved.')} />}
+    {tab === 'book' && <BookProductionWorkspace edition={edition} busy={busy} onDirty={setPassageDirty} onImage={onReferenceImage} onAction={action=>run(()=>onAction(action),'Book production saved.')} onDesign={id=>{setDesignPlan(id);setTab('designer');}} />}
+    {tab === 'designer' && <SpreadDesigner initialPlanId={designPlan} edition={edition} busy={busy} onDirty={setPassageDirty} onImage={onReferenceImage} onAction={action => run(() => onAction(action), 'Composition saved.')} />}
     {tab === 'proof' && <section className="edition-panel"><h1>Reading proof</h1><p>This is a text proof for source review. Spread design and finished illustrations follow in later phases. Private editorial notes are excluded.</p>{issues.length > 0 && <div className="edition-error"><strong>Before export</strong><ul>{issues.map(i => <li key={i}>{i}</li>)}</ul></div>}<div className="edition-actions"><button disabled={busy || !!issues.length} onClick={() => void run(() => exportProof(true), 'Print proof opened. Choose Save as PDF in the print dialog.')}>Print / Save as PDF</button><button disabled={busy || !!issues.length} onClick={() => void run(() => exportProof(false), 'Reading proof downloaded.')}>Download HTML proof</button></div><style>{artGuideProofCss(edition)}</style><div className="edition-proof"><h2>{edition.metadata.title}</h2><p>{[edition.metadata.sourceEdition,edition.metadata.attribution,edition.metadata.translator].filter(Boolean).join(' · ')}</p>{passages.map(p => <article key={p.id}><small>{p.location}</small>{passageFields.filter(f => f !== 'notes' && p.fields[f].text).map(f => <div key={f}>{f !== 'original' && <h3>{f}</h3>}<p className={f === 'original' ? 'edition-original' : f}>{p.fields[f].text}</p></div>)}</article>)}</div></section>}
     {!!edition.affectedTargets.length && <section className="edition-panel"><h2>Dependent work needs review</h2>{edition.affectedTargets.map((t,i) => <p key={i}>{t.targetId} · source passage {t.passageId} changed</p>)}</section>}
   </main>;

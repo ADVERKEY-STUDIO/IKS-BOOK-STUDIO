@@ -31,4 +31,4 @@ Museum images retain complete frames. Object credits, public-domain status, and 
 - Review the saved library draft, establish its art guide, and approve source/artwork through the ordinary workflow once the user accepts the direction. Museum assets are registered as visual references; they are not falsely recorded as approved production results.
 - Native image-rich PDF export and actual-size PDF inspection. The current verified deliverable is HTML review proof; no PDF print-verification claim is made.
 
-Do not start Phase H or label this an approved edition. No Cloudflare deployment was performed.
+The user subsequently instructed starting the next phase. Phase H workspace implementation is authorized; the outstanding pilot checks above remain pending. Do not label this an approved edition. No Cloudflare deployment was performed.

@@ -5,9 +5,9 @@ import type { Edition } from '../../lib/devotional-edition';
 import { compositionDocument, compositionFormat, compositionIssues, compositionMarkup, defaultPrintFormat, initialComposition, layerDefaults, type CompositionAction, type CompositionLayer, type SpreadComposition } from '../../lib/spread-composition';
 
 const asData = (blob:Blob)=>new Promise<string>((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result));r.onerror=()=>reject(new Error('Cannot read asset.'));r.readAsDataURL(blob);});
-export function SpreadDesigner({edition,busy,onAction,onImage,onDirty}:{edition:Edition;busy:boolean;onAction:(a:CompositionAction)=>Promise<boolean>;onImage:(key:string)=>Promise<Blob>;onDirty:(v:boolean)=>void}) {
+export function SpreadDesigner({initialPlanId,edition,busy,onAction,onImage,onDirty}:{initialPlanId?:string;edition:Edition;busy:boolean;onAction:(a:CompositionAction)=>Promise<boolean>;onImage:(key:string)=>Promise<Blob>;onDirty:(v:boolean)=>void}) {
   const plans=edition.storyboard||[];
-  const [planId,setPlanId]=useState(plans[0]?.id||'');
+  const [planId,setPlanId]=useState(initialPlanId&&plans.some(p=>p.id===initialPlanId)?initialPlanId:plans[0]?.id||'');
   const plan=plans.find(p=>p.id===planId);
   const saved=edition.compositions?.find(c=>c.planId===planId);
   const [draft,setDraft]=useState<SpreadComposition|undefined>(()=>saved||(plan?initialComposition(edition,plan):undefined));
