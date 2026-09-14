@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { strToU8, zipSync } from 'fflate';
-import { templates, selectableTemplates, templateLayout, templateAppearanceCss, parseTemplateBook, bookPrompt, continuationPrompt, renderTemplateBook, assetName, type TemplateId, type BookPage } from '../../lib/template-book';
+import { templates, selectableTemplates, templateLayout, templateAppearanceCss, parseTemplateBook, importTemplateManuscript, bookPrompt, continuationPrompt, renderTemplateBook, assetName, type TemplateId, type BookPage } from '../../lib/template-book';
 import { readTemplateArchive } from '../../lib/template-archive';
 import './studio.css';
 import { validateBookArtwork, ARCHIVE_BYTES, IMAGE_BYTES } from '../../lib/template-capacity';
@@ -95,12 +95,7 @@ export default function TemplateStudio() {
             if (/\.zip$/i.test(file.name)) {
                 const archive = readTemplateArchive(new Uint8Array(await file.arrayBuffer()));
                 if (archive['book.json']) {
-                    const parsed = parseTemplateBook(JSON.parse(new TextDecoder().decode(archive['book.json'])), draft.id);
-                    if (parsed.templateId !== draft.templateId)
-                        throw Error('Package template does not match your selected template.');
-                    if (next && JSON.stringify(parsed) !== JSON.stringify(next))
-                        throw Error('A manuscript is already saved. Upload image batches only, or start a new workspace for a replacement manuscript.');
-                    next = parsed;
+                    next = importTemplateManuscript(JSON.parse(new TextDecoder().decode(archive['book.json'])), draft.id, draft.templateId, next);
                 }
                 for (const [path, bytes] of Object.entries(archive))
                     if (path.startsWith('images/')) {
@@ -111,12 +106,7 @@ export default function TemplateStudio() {
             else if (/\.json$/i.test(file.name)) {
                 if (file.size > 2 * 1024 * 1024)
                     throw Error('Manuscript must be under 2 MB.');
-                const parsed = parseTemplateBook(JSON.parse(await file.text()), draft.id);
-                if (parsed.templateId !== draft.templateId)
-                    throw Error('Template mismatch.');
-                if (next && JSON.stringify(parsed) !== JSON.stringify(next))
-                    throw Error('Manuscript already saved. Start a new workspace to replace it.');
-                next = parsed;
+                next = importTemplateManuscript(JSON.parse(await file.text()), draft.id, draft.templateId, next);
             }
             else if (assetName(file.name)) {
                 incoming[file.name] = await imageBlob(file);
@@ -138,10 +128,11 @@ export default function TemplateStudio() {
                 extra.push(new File([blob], name, { type: blob.type }));
         }
         validateBookArtwork(images);
-        patch({ book: next, images });
+        patch({ book: next, title: next.title, language: next.language, images });
         setUnmatched(u => [...u, ...extra]);
         setSelected(0);
         setStep(2);
+        setNotice(`Imported ${next.pages.length} spreads · ${next.pages.filter(p => images[p.image]).length} illustrations placed`);
     }
     async function openPreview() { if (!book || !draft)
         return; const urls: Record<string, string> = {}; for (const [name, blob] of Object.entries(draft.images))
