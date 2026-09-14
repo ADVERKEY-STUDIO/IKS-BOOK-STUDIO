@@ -10,6 +10,8 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
 const bindingConfig = {
   main: "./worker/index.ts",
+  // Preserve dashboard runtime settings across generated-config deployments.
+  keep_vars: true,
   compatibility_flags: ["nodejs_compat", "nodejs_compat_populate_process_env"],
   d1_databases: d1
     ? [
