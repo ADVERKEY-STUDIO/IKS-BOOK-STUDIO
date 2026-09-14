@@ -10,3 +10,10 @@ test('every template generates a matching detailed resumable contract',()=>{for(
 test('render preserves original and meaning, escapes untrusted HTML and marks missing art',()=>{const b=fixture();b.title='<script>alert(1)</script>';b.pages[0].original='<img onerror=alert(1)>';const html=renderTemplateBook(parseTemplateBook(b),{'spread-01.png':'images/spread-01.png'});assert.doesNotMatch(html,/<script>|<img onerror/);assert.match(html,/&lt;img/);assert.match(html,/Artwork pending: spread-02.png/);assert.match(html,/contenteditable/);assert.match(html,/art-left/);});
 test('archive accepts partial manifest and ignores executable content',()=>{const files=readTemplateArchive(zipSync({'book.json':strToU8(JSON.stringify(fixture())),'evil.js':strToU8('alert(1)')}));assert.deepEqual(Object.keys(files),['book.json']);assert.equal(parseTemplateBook(JSON.parse(new TextDecoder().decode(files['book.json']))).pages.length,2);});
 test('archive rejects traversal and bounded decompression rejects huge JSON',()=>{assert.throws(()=>readTemplateArchive(zipSync({'../book.json':strToU8('{}')})),/Unsafe/);assert.throws(()=>readTemplateArchive(zipSync({'book.json':new Uint8Array(3*1024*1024)})),/size limit/);});
+
+test('nine distinct templates retain identity through import, prompt and export',()=>{
+ assert.equal(templates.length,9);
+ assert.equal(new Set(templates.map(t=>t.id)).size,9);
+ assert.equal(new Set(templates.map(t=>t.art)).size,9);
+ for(const t of templates){const input=fixture();input.templateId=t.id;const b=parseTemplateBook(input);const html=renderTemplateBook(b);assert.ok(html.includes(`spread cover ${t.id}`));assert.ok(html.includes(`art-right ${t.id}`));assert.ok(bookPrompt('test',t.id,'Book','source.pdf','Awadhi').includes(t.art));}
+});
