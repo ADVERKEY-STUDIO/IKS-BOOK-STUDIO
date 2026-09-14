@@ -1,8 +1,9 @@
+import { ARCHIVE_BYTES, UNPACKED_BYTES, IMAGE_BYTES } from './template-capacity.ts';
 import { Unzip, UnzipInflate } from 'fflate';
 /** Stream decompression with an actual output limit, not just untrusted ZIP metadata. */
 export function readTemplateArchive(bytes: Uint8Array): Record<string, Uint8Array> {
-    if (bytes.length > 40 * 1024 * 1024)
-        throw Error('ZIP must be under 40 MB.');
+    if (bytes.length > ARCHIVE_BYTES)
+        throw Error('ZIP must be under 550 MB.');
     const entries: Record<string, Uint8Array> = Object.create(null);
     let total = 0, count = 0;
     let failure: Error | undefined;
@@ -32,7 +33,7 @@ export function readTemplateArchive(bytes: Uint8Array): Record<string, Uint8Arra
             return; if (err) {
             failure = err;
             return;
-        } total += data.length; length += data.length; if (total > 50 * 1024 * 1024 || length > (file.name === 'book.json' ? 2 : 10) * 1024 * 1024) {
+        } total += data.length; length += data.length; if (total > UNPACKED_BYTES || length > (file.name === 'book.json' ? 2 * 1024 * 1024 : IMAGE_BYTES)) {
             failure = Error('Unpacked files exceed the size limit.');
             file.terminate();
             return;
