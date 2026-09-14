@@ -64,3 +64,24 @@ existing verified-email book storage remains accessible after migration.
 Run `node --test tests/firebase-identity.test.mjs tests/library.test.mjs` plus the
 production build. Real sign-in and saved-book access in another browser must be
 verified after provider setup; mocked tests do not establish production readiness.
+
+
+### Prevent sign-in configuration loss on redeployment
+
+The 2026-09-14 deployment regression was caused by a later generated-config
+deploy clearing the two plain Firebase variables. Store `FIREBASE_PROJECT_ID`
+and `FIREBASE_API_KEY` as Worker secrets on `iksmain`, even though the Firebase
+web API key is public. Wrangler preserves secrets across normal deployments.
+The Vite binding config also sets `keep_vars: true` to retain dashboard variables.
+For an atomic code-and-settings rollout, use Wrangler deploy's `--secrets-file`
+with an ignored, temporary JSON file containing just these two values. Never
+commit credential files.
+
+After every production deployment run:
+
+```sh
+bash scripts/verify-cloud-signin.sh https://iksmain.gg220962.workers.dev
+```
+
+This checks the real config API and fails when sign-in would show as unavailable.
+It does not replace a signed-in book-save test.
