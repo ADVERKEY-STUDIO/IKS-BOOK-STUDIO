@@ -1,22 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { libraryApi } from '../worker/library.ts';
+import { libraryApi as api, libraryUser, libraryOwner } from '../worker/library.ts';
+const identities = new Map();
+const verifier = async request => identities.get(request.headers.get('cookie')) || null;
+const libraryApi = (request, env) => api(request, env, verifier);
 function environment() {
  const db = new DatabaseSync(':memory:');
  const wrap = (sql, values=[]) => ({ bind: (...args) => wrap(sql,args), first: async () => db.prepare(sql).get(...values) || null, all: async () => ({ results: db.prepare(sql).all(...values) }), run: async () => ({ meta: { changes: Number(db.prepare(sql).run(...values).changes) } }) });
  const objects = new Map();
- return { DB: { prepare: sql => wrap(sql), batch: async statements => Promise.all(statements.map(s=>s.run())) }, BUCKET: { put: async (key,bytes) => objects.set(key,new Uint8Array(bytes)), head: async key => objects.has(key) ? {size:objects.get(key).length} : null, get: async key => objects.has(key) ? {body:objects.get(key)} : null }, RESEND_API_KEY:'test-only', AUTH_EMAIL_FROM:'test@example.com' };
+ return { DB: { prepare: sql => wrap(sql), batch: async statements => Promise.all(statements.map(s=>s.run())) }, BUCKET: { put: async (key,bytes) => objects.set(key,new Uint8Array(bytes)), head: async key => objects.has(key) ? {size:objects.get(key).length} : null, get: async key => objects.has(key) ? {body:objects.get(key)} : null } };
 }
 const req = (path, method='GET', data, cookie='') => new Request('https://studio.test'+path, {method,headers:{origin:'https://studio.test',cookie,'content-type':'application/json'},body:data === undefined ? undefined : JSON.stringify(data)});
-async function signIn(env,email) {
- let code;
- const sent = await libraryApi(req('/api/account/request','POST',{email}),env,async (_,options)=>{code=JSON.parse(options.body).text.match(/code is (\d+)/)[1]; return Response.json({id:'test'});});
- assert.equal(sent.status,200);
- const verified=await libraryApi(req('/api/account/verify','POST',{email,code}),env);
- assert.equal(verified.status,200);
- assert.match(verified.headers.get('set-cookie'),/HttpOnly; SameSite=Strict/);
- return {cookie:verified.headers.get('set-cookie').split(';')[0],code};
+async function signIn(env,email,userId='user-'+email) {
+ const cookie=crypto.randomUUID(); identities.set(cookie,{userId,email});
+ const session=await libraryApi(req('/api/account/session','GET',undefined,cookie),env);
+ assert.equal(session.status,200);
+ return {cookie};
 }
 test('email sessions restore the same saved book and bytes in a second browser, with isolation and conflict checks',async()=>{
  const env=environment();
@@ -38,13 +38,12 @@ test('email sessions restore the same saved book and bytes in a second browser, 
  const stranger=await signIn(env,'other@example.com');
  assert.deepEqual((await (await libraryApi(req('/api/library/books','GET',undefined,stranger.cookie),env)).json()).books,[]);
  assert.equal((await libraryApi(req('/api/library/asset?hash='+hash,'GET',undefined,stranger.cookie),env)).status,404);
- assert.equal((await libraryApi(req('/api/account/verify','POST',{email:'reader@example.com',code:b.code}),env)).status,401);
- await libraryApi(req('/api/account/logout','POST',{},b.cookie),env);
+ identities.delete(b.cookie);
  assert.equal((await libraryApi(req('/api/library/books','GET',undefined,b.cookie),env)).status,401);
 });
-test('email setup failures and foreign-origin writes do not pretend to save',async()=>{
- const env=environment(); delete env.RESEND_API_KEY;
- assert.equal((await libraryApi(req('/api/account/request','POST',{email:'reader@example.com'}),env)).status,503);
+test('retired email endpoints and foreign-origin writes cannot bypass Clerk',async()=>{
+ const env=environment();
+ assert.equal((await libraryApi(req('/api/account/request','POST',{email:'reader@example.com'}),env)).status,410);
  assert.equal((await libraryApi(new Request('https://studio.test/api/account/request',{method:'POST',headers:{origin:'https://other.test'},body:'{}'}),env)).status,403);
 });
 
@@ -73,20 +72,17 @@ test('client save and open round-trip manuscript, source file, artwork, and revi
  } finally { globalThis.fetch=originalFetch; }
 });
 
-test('verification attempt limits, expiry, and initial browser library mapping',async()=>{
- const { libraryOwner }=await import('../worker/library.ts');
- const env=environment(); let code;
- await libraryApi(req('/api/account/request','POST',{email:'owner@example.com'}),env,async(_,options)=>{code=JSON.parse(options.body).text.match(/code is (\d+)/)[1]; return Response.json({});});
+test('Clerk account ID preserves storage identity across email changes and links the original browser library',async()=>{
+ const env=environment();
+ const a=await signIn(env,'original@example.com','user-stable');
  const browserOwner='browser-123456789012345678901234';
- const verified=await libraryApi(req('/api/account/verify','POST',{email:'owner@example.com',code,browserOwner}),env);
- assert.equal(verified.status,200);
- assert.equal(await libraryOwner('owner@example.com',env),browserOwner);
- await signIn(env,'owner@example.com');
- assert.equal(await libraryOwner('owner@example.com',env),browserOwner);
- await libraryApi(req('/api/account/request','POST',{email:'limited@example.com'}),env,async(_,options)=>{code=JSON.parse(options.body).text.match(/code is (\d+)/)[1]; return Response.json({});});
- const wrong=code==='00000000'?'11111111':'00000000';
- for(let i=0;i<5;i++) assert.equal((await libraryApi(req('/api/account/verify','POST',{email:'limited@example.com',code:wrong}),env)).status,401);
- assert.equal((await libraryApi(req('/api/account/verify','POST',{email:'limited@example.com',code}),env)).status,401);
- await env.DB.prepare('UPDATE library_codes SET expires=0,attempts=0 WHERE email=?').bind('limited@example.com').run();
- assert.equal((await libraryApi(req('/api/account/verify','POST',{email:'limited@example.com',code}),env)).status,401);
+ assert.equal((await libraryApi(req('/api/account/link','POST',{browserOwner},a.cookie),env)).status,200);
+ assert.equal(await libraryOwner('original@example.com',env),browserOwner);
+ const b=await signIn(env,'changed@example.com','user-stable');
+ assert.equal(await libraryUser(req('/api/account/session','GET',undefined,b.cookie),env,verifier),'original@example.com');
+ const other=await signIn(env,'other@example.com');
+ await libraryApi(req('/api/account/link','POST',{browserOwner},other.cookie),env);
+ assert.notEqual(await libraryOwner('other@example.com',env),browserOwner);
+ identities.delete(a.cookie);
+ assert.equal(await libraryUser(req('/api/account/session','GET',undefined,a.cookie),env,verifier),null);
 });

@@ -1,5 +1,5 @@
 OPENROUTER_API_KEY=paste_your_openrouter_key_here
 OPENROUTER_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
-# Email sign-in (set real values as Cloudflare secrets, never commit them):
-RESEND_API_KEY=
-AUTH_EMAIL_FROM=
+# Clerk sign-in (use Clerk CLI env pull; never commit real keys):
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
+CLERK_SECRET_KEY=

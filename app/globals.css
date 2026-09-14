@@ -783,3 +783,5 @@ html[data-theme="scholar"] .paper{padding-left:84px !important;padding-right:84p
   .dashboard > header > div:last-child { width: 100%; justify-content: space-between; }
   .dashboard .inspiration-shelf-heading > button { white-space: normal; text-align: left; }
 }
+
+.book-account{margin:16px auto;padding:18px 24px;max-width:1400px;border:1px solid #cbd1c8;border-radius:8px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;background:#fbf8f1;color:#243e35}.book-account p{margin:5px 0;font-size:14px}.book-account-actions{display:flex;align-items:center;flex-wrap:wrap;gap:12px}.book-account-actions button{padding:10px 16px;border:1px solid #b9c5ba;border-radius:5px;background:#fff;color:#243e35;cursor:pointer}.book-account-actions button:hover{background:#e9eee7}

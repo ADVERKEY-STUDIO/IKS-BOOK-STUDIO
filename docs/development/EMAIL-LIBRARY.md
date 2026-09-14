@@ -1,24 +1,39 @@
-# Email sign-in and shared books
+# Clerk accounts and shared books
 
-The template studio keeps its IndexedDB copies and adds an explicit **Save book to account** action. A cloud save uploads all images and the source file before committing the book manifest. Open a cloud book on another browser after signing in with the same email. Conflicts reject stale saves; opening the cloud copy preserves an existing local copy as a separate backup.
+Clerk now owns sign-in, sign-up, email verification, Google sign-in when enabled in the Clerk instance, session renewal, and sign-out. The old custom email-code endpoints return 410; Resend is no longer required. No paid Clerk plan is enabled by this integration.
 
-The main studio uses the verified email session to select a stable library identity. First sign-in links the current browser's existing library identity; sign in first from the browser containing your original books. Browser libraries created independently before this feature are not automatically combined. Template books must be opened and saved to the account individually.
+## Linked application and configuration
 
-## Hosting setup
+Application: `app_3JJcLxlw2SrFADAPKe22enxvmLK`.
 
-D1 (`DB`) and R2 (`BUCKET`) are existing bindings. New library tables initialize on the first account/library request. Configure these Worker secrets before email sign-in can work:
+The Clerk CLI linked the project and populated ignored local configuration. Use `clerk env pull --app app_3JJcLxlw2SrFADAPKe22enxvmLK` for Next.js build configuration and `clerk env pull --app app_3JJcLxlw2SrFADAPKe22enxvmLK --file .dev.vars` for the local Cloudflare worker. Do not print or commit either file.
 
-- `RESEND_API_KEY`: a Resend sending key.
-- `AUTH_EMAIL_FROM`: an address on a verified sending domain, such as `Book Studio <books@example.com>`.
+Required deployment configuration:
 
-A Gmail address can receive sign-in codes but is not a verified sending domain for this integration. Do not put real secrets in `.dev.vars.example` or source control. For local development, configure ignored `.dev.vars` using the same names.
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` in the build environment and Worker bindings.
+- `CLERK_SECRET_KEY` as a Worker secret only, never a public build define.
+- Existing D1 `DB` and R2 `BUCKET` bindings.
 
-The implementation calls the [Resend email API](https://resend.com/docs/api-reference/emails/send-email). Without configuration, the UI states that email sign-in is awaiting setup; it never claims a message was sent. Codes expire in ten minutes, can be used once, allow five attempts, and are stored as hashes. Requests are limited by email and IP. Sessions are hashed in D1 and issued as HttpOnly, SameSite=Strict cookies, with Secure on HTTPS. They expire after 30 days and sign-out revokes the session.
+Configure the Clerk production instance and domain before live rollout. Development keys are not a completed production setup. Run `clerk doctor` and `clerk deploy status` to review the linked instance.
 
-Cloud access requires a verified session. Asset keys are content hashes scoped to the account, and a stale revision cannot overwrite a newer manifest. Uploads remain at full quality, bounded to 25 MB each and 512 MB of artwork per book. Source files are limited to 20 MB.
+## Runtime integration
 
-## Verification
+The provider sits inside `<body>`. `proxy.ts` includes the API matcher and `/__clerk/:path*`. UI routes use Clerk middleware; the custom Worker API routes execute before the Next.js handler, so they independently verify session tokens using `@clerk/backend.authenticateRequest()` and a same-origin authorized-party check. Only a verified primary email can link a library. Client-supplied account IDs or emails cannot authorize storage access.
 
-`node --test tests/library.test.mjs tests/template-book.test.mjs tests/template-capacity.test.mjs`
+Clerk user IDs map to the original storage identity, preserving saved books if an account changes its email address. The first explicit library link connects the browser's pre-existing main-studio library identity. Sign in first from the browser with the original books. Independently created pre-login browser libraries are not automatically combined.
 
-The account tests run the actual API with SQLite and an in-memory object bucket, capturing email in-process without sending mail. They cover independent sessions for the same email, artwork bytes, account isolation, one-use codes, logout, stale-save rejection, and missing email configuration. Live email delivery still requires the configured sender and a deployment smoke test.
+The Vite config excludes `@clerk/nextjs` from dependency prebundling to retain React Server Component boundaries. It selects Clerk's own browser-safe `#safe-node-apis` implementation because workerd cannot run the SDK's Node filesystem require shim. `nodejs_compat_populate_process_env` exposes Worker secrets to server-only SDK code. A narrowly scoped Vite transform also converts the SDK navigation hook’s optional Next.js require calls into a static ESM import. Revalidate these compatibility adaptations on Clerk upgrades.
+
+## Saving
+
+Template books retain their IndexedDB copies. **Save book to account** uploads all artwork and the source file before committing a revision-checked manifest. Open a cloud book after signing into the same Clerk account in another browser. Existing local template books must be saved to the account individually. A stale save is rejected; opening a cloud copy preserves a local backup.
+
+Artwork remains at full quality with 25 MB per file and 512 MB per book limits. Source files are limited to 20 MB. Account-scoped content hashes identify the stored bytes.
+
+## Validation
+
+`node --test tests/clerk-identity.test.mjs tests/library.test.mjs tests/template-book.test.mjs tests/template-capacity.test.mjs`
+
+Library tests exercise the actual API and browser serialization helpers with SQLite and an in-memory object bucket. The Clerk verifier is injected in these tests; no real mail or Clerk user is created. Tests cover independent sessions, manuscript/source/artwork restoration, account isolation, retired login routes, stable identity after an email change, and stale-save rejection. A real browser sign-in is also needed to validate the SDK and instance configuration.
+
+The identity test additionally uses the real Clerk SDK with locally signed RSA tokens and stubbed Clerk API responses to verify signature rejection, authorized-party enforcement, and verified-email requirements. Local browser testing confirmed Google sign-in, the profile menu, account linking, and a successful cloud save.
