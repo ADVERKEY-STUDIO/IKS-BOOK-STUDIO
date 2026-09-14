@@ -44,7 +44,11 @@ test('reference catalogue identifies originals and distinguishes cover-only and 
   for (const book of inspirationBooks) {
     assert.ok(book.creators && book.publisher && book.edition && book.rights);
     assert.equal(new URL(book.sourceUrl).protocol, 'https:');
-    for (const image of book.images) assert.equal(new URL(image.url).protocol, 'https:');
+    for (const image of book.images) {
+      if (image.url.startsWith('/') && !image.url.startsWith('//')) {
+        assert.ok(readFileSync(resolve('public', image.url.slice(1))).length > 0);
+      } else assert.equal(new URL(image.url).protocol, 'https:');
+    }
   }
   assert.equal(inspirationBooks.find(book => book.id === 'gita-mewar').images[0].kind, 'Cover');
   assert.equal(inspirationBooks.find(book => book.id === 'penn-bhagavadgita').category, 'Historical manuscripts');

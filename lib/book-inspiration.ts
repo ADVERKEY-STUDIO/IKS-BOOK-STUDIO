@@ -15,7 +15,7 @@ export type InspirationBook = {
   edition: string;
   category: "Scripture & commentary" | "Devotional stories" | "Traditional art" | "Historical manuscripts";
   sourceUrl: string;
-  images: { url: string; label: string; kind: "Interior" | "Cover" | "Manuscript" }[];
+  images: { url: string; label: string; kind: "Interior" | "Cover" | "Manuscript"; sourceUrl?: string }[];
   tags: string[];
   description: string;
   evidence: string;
@@ -35,6 +35,21 @@ const interiors = (names: string[]) => names.map((name, index) => ({ url: tara +
 // A curated catalogue of real editions. Direction fields are our editorial interpretation,
 // not claims about the original book's exact font, palette, or production specification.
 export const inspirationBooks: InspirationBook[] = [
+  {
+    id: "bhagavata-purana-nepal", title: "Folio from a Bhagavata Purana series", creators: "Nepal · Shah period · Artist unrecorded", publisher: "The Metropolitan Museum of Art", edition: "ca. 1775–1800 · Watercolor and ink on paper · Object 2019.65",
+    category: "Historical manuscripts", sourceUrl: "https://www.metmuseum.org/art/collection/search/819647",
+    images: [
+      { url: "/pilot/gita/journey.jpg", label: "Krishna and Arjuna depart by carriage for a forest hunting expedition · 2019.65", kind: "Manuscript", sourceUrl: "https://www.metmuseum.org/art/collection/search/819647" },
+      { url: "https://images.metmuseum.org/CRDImages/as/web-large/DP-18168-001.jpg", label: "Companion folio: Pradyumna and Rati return to Dwarka · 2019.64", kind: "Manuscript", sourceUrl: "https://www.metmuseum.org/art/collection/search/819646" },
+      { url: "https://images.metmuseum.org/CRDImages/as/web-large/DP156159.jpg", label: "Related manuscript page: Life of Krishna · Nepal, ca. 1775 · 1985.398.10", kind: "Manuscript", sourceUrl: "https://www.metmuseum.org/art/collection/search/37981" },
+    ],
+    tags: ["Bhagavata Purana", "Nepali painting", "Vermilion borders", "Panoramic landscape"],
+    description: "A painted folio from a dispersed Bhagavata Purana series. A palace, procession and densely populated forest form a continuous landscape enclosed by a broad red border.",
+    evidence: "Historical painted folio, not a modern book cover. The museum identifies the scene as Krishna and Arjuna leaving Indraprastha for a hunting expedition. Three original folio previews: the selected painting, its companion from the same series, and a related Nepali Bhagavata Purana page. The third page is not confirmed as part of the same series; these are not consecutive pages.",
+    rights: "Public domain. The Metropolitan Museum of Art, Purchase, Friends of Asian Art Gifts, 2019; objects 2019.65 and 2019.64. Related page 1985.398.10: Gift of Cynthia Hazen Polsky, 1985.",
+    direction: { typography: "Use a restrained, readable hierarchy for separately typeset verses and commentary; the folio is an artwork reference, not a modern typography specimen.", palette: "Vermilion red borders, blue-gray landscapes, dark foliage and warm ivory architectural details.", illustration: "Layer finely detailed architecture, a narrative procession and stylized trees into a continuous landscape. Develop original scenes with approved character references.", layout: "Give a panoramic painting a full spread with a broad red frame. Place longer verses and commentary on a separate quiet reading page." },
+    palette: { ink: "#283b3b", accent: "#c94b3d", support: "#819c9c", paper: "#faf3e3" }, personaId: "living-history-chronicle", fontTheme: "Storybook Serif", pageAesthetic: "Calm Editorial", bookBorder: "Golden Lines",
+  },
   {
     id: "sitas-ramayana", title: "Sita’s Ramayana", creators: "Samhita Arni · Moyna Chitrakar · Design: Jonathan Yamakami", publisher: "Tara Books", edition: "156 pages · ISBN 9789380340036",
     category: "Devotional stories", sourceUrl: "https://tarabooks.com/shop/sitas-ramayana/",
