@@ -1,3 +1,4 @@
+import { libraryApi, libraryUser, librarySchema, libraryOwner } from './library';
 import { bookReleaseApi } from './book-release';
 import { openReviewFindings, releaseReviewIssues, renderReviewCurrent } from '../lib/book-review';
 import { editionImages } from '../lib/art-production';
@@ -21,6 +22,8 @@ export interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
   BUCKET: R2Bucket;
+  RESEND_API_KEY?: string;
+  AUTH_EMAIL_FROM?: string;
   OPENROUTER_API_KEY?: string;
   OPENROUTER_MODEL?: string;
   IMAGES: {
@@ -904,12 +907,13 @@ async function projectsApi(request: Request, env: Env) {
       if (!result.meta.changes) return json({ error: "The edition changed while saving. Reload the book." }, 409);
       return json({ project: saved });
     }
-    await env.DB.prepare(`INSERT INTO book_projects (id, owner_key, title, source_name, data_json, created_at, updated_at)
+    const savedResult = await env.DB.prepare(`INSERT INTO book_projects (id, owner_key, title, source_name, data_json, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET title = excluded.title, source_name = excluded.source_name,
       data_json = excluded.data_json, updated_at = excluded.updated_at
       WHERE book_projects.owner_key = excluded.owner_key`)
       .bind(project.id, owner, project.title, project.source, JSON.stringify(saved), now, now).run();
+    if (!savedResult.meta.changes) return json({ error: "This book belongs to a different library. Open it from its original browser and account." }, 409);
     return json({ project: saved });
   }
   if (request.method === "DELETE") {
@@ -1481,6 +1485,20 @@ const worker = {
     const url = new URL(request.url);
 
     try {
+      if (url.pathname.startsWith('/api/account/') || url.pathname.startsWith('/api/library/')) return await libraryApi(request, env);
+      if (url.pathname.startsWith('/api/')) {
+        await librarySchema(env);
+        const email = await libraryUser(request, env);
+        const linked = !email ? await env.DB.prepare('SELECT email FROM library_accounts WHERE owner=?').bind(ownerKey(request)).first() : null;
+        if (!email && (linked || request.headers.get('cookie')?.includes('iks_session='))) return json({ error: 'Sign in again to open your account library.' }, 401);
+        if (email) {
+          if (!['GET','HEAD'].includes(request.method) && request.headers.get('origin') !== url.origin) return json({ error: 'Open this action from Book Studio.' }, 403);
+          const headers = new Headers(request.headers);
+          headers.delete('oai-authenticated-user-email');
+          headers.set('x-book-studio-owner', await libraryOwner(email, env));
+          request = new Request(request, { headers });
+        }
+      }
       if (url.pathname.startsWith("/api/")) await ensureSchema(env);
       if (["/api/edition/backup", "/api/edition/restore", "/api/edition/release-snapshot"].includes(url.pathname)) return bookReleaseApi(request, env, ownerKey(request));
     if (["/api/edition", "/api/edition/review", "/api/edition/source", "/api/edition/export", "/api/edition/art-brief", "/api/edition/reference-image", "/api/edition/reference-asset", "/api/edition/reference-package", "/api/edition/art-image", "/api/edition/art-package"].includes(url.pathname)) return await editionApi(request, env);
