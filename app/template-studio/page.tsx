@@ -1,9 +1,11 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { strToU8, zipSync } from 'fflate';
-import { templates, templateLayout, templateAppearanceCss, parseTemplateBook, bookPrompt, continuationPrompt, renderTemplateBook, assetName, type TemplateBook, type TemplateId, type BookPage } from '../../lib/template-book';
+import { templates, selectableTemplates, templateLayout, templateAppearanceCss, parseTemplateBook, bookPrompt, continuationPrompt, renderTemplateBook, assetName, type TemplateBook, type TemplateId, type BookPage } from '../../lib/template-book';
 import { readTemplateArchive } from '../../lib/template-archive';
 import './studio.css';
+import LiteraryGallery from './literary-gallery';
+import { isLiteraryTemplate } from '../../lib/literary-templates';
 type Draft = {
     id: string;
     templateId: TemplateId;
@@ -62,6 +64,11 @@ export default function TemplateStudio() {
     const names = Object.keys(draft?.images || {});
     const done = book?.pages.filter(p => names.includes(p.image)).length || 0;
     const prompt = draft ? bookPrompt(draft.id, draft.templateId, draft.title, draft.source?.name || 'source.pdf', draft.language) : '';
+    function chooseTemplate(templateId: TemplateId) {
+        if (draft?.book) { setError('Your current book is saved. Choose Start another book below before selecting a new template.'); return; }
+        setDraft({ id: crypto.randomUUID(), templateId, title: 'My illustrated book', language: 'Original language with English meanings', images: {}, updated: Date.now() });
+        setStep(1); setError(''); window.scrollTo({top:0});
+    }
     function editPage(p: Partial<BookPage>) { if (book)
         patch({ book: { ...book, pages: book.pages.map((v, i) => i === selected ? { ...v, ...p } : v) } }); }
     async function importFiles(files: File[]) {
@@ -137,7 +144,7 @@ export default function TemplateStudio() {
         throw Error('Font license could not be packaged.'); entries['fonts/OFL.txt'] = new Uint8Array(await license.arrayBuffer()); if (draft.source)
         entries['source/' + draft.source.name] = new Uint8Array(await draft.source.arrayBuffer()); download('Editable-Book.zip', new Blob([new Uint8Array(zipSync(entries))], { type: 'application/zip' })); }
     return <main className="ts"><style>{templateAppearanceCss()}</style><header className="ts-header"><a href="/">← Book Studio</a><strong>Books, made your way.</strong><span role="status">{busy ? 'Working…' : notice}</span></header><nav aria-label="Book creation steps">{['Choose a template', 'Source & prompt', 'Assemble & edit'].map((label, i) => <button key={label} disabled={busy || !draft && i > 0 || i === 2 && !book} aria-current={step === i ? 'step' : undefined} onClick={() => setStep(i)}>{i + 1}. {label}</button>)}</nav>{error && <p className="ts-error" role="alert">{error}</p>}
- {step === 0 && <><div className="ts-intro"><p>YOUR SOURCE. YOUR BOOK.</p><h1>Start with a book you can see.</h1><p>Choose a visual direction. Bring your PDF or DOCX. Get one detailed prompt and build the book at your own pace.</p></div><div className="ts-templates">{[...templates].sort((a,b) => Number(templateLayout(b.id) !== 'art-right') - Number(templateLayout(a.id) !== 'art-right')).map(t => <article className={t.id} key={t.id} style={{ background: t.paper, color: t.ink }}>{templateLayout(t.id) === 'art-right' && <div className={'ts-demo ' + t.id}><div className={"ts-mini-cover cover " + t.id}><small>AN ILLUSTRATED EDITION</small><h2>Wisdom<br />in every page</h2><span style={{ color: t.accent }}>A reading journey</span></div><img src={t.demo} alt={`${t.name} example artwork`}/></div>}<div className={'ts-mini-spread ' + t.id + ' composition-' + templateLayout(t.id) + (templateLayout(t.id) !== 'art-right' ? ' ts-structural-preview' : '')}><div className="copy"><h2>A moment of stillness</h2><p className="original">शान्तिः<br />A quiet place for the original words.</p><p className="meaning">A separate space to reflect on their meaning.</p></div><div className="art"><img src={t.demo} alt="Interior layout example"/></div></div><h2>{t.name}</h2><p>{t.description}</p><button disabled={busy} onClick={() => { if (draft?.book) {
+ {step === 0 && <><div className="ts-intro"><p>YOUR SOURCE. YOUR BOOK.</p><h1>Start with a book you can see.</h1><p>Choose a visual direction. Bring your PDF or DOCX. Get one detailed prompt and build the book at your own pace.</p></div><LiteraryGallery onChoose={chooseTemplate} disabled={busy}/><h2>Classic illustrated templates</h2><div className="ts-templates">{selectableTemplates.filter(t => !isLiteraryTemplate(t.id)).sort((a,b) => Number(templateLayout(b.id) !== 'art-right') - Number(templateLayout(a.id) !== 'art-right')).map(t => <article className={t.id} key={t.id} style={{ background: t.paper, color: t.ink }}>{templateLayout(t.id) === 'art-right' && <div className={'ts-demo ' + t.id}><div className={"ts-mini-cover cover " + t.id}><small>AN ILLUSTRATED EDITION</small><h2>Wisdom<br />in every page</h2><span style={{ color: t.accent }}>A reading journey</span></div><img src={t.demo} alt={`${t.name} example artwork`}/></div>}<div className={'ts-mini-spread ' + t.id + ' composition-' + templateLayout(t.id) + (templateLayout(t.id) !== 'art-right' ? ' ts-structural-preview' : '')}><div className="copy"><h2>A moment of stillness</h2><p className="original">शान्तिः<br />A quiet place for the original words.</p><p className="meaning">A separate space to reflect on their meaning.</p></div><div className="art"><img src={t.demo} alt="Interior layout example"/></div></div><h2>{t.name}</h2><p>{t.description}</p><button disabled={busy} onClick={() => { if (draft?.book) {
         setError('Your current book is saved. Open a new template in a new workspace from the saved-books list below.');
         return;
     } const d: Draft = { id: crypto.randomUUID(), templateId: t.id, title: 'My illustrated book', language: 'Original language with English meanings', images: {}, updated: Date.now() }; setDraft(d); setStep(1); setError(''); }}>Choose {t.name}</button></article>)}</div><p className="ts-help">Original layout templates with public-domain example artwork, not reproductions of published books. <a href="/pilot/gita/credits.json">Artwork credits</a>. Your generated illustrations replace these examples.</p><section><h2>Your saved template books</h2><label className="ts-upload">Restore an editable book ZIP<input disabled={busy} type="file" accept=".zip" onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f)
