@@ -22,6 +22,8 @@ export interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
   BUCKET: R2Bucket;
+  FIREBASE_PROJECT_ID?: string;
+  FIREBASE_API_KEY?: string;
   CLERK_SECRET_KEY?: string;
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?: string;
   OPENROUTER_API_KEY?: string;
@@ -1490,7 +1492,7 @@ const worker = {
         await librarySchema(env);
         const email = await libraryUser(request, env);
         const linked = !email ? await env.DB.prepare('SELECT email FROM library_accounts WHERE owner=?').bind(ownerKey(request)).first() : null;
-        if (!email && (linked || request.headers.get('cookie')?.includes('__session=') || request.headers.has('authorization'))) return json({ error: 'Sign in again to open your account library.' }, 401);
+        if (!email && (linked || request.headers.get('cookie')?.match(/(?:__session|iks_session)=/) || request.headers.has('authorization'))) return json({ error: 'Sign in again to open your account library.' }, 401);
         if (email) {
           if (!['GET','HEAD'].includes(request.method) && request.headers.get('origin') !== url.origin) return json({ error: 'Open this action from Book Studio.' }, 403);
           const headers = new Headers(request.headers);

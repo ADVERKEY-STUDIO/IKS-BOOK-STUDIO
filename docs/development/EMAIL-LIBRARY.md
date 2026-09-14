@@ -37,3 +37,30 @@ Artwork remains at full quality with 25 MB per file and 512 MB per book limits. 
 Library tests exercise the actual API and browser serialization helpers with SQLite and an in-memory object bucket. The Clerk verifier is injected in these tests; no real mail or Clerk user is created. Tests cover independent sessions, manuscript/source/artwork restoration, account isolation, retired login routes, stable identity after an email change, and stale-save rejection. A real browser sign-in is also needed to validate the SDK and instance configuration.
 
 The identity test additionally uses the real Clerk SDK with locally signed RSA tokens and stubbed Clerk API responses to verify signature rejection, authorized-party enforcement, and verified-email requirements. Local browser testing confirmed Google sign-in, the profile menu, account linking, and a successful cloud save.
+
+
+## Firebase on workers.dev
+
+Firebase Authentication supports the existing Workers address without moving the
+site. The dedicated `iks-book-studio` project uses Spark ($0/month), with optional
+Analytics and Gemini disabled. Email/password and Google providers are enabled. Authorized domains include
+`iksmain.gg220962.workers.dev` and `localhost`.
+
+Set Worker bindings `FIREBASE_PROJECT_ID` and `FIREBASE_API_KEY` from the registered
+Firebase web app. The latter is the public Firebase web API key, not an admin or
+service-account credential. `/api/account/config` exposes only these public web
+settings. The browser selects Firebase when configured; Clerk remains a fallback
+for existing local installations. No book files move to Firebase.
+
+The server verifies RS256 signatures against Google's secure-token keys, checks
+issuer, project audience, expiration and authentication time, and requires a
+verified email. An account lookup additionally rejects disabled/deleted users and
+revoked sessions. A same-origin POST exchanges the ID token for an HttpOnly,
+SameSite=Lax cookie (Secure over HTTPS). The SDK refreshes the token while the page
+is open. Library requests independently verify identity; a cookie alone never
+proves the user is authorized. Firebase IDs have a separate mapping table, while
+existing verified-email book storage remains accessible after migration.
+
+Run `node --test tests/firebase-identity.test.mjs tests/library.test.mjs` plus the
+production build. Real sign-in and saved-book access in another browser must be
+verified after provider setup; mocked tests do not establish production readiness.
