@@ -34,3 +34,7 @@ The existing devotional workspace and its approvals are independent. Template bo
 ## Deliberate limits
 
 Paintings remain raster assets; text and placement settings are editable. Templates do not guarantee artistic quality or complete source coverage from AI. Preview warns about detected text overflow and low placed image resolution. Source fidelity, character continuity and final print review still require inspection. Output is a working HTML/PDF proof, not PDF/X. Artwork generation is external, not an automatic background job.
+
+### Structural compositions (September 14)
+
+Four additional templates lead the gallery: Landscape journey (panoramic art and reading band), Painting & passage (full-spread art and opaque text inset), The sacred word (centered text with a small footer illustration), and Picture & commentary (art strip with separate original and meaning columns). These are editable layout values, carried in `book.json`, validated on import and rendered by the portable HTML export. Older three-layout books remain compatible. The generated prompt selects the corresponding primary composition and describes its illustration area. Gallery samples reuse credited public-domain artwork to demonstrate placement; they are not newly commissioned paintings. Review image cropping and text fit in the full proof before printing.

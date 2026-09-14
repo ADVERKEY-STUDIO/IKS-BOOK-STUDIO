@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {templates,parseTemplateBook,bookPrompt,continuationPrompt,renderTemplateBook} from '../lib/template-book.ts';
+import {templates,templateLayout,parseTemplateBook,bookPrompt,continuationPrompt,renderTemplateBook} from '../lib/template-book.ts';
 import {readTemplateArchive} from '../lib/template-archive.ts';
 import {zipSync,strToU8} from 'fflate';
 const fixture=()=>({format:'iks-template-book-v1',projectId:'test-book',templateId:'painted',title:'Devotion',language:'Awadhi',characterGuide:'Golden Hanuman',pages:[{id:'spread-01',title:'Invocation',original:'श्री गुरु चरन',meaning:'A prayer',sourceReference:'PDF page 1',scene:'Hanuman by a river',image:'spread-01.png',layout:'art-right',fontSize:22,imageScale:100},{id:'spread-02',title:'Courage',original:'जय हनुमान',meaning:'',sourceReference:'PDF page 2',scene:'Mountain flight',image:'spread-02.png',layout:'art-left',fontSize:22,imageScale:100}]});
@@ -11,9 +11,11 @@ test('render preserves original and meaning, escapes untrusted HTML and marks mi
 test('archive accepts partial manifest and ignores executable content',()=>{const files=readTemplateArchive(zipSync({'book.json':strToU8(JSON.stringify(fixture())),'evil.js':strToU8('alert(1)')}));assert.deepEqual(Object.keys(files),['book.json']);assert.equal(parseTemplateBook(JSON.parse(new TextDecoder().decode(files['book.json']))).pages.length,2);});
 test('archive rejects traversal and bounded decompression rejects huge JSON',()=>{assert.throws(()=>readTemplateArchive(zipSync({'../book.json':strToU8('{}')})),/Unsafe/);assert.throws(()=>readTemplateArchive(zipSync({'book.json':new Uint8Array(3*1024*1024)})),/size limit/);});
 
-test('nine distinct templates retain identity through import, prompt and export',()=>{
- assert.equal(templates.length,9);
- assert.equal(new Set(templates.map(t=>t.id)).size,9);
- assert.equal(new Set(templates.map(t=>t.art)).size,9);
+test('thirteen distinct templates retain identity through import, prompt and export',()=>{
+ assert.equal(templates.length,13);
+ assert.equal(new Set(templates.map(t=>t.id)).size,13);
+ assert.equal(new Set(templates.map(t=>t.art)).size,13);
  for(const t of templates){const input=fixture();input.templateId=t.id;const b=parseTemplateBook(input);const html=renderTemplateBook(b);assert.ok(html.includes(`spread cover ${t.id}`));assert.ok(html.includes(`art-right ${t.id}`));assert.ok(bookPrompt('test',t.id,'Book','source.pdf','Awadhi').includes(t.art));}
 });
+
+test('structural templates carry their primary composition through prompt, import and export',()=>{for(const id of ['panorama','immersive','poetry','study']){const input=fixture();input.templateId=id;input.pages[0].layout=templateLayout(id);const book=parseTemplateBook(input);assert.match(renderTemplateBook(book),new RegExp('composition-'+id));assert.ok(bookPrompt('test',id,'Book','source.pdf','Hindi').includes('"layout": "'+id+'"'));}const input=fixture();input.pages[0].layout='unknown';assert.throws(()=>parseTemplateBook(input),/allowed layout/);});
