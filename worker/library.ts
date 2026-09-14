@@ -1,32 +1,31 @@
+import { verifyClerkIdentity, clerkConfigured, type ClerkEnvironment } from './clerk-identity.ts';
 import { parseTemplateBook, templates } from '../lib/template-book.ts';
 import { BOOK_ARTWORK_BYTES, IMAGE_BYTES } from '../lib/template-capacity.ts';
 type Statement = { bind(...values: unknown[]): Statement; first<T>(): Promise<T | null>; all<T>(): Promise<{ results: T[] }>; run(): Promise<{ meta: { changes?: number } }> };
-export type LibraryEnv = { DB: { prepare(sql: string): Statement; batch(statements: Statement[]): Promise<unknown> }; BUCKET: { put(key: string, bytes: ArrayBuffer, options?: unknown): Promise<unknown>; get(key: string): Promise<{ body: ReadableStream } | null>; head(key: string): Promise<{ size: number } | null> }; RESEND_API_KEY?: string; AUTH_EMAIL_FROM?: string };
+export type LibraryEnv = ClerkEnvironment & { DB: { prepare(sql: string): Statement; batch(statements: Statement[]): Promise<unknown> }; BUCKET: { put(key: string, bytes: ArrayBuffer, options?: unknown): Promise<unknown>; get(key: string): Promise<{ body: ReadableStream } | null>; head(key: string): Promise<{ size: number } | null> }; };
 const reply = (data: unknown, status = 200, headers = {}) => Response.json(data, { status, headers: { 'cache-control': 'no-store', ...headers } });
 export async function digest(value: string | ArrayBuffer) { return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', typeof value === 'string' ? new TextEncoder().encode(value) : value))).map(v => v.toString(16).padStart(2, '0')).join(''); }
 export async function librarySchema(env: LibraryEnv) {
   await env.DB.batch([
     env.DB.prepare('CREATE TABLE IF NOT EXISTS library_accounts (email TEXT PRIMARY KEY, owner TEXT NOT NULL UNIQUE)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS library_codes (email TEXT PRIMARY KEY, hash TEXT NOT NULL, expires INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS library_sessions (hash TEXT PRIMARY KEY, email TEXT NOT NULL, expires INTEGER NOT NULL)'),
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS library_rates (key TEXT PRIMARY KEY, count INTEGER NOT NULL)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS library_clerk_users (user_id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS library_books (owner TEXT NOT NULL, id TEXT NOT NULL, revision INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(owner,id))'),
   ]);
 }
-function cookie(request: Request, token: string, age: number) { return `iks_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${age}${new URL(request.url).protocol === 'https:' ? '; Secure' : ''}`; }
-export async function libraryUser(request: Request, env: LibraryEnv): Promise<string | null> {
-  const token = request.headers.get('cookie')?.match(/(?:^|;\s*)iks_session=([a-f0-9]{64})(?:;|$)/)?.[1];
-  if (!token) return null;
-  const row = await env.DB.prepare('SELECT email FROM library_sessions WHERE hash = ? AND expires > ?').bind(await digest(token), Date.now()).first<{ email: string }>();
-  return row?.email || null;
+export async function libraryUser(request: Request, env: LibraryEnv, verify = verifyClerkIdentity): Promise<string | null> {
+  const identity = await verify(request, env);
+  if (!identity) return null;
+  // The original email remains the storage identity if the Clerk user changes email.
+  const existing = await env.DB.prepare('SELECT email FROM library_clerk_users WHERE user_id=?').bind(identity.userId).first<{ email: string }>();
+  if (existing) return existing.email;
+  await env.DB.prepare('INSERT OR IGNORE INTO library_clerk_users(user_id,email) VALUES (?,?)').bind(identity.userId, identity.email).run();
+  const linked = await env.DB.prepare('SELECT email FROM library_clerk_users WHERE user_id=?').bind(identity.userId).first<{ email: string }>();
+  if (!linked) throw new Error('This email is already linked to another library account. Use the original account.');
+  return linked.email;
 }
 export async function libraryOwner(email: string, env: LibraryEnv) {
   const row = await env.DB.prepare('SELECT owner FROM library_accounts WHERE email=?').bind(email).first<{ owner: string }>();
   return row?.owner || 'account-' + await digest(email);
-}
-async function limited(env: LibraryEnv, key: string, max: number) {
-  const row = await env.DB.prepare('INSERT INTO library_rates(key,count) VALUES (?,1) ON CONFLICT(key) DO UPDATE SET count=count+1 RETURNING count').bind(key).first<{ count: number }>();
-  return !row || row.count > max;
 }
 async function readLimited(request: Request, max: number): Promise<ArrayBuffer> {
   if (Number(request.headers.get('content-length')) > max) throw new Error('Upload is too large.');
@@ -40,46 +39,22 @@ async function readLimited(request: Request, max: number): Promise<ArrayBuffer> 
   for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.length; }
   return result.buffer;
 }
-export async function libraryApi(request: Request, env: LibraryEnv, send: typeof fetch = fetch): Promise<Response> {
+export async function libraryApi(request: Request, env: LibraryEnv, verify = verifyClerkIdentity): Promise<Response> {
   await librarySchema(env);
   const url = new URL(request.url), path = url.pathname;
   if (request.method !== 'GET' && request.headers.get('origin') !== url.origin) return reply({ error: 'Open this action from Book Studio.' }, 403);
-  if (path === '/api/account/request' && request.method === 'POST') {
-    if (!env.RESEND_API_KEY || !env.AUTH_EMAIL_FROM) return reply({ error: 'Email sign-in is not configured yet. Your browser saves still work.' }, 503);
-    const { email: raw } = JSON.parse(new TextDecoder().decode(await readLimited(request, 4096))) as { email?: string };
-    const email = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
-    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return reply({ error: 'Enter a valid email address.' }, 400);
-    const hour = Math.floor(Date.now() / 3600000);
-    if (await limited(env, `ip:${request.headers.get('cf-connecting-ip') || 'local'}:${hour}`, 20) || await limited(env, `email:${email}:${hour}`, 5)) return reply({ error: 'Too many requests. Try again in an hour.' }, 429);
-    const bytes = crypto.getRandomValues(new Uint8Array(8));
-    const code = Array.from(bytes).map(v => String(v % 10)).join('');
-    await env.DB.prepare('INSERT INTO library_codes(email,hash,expires,attempts) VALUES (?,?,?,0) ON CONFLICT(email) DO UPDATE SET hash=excluded.hash,expires=excluded.expires,attempts=0').bind(email, await digest(`${email}:${code}`), Date.now() + 600000).run();
-    const result = await send('https://api.resend.com/emails', { signal: AbortSignal.timeout(15000), method: 'POST', headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' }, body: JSON.stringify({ from: env.AUTH_EMAIL_FROM, to: [email], subject: 'Your Book Studio sign-in code', text: `Your Book Studio code is ${code}. It expires in 10 minutes. Enter it only in Book Studio. If you did not request this code, ignore this email.` }) });
-    if (!result.ok) return reply({ error: 'The verification email could not be sent. Please try again later.' }, 502);
-    return reply({ sent: true });
-  }
-  if (path === '/api/account/verify' && request.method === 'POST') {
-    const body = JSON.parse(new TextDecoder().decode(await readLimited(request, 4096))) as { email?: string; code?: string; browserOwner?: string };
-    const email = String(body.email || '').trim().toLowerCase(), code = String(body.code || '');
-    if (!/^\d{8}$/.test(code)) return reply({ error: 'Enter the eight-digit email code.' }, 400);
-    const row = await env.DB.prepare('UPDATE library_codes SET attempts=attempts+1 WHERE email=? AND expires>? AND attempts<5 RETURNING hash').bind(email, Date.now()).first<{ hash: string }>();
-    if (!row || row.hash !== await digest(`${email}:${code}`)) return reply({ error: 'Invalid or expired code. Request a new one.' }, 401);
-    const consumed = await env.DB.prepare('DELETE FROM library_codes WHERE email=? AND hash=?').bind(email, row.hash).run();
-    if (!consumed.meta.changes) return reply({ error: 'This code was already used.' }, 401);
-    const owner = typeof body.browserOwner === 'string' && /^[a-zA-Z0-9-]{24,100}$/.test(body.browserOwner) ? body.browserOwner : 'account-' + await digest(email);
-    await env.DB.prepare('INSERT OR IGNORE INTO library_accounts(email,owner) VALUES (?,?)').bind(email, owner).run();
-    const token = Array.from(crypto.getRandomValues(new Uint8Array(32))).map(v => v.toString(16).padStart(2, '0')).join('');
-    await env.DB.prepare('INSERT INTO library_sessions(hash,email,expires) VALUES (?,?,?)').bind(await digest(token), email, Date.now() + 30 * 86400000).run();
-    return reply({ email }, 200, { 'set-cookie': cookie(request, token, 30 * 86400) });
-  }
-  const email = await libraryUser(request, env);
-  if (path === '/api/account/session' && request.method === 'GET') return reply({ email, configured: Boolean(env.RESEND_API_KEY && env.AUTH_EMAIL_FROM) });
-  if (path === '/api/account/logout' && request.method === 'POST') {
-    const token = request.headers.get('cookie')?.match(/iks_session=([a-f0-9]{64})/)?.[1];
-    if (token) await env.DB.prepare('DELETE FROM library_sessions WHERE hash=?').bind(await digest(token)).run();
-    return reply({ signedOut: true }, 200, { 'set-cookie': cookie(request, '', 0) });
-  }
+  if (['/api/account/request','/api/account/verify','/api/account/logout'].includes(path)) return reply({ error: 'Use Clerk sign-in and account controls.' }, 410);
+  const email = await libraryUser(request, env, verify);
+  if (path === '/api/account/session' && request.method === 'GET') return reply({ email, configured: clerkConfigured(env) });
   if (!email) return reply({ error: 'Sign in to save and open books across browsers.' }, 401);
+  if (path === '/api/account/link' && request.method === 'POST') {
+    const body = JSON.parse(new TextDecoder().decode(await readLimited(request, 4096)));
+    const owner = typeof body.browserOwner === 'string' && /^[a-zA-Z0-9-]{24,100}$/.test(body.browserOwner) ? body.browserOwner : 'account-' + await digest(email);
+    const result = await env.DB.prepare('INSERT OR IGNORE INTO library_accounts(email,owner) VALUES (?,?)').bind(email, owner).run();
+    // A browser already linked to a different account must not expose that library.
+    await env.DB.prepare('INSERT OR IGNORE INTO library_accounts(email,owner) VALUES (?,?)').bind(email, 'account-' + await digest(email)).run();
+    return reply({ email, linked: Boolean(result.meta.changes) });
+  }
   const owner = await digest(email), prefix = `library/${owner}/`;
   if (path === '/api/library/asset') {
     const hash = url.searchParams.get('hash') || '';

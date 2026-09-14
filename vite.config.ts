@@ -10,7 +10,7 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
 const bindingConfig = {
   main: "./worker/index.ts",
-  compatibility_flags: ["nodejs_compat"],
+  compatibility_flags: ["nodejs_compat", "nodejs_compat_populate_process_env"],
   d1_databases: d1
     ? [
         {
@@ -40,6 +40,10 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    optimizeDeps: { exclude: ["@clerk/nextjs"] },
+    // Workerd has node compatibility but no filesystem for Clerk's keyless setup.
+    // Select the SDK's own edge-safe runtime rather than its Node require() shim.
+    resolve: { alias: { '#safe-node-apis': new URL('./node_modules/@clerk/nextjs/dist/esm/runtime/browser/safe-node-apis.js', import.meta.url).pathname } },
     server: {
       host: "0.0.0.0",
       allowedHosts: ["terminal.local"],
@@ -48,6 +52,16 @@ export default defineConfig(async () => {
         : {}),
     },
     plugins: [
+      {
+        name: 'clerk-vinext-navigation',
+        enforce: 'pre' as const,
+        transform(code, id) {
+          // Clerk ships this optional Next import as require() inside ESM.
+          // Vite/workerd need a static import; preserve the SDK's hook logic.
+          if (!id.split('?')[0].endsWith('/@clerk/nextjs/dist/esm/client-boundary/hooks/usePathnameWithoutCatchAll.js')) return;
+          return code.replaceAll('require("next/navigation")', '__clerkNavigation') + '\nimport * as __clerkNavigation from "next/navigation";\n';
+        },
+      },
       vinext(),
       sites(),
       cloudflare({

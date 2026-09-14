@@ -1,29 +1,46 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { Show, SignInButton, SignUpButton, UserButton, useUser } from '@clerk/nextjs';
+import { useEffect, useRef, useState } from 'react';
 import { cloudRequest } from '../../lib/template-storage';
-export default function AccountPanel({ onSession, reloadOnChange = false }: { onSession?: (email: string | null) => void; reloadOnChange?: boolean }) {
-  const [email, setEmail] = useState<string | null>(null);
-  const [address, setAddress] = useState('');
-  const [code, setCode] = useState('');
-  const [sent, setSent] = useState(false);
-  const [busy, setBusy] = useState(false);
+type AccountProps = { onSession?: (email: string | null) => void; reloadOnChange?: boolean };
+export default function AccountPanel(props: AccountProps) {
+  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) return <section className="book-account" aria-label="Book account"><p>Cloud sign-in is awaiting configuration. Your browser books and local saving remain available.</p></section>;
+  return <ClerkAccountPanel {...props}/>;
+}
+function ClerkAccountPanel({ onSession, reloadOnChange = false }: AccountProps) {
+  const { isLoaded, isSignedIn, user } = useUser();
   const [message, setMessage] = useState('');
-  const [configured, setConfigured] = useState(true);
-  useEffect(() => { let active = true; void cloudRequest('/api/account/session').then(r => r.json()).then(data => { if (active) { setEmail(data.email); setConfigured(data.configured); onSession?.(data.email); } }).catch(() => { if (active) setMessage('Cloud connection unavailable. Browser saving is still available.'); }); return () => { active = false; }; }, [onSession]);
-  async function action(path: string, data = {}) {
-    setBusy(true); setMessage('');
-    try {
+  const previousUser = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!isLoaded) return;
+    let active = true;
+    const currentId = user?.id || null;
+    const changed = previousUser.current !== undefined && previousUser.current !== currentId;
+    previousUser.current = currentId;
+    if (!isSignedIn) {
+      onSession?.(null);
+      if (changed && reloadOnChange) window.location.reload();
+      return;
+    }
+    void (async () => {
       let browserOwner = localStorage.getItem('iks-book-studio-owner');
       if (!browserOwner) { browserOwner = crypto.randomUUID(); localStorage.setItem('iks-book-studio-owner', browserOwner); }
-      const response = await cloudRequest('/api/account/' + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...data, browserOwner }) });
-      const result = await response.json();
-      if (path === 'request') { setSent(true); setMessage('Check your email for an eight-digit code. It expires in 10 minutes.'); }
-      if (path === 'verify' || path === 'logout') { setEmail(result.email || null); onSession?.(result.email || null); setSent(false); setCode(''); if (reloadOnChange) window.location.reload(); }
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'Sign-in failed. Try again.'); }
-    finally { setBusy(false); }
-  }
-  return <section aria-label="Book account" style={{ padding: '16px', margin: '16px 0', border: '1px solid #cbd1c8', borderRadius: '8px' }}>
-    {email ? <><strong>Signed in as {email}</strong> <button disabled={busy} onClick={() => void action('logout')}>Sign out</button></> : <details><summary>Sign in to save books across browsers</summary><p>Sign in first in the browser containing your existing books, then use the same email in other browsers. In the template studio, open each existing book and choose Save book to account.</p>{!configured && <p>Email sign-in is awaiting setup by the site owner. You can still save books in this browser.</p>}<form onSubmit={event => { event.preventDefault(); void action(sent ? 'verify' : 'request', { email: address, code }); }} style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'end' }}><label>Email <input type="email" autoComplete="email" required maxLength={254} disabled={busy || sent} value={address} onChange={event => setAddress(event.target.value)}/></label>{sent && <label>Email code <input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{8}" maxLength={8} required value={code} onChange={event => setCode(event.target.value)}/></label>}<button disabled={busy || !configured}>{busy ? 'Please wait…' : sent ? 'Sign in' : 'Send sign-in code'}</button>{sent && <button type="button" disabled={busy} onClick={() => { setSent(false); setCode(''); if (reloadOnChange) window.location.reload(); }}>Use another email or request a new code</button>}</form></details>}
-    {message && <p role="status">{message}</p>}
+      const response = await cloudRequest('/api/account/link', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ browserOwner }) });
+      const data = await response.json();
+      if (!active) return;
+      onSession?.(data.email);
+      setMessage('Your library is connected.');
+      if (reloadOnChange && (changed || data.linked)) window.location.reload();
+    })().catch(error => { if (active) { onSession?.(null); setMessage(error instanceof Error ? error.message : 'Could not connect your library.'); } });
+    return () => { active = false; };
+  }, [isLoaded, isSignedIn, user?.id, onSession, reloadOnChange]);
+  return <section aria-label="Book account" className="book-account">
+    <div><strong>Your book library</strong><p>Sign in with the same account in each browser to open your saved books.</p></div>
+    <div className="book-account-actions">
+      <Show when="signed-out"><SignInButton mode="modal"><button>Sign in</button></SignInButton><SignUpButton mode="modal"><button>Create account</button></SignUpButton></Show>
+      <Show when="signed-in"><span>{user?.primaryEmailAddress?.emailAddress}</span><UserButton/></Show>
+      {!isLoaded && <span>Loading account…</span>}
+    </div>
+    {message && isSignedIn && <p role="status">{message}</p>}
   </section>;
 }
