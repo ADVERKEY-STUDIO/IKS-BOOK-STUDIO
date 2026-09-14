@@ -1,9 +1,16 @@
 'use client';
 import { Show, SignInButton, SignUpButton, UserButton, useUser } from '@clerk/nextjs';
 import { useEffect, useRef, useState } from 'react';
+import FirebaseAccountPanel, { type FirebaseConfig } from './firebase-account-panel';
 import { cloudRequest } from '../../lib/template-storage';
 type AccountProps = { onSession?: (email: string | null) => void; reloadOnChange?: boolean };
 export default function AccountPanel(props: AccountProps) {
+  const [config, setConfig] = useState<FirebaseConfig | null | undefined>(undefined);
+  const [error, setError] = useState(false);
+  useEffect(() => { let active = true; cloudRequest('/api/account/config').then(r => r.json()).then(data => { if (active) setConfig(data.firebase || null); }).catch(() => { if (active) setError(true); }); return () => { active = false; }; }, []);
+  if (error) return <section className="book-account"><p>Could not load sign-in. Please reload the page. Your browser books are still saved.</p></section>;
+  if (config === undefined) return <section className="book-account"><p>Loading account…</p></section>;
+  if (config) return <FirebaseAccountPanel config={config} {...props}/>;
   if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) return <section className="book-account" aria-label="Book account"><p>Cloud sign-in is awaiting configuration. Your browser books and local saving remain available.</p></section>;
   return <ClerkAccountPanel {...props}/>;
 }

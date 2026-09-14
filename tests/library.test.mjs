@@ -86,3 +86,21 @@ test('Clerk account ID preserves storage identity across email changes and links
  identities.delete(a.cookie);
  assert.equal(await libraryUser(req('/api/account/session','GET',undefined,a.cookie),env,verifier),null);
 });
+
+test('Firebase migration preserves verified-email books and isolates another account', async () => {
+ const env = environment();
+ const clerk = await signIn(env, 'existing@example.com', 'clerk-original');
+ const book = { id: 'existing-book', templateId: 'panorama', title: 'Existing library', language: 'English', images: {}, revision: 0 };
+ assert.equal((await libraryApi(req('/api/library/books', 'PUT', book, clerk.cookie), env)).status, 200);
+ env.FIREBASE_PROJECT_ID = 'fixture'; env.FIREBASE_API_KEY = 'public-fixture';
+ const firebase = await signIn(env, 'existing@example.com', 'firebase:fixture:reader');
+ const library = await (await libraryApi(req('/api/library/books', 'GET', undefined, firebase.cookie), env)).json();
+ assert.equal(library.books[0].title, 'Existing library');
+ const changed = await signIn(env, 'changed@example.com', 'firebase:fixture:reader');
+ const after = await (await libraryApi(req('/api/library/books', 'GET', undefined, changed.cookie), env)).json();
+ assert.equal(after.books[0].id, 'existing-book');
+ const stranger = await signIn(env, 'stranger@example.com', 'firebase:fixture:stranger');
+ assert.deepEqual((await (await libraryApi(req('/api/library/books', 'GET', undefined, stranger.cookie), env)).json()).books, []);
+ const foreign = new Request('https://studio.test/api/account/firebase-session', { method: 'POST', headers: { origin: 'https://attacker.test' } });
+ assert.equal((await libraryApi(foreign, env)).status, 403);
+});

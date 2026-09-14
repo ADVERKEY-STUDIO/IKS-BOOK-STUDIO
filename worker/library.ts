@@ -1,25 +1,28 @@
 import { verifyClerkIdentity, clerkConfigured, type ClerkEnvironment } from './clerk-identity.ts';
+import { verifyFirebaseIdentity, firebaseConfigured, type FirebaseEnvironment } from './firebase-identity.ts';
 import { parseTemplateBook, templates } from '../lib/template-book.ts';
 import { BOOK_ARTWORK_BYTES, IMAGE_BYTES } from '../lib/template-capacity.ts';
 type Statement = { bind(...values: unknown[]): Statement; first<T>(): Promise<T | null>; all<T>(): Promise<{ results: T[] }>; run(): Promise<{ meta: { changes?: number } }> };
-export type LibraryEnv = ClerkEnvironment & { DB: { prepare(sql: string): Statement; batch(statements: Statement[]): Promise<unknown> }; BUCKET: { put(key: string, bytes: ArrayBuffer, options?: unknown): Promise<unknown>; get(key: string): Promise<{ body: ReadableStream } | null>; head(key: string): Promise<{ size: number } | null> }; };
+export type LibraryEnv = ClerkEnvironment & FirebaseEnvironment & { DB: { prepare(sql: string): Statement; batch(statements: Statement[]): Promise<unknown> }; BUCKET: { put(key: string, bytes: ArrayBuffer, options?: unknown): Promise<unknown>; get(key: string): Promise<{ body: ReadableStream } | null>; head(key: string): Promise<{ size: number } | null> }; };
 const reply = (data: unknown, status = 200, headers = {}) => Response.json(data, { status, headers: { 'cache-control': 'no-store', ...headers } });
 export async function digest(value: string | ArrayBuffer) { return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', typeof value === 'string' ? new TextEncoder().encode(value) : value))).map(v => v.toString(16).padStart(2, '0')).join(''); }
 export async function librarySchema(env: LibraryEnv) {
   await env.DB.batch([
     env.DB.prepare('CREATE TABLE IF NOT EXISTS library_accounts (email TEXT PRIMARY KEY, owner TEXT NOT NULL UNIQUE)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS library_firebase_users (user_id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS library_clerk_users (user_id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS library_books (owner TEXT NOT NULL, id TEXT NOT NULL, revision INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(owner,id))'),
   ]);
 }
-export async function libraryUser(request: Request, env: LibraryEnv, verify = verifyClerkIdentity): Promise<string | null> {
+export async function libraryUser(request: Request, env: LibraryEnv, verify = firebaseConfigured(env) ? verifyFirebaseIdentity : verifyClerkIdentity): Promise<string | null> {
   const identity = await verify(request, env);
   if (!identity) return null;
+  const table = firebaseConfigured(env) ? 'library_firebase_users' : 'library_clerk_users';
   // The original email remains the storage identity if the Clerk user changes email.
-  const existing = await env.DB.prepare('SELECT email FROM library_clerk_users WHERE user_id=?').bind(identity.userId).first<{ email: string }>();
+  const existing = await env.DB.prepare(`SELECT email FROM ${table} WHERE user_id=?`).bind(identity.userId).first<{ email: string }>();
   if (existing) return existing.email;
-  await env.DB.prepare('INSERT OR IGNORE INTO library_clerk_users(user_id,email) VALUES (?,?)').bind(identity.userId, identity.email).run();
-  const linked = await env.DB.prepare('SELECT email FROM library_clerk_users WHERE user_id=?').bind(identity.userId).first<{ email: string }>();
+  await env.DB.prepare(`INSERT OR IGNORE INTO ${table}(user_id,email) VALUES (?,?)`).bind(identity.userId, identity.email).run();
+  const linked = await env.DB.prepare(`SELECT email FROM ${table} WHERE user_id=?`).bind(identity.userId).first<{ email: string }>();
   if (!linked) throw new Error('This email is already linked to another library account. Use the original account.');
   return linked.email;
 }
@@ -39,13 +42,22 @@ async function readLimited(request: Request, max: number): Promise<ArrayBuffer> 
   for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.length; }
   return result.buffer;
 }
-export async function libraryApi(request: Request, env: LibraryEnv, verify = verifyClerkIdentity): Promise<Response> {
+export async function libraryApi(request: Request, env: LibraryEnv, verify = firebaseConfigured(env) ? verifyFirebaseIdentity : verifyClerkIdentity): Promise<Response> {
   await librarySchema(env);
   const url = new URL(request.url), path = url.pathname;
   if (request.method !== 'GET' && request.headers.get('origin') !== url.origin) return reply({ error: 'Open this action from Book Studio.' }, 403);
+  if (path === '/api/account/config' && request.method === 'GET') return reply({ firebase: firebaseConfigured(env) ? { apiKey: env.FIREBASE_API_KEY, projectId: env.FIREBASE_PROJECT_ID, authDomain: `${env.FIREBASE_PROJECT_ID}.firebaseapp.com` } : null });
+  if (path === '/api/account/firebase-session' && request.method === 'DELETE') return reply({ email: null }, 200, { 'set-cookie': 'iks_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0' + (url.protocol === 'https:' ? '; Secure' : '') });
+  if (path === '/api/account/firebase-session' && request.method === 'POST') {
+    const identity = await verifyFirebaseIdentity(request, env);
+    if (!identity) return reply({ error: 'Sign in with a verified email address.' }, 401);
+    const token = request.headers.get('authorization')?.match(/^Bearer ([A-Za-z0-9_.-]+)$/)?.[1];
+    if (!token || token.length > 8192) return reply({ error: 'Invalid sign-in token.' }, 401);
+    return reply({ email: identity.email }, 200, { 'set-cookie': `iks_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=3600${url.protocol === 'https:' ? '; Secure' : ''}` });
+  }
   if (['/api/account/request','/api/account/verify','/api/account/logout'].includes(path)) return reply({ error: 'Use Clerk sign-in and account controls.' }, 410);
   const email = await libraryUser(request, env, verify);
-  if (path === '/api/account/session' && request.method === 'GET') return reply({ email, configured: clerkConfigured(env) });
+  if (path === '/api/account/session' && request.method === 'GET') return reply({ email, configured: firebaseConfigured(env) || clerkConfigured(env) });
   if (!email) return reply({ error: 'Sign in to save and open books across browsers.' }, 401);
   if (path === '/api/account/link' && request.method === 'POST') {
     const body = JSON.parse(new TextDecoder().decode(await readLimited(request, 4096)));
