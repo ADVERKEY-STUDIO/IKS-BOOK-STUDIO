@@ -84,7 +84,7 @@ export function parseTemplateBook(input: unknown, projectId?: string): TemplateB
     if (b.format !== 'iks-template-book-v1')
         throw Error('This is not a template book. Use the prompt from this workspace and return book.json.');
     if (typeof b.projectId !== 'string' || !b.projectId || b.projectId.length > 100 || projectId && b.projectId !== projectId)
-        throw Error('This package belongs to a different book. Open its saved workspace or import it as a new book.');
+        throw Error('This ZIP belongs to another book. Choose “Import ZIP as a separate book” to open the complete package and keep your current book.');
     if (!templates.some(t => t.id === b.templateId))
         throw Error('Unknown book template.');
     if (!Array.isArray(b.pages) || !b.pages.length || b.pages.length > 80)

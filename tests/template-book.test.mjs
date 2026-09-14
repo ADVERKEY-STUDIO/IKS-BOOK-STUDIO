@@ -60,7 +60,7 @@ test('a fresh workspace accepts a manuscript from an earlier request without cha
 test('manuscript import preserves template and existing-book safeguards',()=>{
  const input=fixture();
  assert.throws(()=>importTemplateManuscript(input,'fresh-workspace','panorama'),/template/i);
- assert.throws(()=>importTemplateManuscript(input,'fresh-workspace','painted',input),/different book/);
+ assert.throws(()=>importTemplateManuscript(input,'fresh-workspace','painted',input),/another book/);
  assert.deepEqual(importTemplateManuscript(input,'test-book','painted',input),input);
  const changed=fixture();changed.pages[0].original='Changed verse';
  assert.throws(()=>importTemplateManuscript(changed,'test-book','painted',input),/already saved/);
