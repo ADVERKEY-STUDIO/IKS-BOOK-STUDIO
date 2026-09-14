@@ -34,3 +34,15 @@ The existing devotional workspace and its approvals are independent. Template bo
 ## Deliberate limits
 
 Paintings remain raster assets; text and placement settings are editable. Templates do not guarantee artistic quality or complete source coverage from AI. Preview warns about detected text overflow and low placed image resolution. Source fidelity, character continuity and final print review still require inspection. Output is a working HTML/PDF proof, not PDF/X. Artwork generation is external, not an automatic background job.
+
+### Structural compositions (September 14)
+
+Four additional templates lead the gallery: Landscape journey (panoramic art and reading band), Painting & passage (full-spread art and opaque text inset), The sacred word (centered text with a small footer illustration), and Picture & commentary (art strip with separate original and meaning columns). These are editable layout values, carried in `book.json`, validated on import and rendered by the portable HTML export. Older three-layout books remain compatible. The generated prompt selects the corresponding primary composition and describes its illustration area. Gallery samples reuse credited public-domain artwork to demonstrate placement; they are not newly commissioned paintings. Review image cropping and text fit in the full proof before printing.
+
+## Literary cover collection (September 2026)
+
+Six original directions inspired by the selected Literary Hub covers are available at the top of `/template-studio`: The bold edition, The living atlas, The memory archive, The color story, The word edition, and The quiet atmosphere. Each card uses the portable book renderer to show one cover and one facing-page spread (two interior pages). “Look inside” opens a keyboard-dismissible modal; “Use template” enters the existing source/import/edit workflow.
+
+Definitions, cover markup and shared layout styles live in `lib/literary-templates.ts`; sample text and responsive proof styling live in `lib/template-sample.ts`. The reference books are credited as cover inspiration; their interior pages and protected cover images are not packaged. Living atlas uses original generated demonstration art at `public/templates/living-atlas.png`; other photographic examples retain the existing public-domain credits. Uploaded first-spread artwork supplies the artwork on assembled literary covers.
+
+Validation: nine template tests pass, the Vinext production build passes, and desktop/mobile gallery, enlarged previews, Escape dismissal and template selection were checked in the browser. Repository-wide TypeScript checking reports errors in existing `app/page.tsx`, `db/index.ts` and `worker/index.ts`; the new modules pass targeted lint.
