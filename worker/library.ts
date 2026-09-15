@@ -71,6 +71,10 @@ export async function libraryApi(request: Request, env: LibraryEnv, verify = fir
   if (path === '/api/library/asset') {
     const hash = url.searchParams.get('hash') || '';
     if (!/^[a-f0-9]{64}$/.test(hash)) return reply({ error: 'Invalid artwork key.' }, 400);
+    if (request.method === 'HEAD') {
+      const object = await env.BUCKET.head(prefix + hash);
+      return new Response(null, { status: object ? 200 : 404, headers: { 'cache-control': 'private, no-store' } });
+    }
     if (request.method === 'PUT') {
       const size = Number(request.headers.get('content-length'));
       if (size > IMAGE_BYTES) return reply({ error: 'File exceeds 25 MB.' }, 413);

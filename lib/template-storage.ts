@@ -22,11 +22,40 @@ export async function cloudRequest(path: string, options?: RequestInit) {
   if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error || 'Cloud library is unavailable. Your browser copy is still here.'); }
   return response;
 }
+// Cache hashes by immutable Blob identity, without retaining discarded artwork.
+const assetHashes = new WeakMap<Blob, Promise<string>>();
+async function assetRequest(path: string, options: RequestInit) {
+  for (let attempt = 0; ; attempt++) {
+    let response: Response;
+    try { response = await fetch(path, options); }
+    catch (error) {
+      if (attempt >= 2) throw error;
+      await new Promise(resolve => setTimeout(resolve, 300 * 2 ** attempt));
+      continue;
+    }
+    if (attempt < 2 && (response.status === 429 || response.status >= 500)) {
+      await new Promise(resolve => setTimeout(resolve, 300 * 2 ** attempt));
+      continue;
+    }
+    return response;
+  }
+}
 export async function uploadDraft(draft: Draft, email: string): Promise<Draft> {
   async function upload(blob: Blob): Promise<Asset> {
-    const bytes = await blob.arrayBuffer();
-    const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))).map(v => v.toString(16).padStart(2, '0')).join('');
-    await cloudRequest(`/api/library/asset?hash=${hash}`, { method: 'PUT', body: bytes });
+    let hashing = assetHashes.get(blob);
+    if (!hashing) {
+      hashing = blob.arrayBuffer().then(bytes => crypto.subtle.digest('SHA-256', bytes)).then(hash => Array.from(new Uint8Array(hash)).map(v => v.toString(16).padStart(2, '0')).join(''));
+      assetHashes.set(blob, hashing);
+      void hashing.catch(() => assetHashes.delete(blob));
+    }
+    const hash = await hashing;
+    const path = `/api/library/asset?hash=${hash}`;
+    // The server checks existence within the authenticated account, never globally.
+    const existing = await assetRequest(path, { method: 'HEAD' });
+    if (existing.status === 404) {
+      const response = await assetRequest(path, { method: 'PUT', body: blob });
+      if (!response.ok) throw new Error('Artwork could not be uploaded. Retry saving to resume.');
+    } else if (!existing.ok) throw new Error('Could not check account artwork. Retry saving.');
     return { hash, type: blob.type || 'image/png' };
   }
   const images: Record<string, Asset> = {};
