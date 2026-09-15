@@ -41,26 +41,27 @@ async function assetRequest(path: string, options: RequestInit) {
   }
 }
 export async function uploadDraft(draft: Draft, email: string): Promise<Draft> {
-  async function upload(blob: Blob): Promise<Asset> {
+  async function upload(blob: Blob, name: string): Promise<Asset> {
     let hashing = assetHashes.get(blob);
     if (!hashing) {
       hashing = blob.arrayBuffer().then(bytes => crypto.subtle.digest('SHA-256', bytes)).then(hash => Array.from(new Uint8Array(hash)).map(v => v.toString(16).padStart(2, '0')).join(''));
       assetHashes.set(blob, hashing);
       void hashing.catch(() => assetHashes.delete(blob));
     }
-    const hash = await hashing;
+    let hash: string;
+    try { hash = await hashing; } catch { throw new Error(`“${name}” could not be read from browser storage. Re-add this file from your original ZIP or image, then save again. Keep this tab open until you have recovered the book.`); }
     const path = `/api/library/asset?hash=${hash}`;
     // The server checks existence within the authenticated account, never globally.
-    const existing = await assetRequest(path, { method: 'HEAD' });
+    const existing = await assetRequest(path, { method: 'HEAD' }).catch(() => { throw new Error(`Connection interrupted while checking “${name}”. Retry saving.`); });
     if (existing.status === 404) {
-      const response = await assetRequest(path, { method: 'PUT', body: blob });
+      const response = await assetRequest(path, { method: 'PUT', body: blob }).catch(() => { throw new Error(`Upload interrupted for “${name}”. Retry saving; completed uploads will be reused.`); });
       if (!response.ok) throw new Error('Artwork could not be uploaded. Retry saving to resume.');
     } else if (!existing.ok) throw new Error('Could not check account artwork. Retry saving.');
     return { hash, type: blob.type || 'image/png' };
   }
   const images: Record<string, Asset> = {};
-  for (const [name, blob] of Object.entries(draft.images)) images[name] = await upload(blob);
-  const source = draft.source ? { ...await upload(draft.source), type: draft.source.type, name: draft.source.name } : undefined;
+  for (const [name, blob] of Object.entries(draft.images)) images[name] = await upload(blob, name);
+  const source = draft.source ? { ...await upload(draft.source, draft.source.name), type: draft.source.type, name: draft.source.name } : undefined;
   const response = await cloudRequest('/api/library/books', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...draft, images, source, cloud: undefined, revision: draft.cloud?.email === email ? draft.cloud.revision : 0 }) });
   const { revision } = await response.json();
   return { ...draft, cloud: { email, revision, savedUpdated: draft.updated } };

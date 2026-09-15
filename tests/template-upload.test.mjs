@@ -20,3 +20,8 @@ test('authorization failures do not upload files or commit the book',async()=>{
  globalThis.fetch=async()=>{calls++;return new Response(null,{status:401});};
  try{await assert.rejects(uploadDraft({images:{a:new Blob(['a'])}},'test@example.com'));assert.equal(calls,1);}finally{globalThis.fetch=original;}
 });
+test('unreadable artwork identifies the file instead of a generic abort',async()=>{
+ const broken=new Blob(['art']);
+ broken.arrayBuffer=async()=>{throw new DOMException('The operation was aborted.','AbortError');};
+ await assert.rejects(uploadDraft({images:{'spread-07.png':broken}},'test@example.com'),/spread-07.png.*could not be read/);
+});
