@@ -10,6 +10,7 @@ import LiteraryGallery from './literary-gallery';
 import { isLiteraryTemplate } from '../../lib/literary-templates';
 import { storage, uploadDraft, downloadDraft, cloudRequest, type Draft, type CloudBook } from '../../lib/template-storage';
 import AccountPanel from '../components/account-panel';
+import { saveWithFallback, browserSaveError } from '../../lib/template-save';
 function download(name: string, data: Blob) { const url = URL.createObjectURL(data); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 30000); }
 async function imageBlob(file: Blob) { if (file.size > IMAGE_BYTES)
     throw Error('Each image must be under 25 MB.'); const bitmap = await createImageBitmap(file); const pixels = bitmap.width * bitmap.height; bitmap.close(); if (pixels > 64000000)
@@ -40,6 +41,8 @@ export default function TemplateStudio() {
     const [unmatched, setUnmatched] = useState<File[]>([]);
     const [assignment, setAssignment] = useState('');
     const writeQueue = useRef(Promise.resolve());
+    const latestDraft = useRef<Draft>(undefined);
+    const [saveError, setSaveError] = useState('');
     useEffect(() => { storage('read').then(books => {
         setSaved(books);
         const bookId = new URLSearchParams(window.location.search).get('book');
@@ -49,8 +52,20 @@ export default function TemplateStudio() {
             else setError('This book is not available in this browser. Return to Book Studio and open it from your account library.');
         }
     }).catch(() => setError('Browser storage could not be opened. Export a ZIP to keep your work.')).finally(() => setReady(true)); }, []);
-    useEffect(() => { if (!draft)
-        return; writeQueue.current = writeQueue.current.catch(() => { }).then(async () => { setNotice('Saving…'); await storage('write', draft); setSaved(old => [...old.filter(v => v.id !== draft.id), draft]); setNotice(draft.cloud?.savedUpdated === draft.updated ? 'Saved to your account and this browser' : 'Saved in this browser' + (email ? ' · Save to account to sync changes' : '')); }).catch(() => { setNotice('Not saved'); setError('Could not save in browser storage. Download your working ZIP before closing.'); }); }, [draft, email]);
+    useEffect(() => {
+        if (!draft) return;
+        latestDraft.current = draft;
+        writeQueue.current = writeQueue.current.catch(() => {}).then(async () => {
+            if (latestDraft.current !== draft) return;
+            setNotice('Saving…');
+            try {
+                await storage('write', draft);
+                setSaved(old => [...old.filter(v => v.id !== draft.id), draft]);
+                setSaveError('');
+                setNotice('Saved in this browser');
+            } catch (error) { setNotice('Browser save needs attention'); setSaveError(browserSaveError(error)); }
+        });
+    }, [draft]);
     async function refreshCloud() {
         const response = await cloudRequest('/api/library/books');
         setCloudLibrary({ email, books: (await response.json()).books });
@@ -59,16 +74,16 @@ export default function TemplateStudio() {
     async function saveNow() {
         if (!draft) return;
         await writeQueue.current;
-        await storage('write', draft);
+        setNotice(email ? 'Saving to your account…' : 'Saving…');
+        const result = await saveWithFallback(draft, value => storage('write', value), email ? value => uploadDraft(value, email) : undefined);
+        setSaveError(result.localError ? browserSaveError(result.localError) : '');
         if (email) {
-            setNotice('Uploading book and artwork…');
-            const uploaded = await uploadDraft(draft, email);
-            await storage('write', uploaded);
-            setDraft(current => current?.id === uploaded.id ? { ...current, cloud: uploaded.cloud } : current);
-            await refreshCloud();
+            setDraft(current => current?.id === result.value.id ? { ...current, cloud: result.value.cloud } : current);
             setNotice('Saved to your account');
-        } else setNotice('Saved in this browser. Sign in for access elsewhere.');
+            await refreshCloud();
+        } else setNotice('Saved in this browser');
     }
+
     function patch(p: Partial<Draft>) { setDraft(d => d ? { ...d, ...p, ...(d.book && !p.book && (p.title !== undefined || p.language !== undefined) ? {book:{...d.book, title:p.title ?? d.book.title, language:p.language ?? d.book.language}} : {}), updated: Date.now() } : d); }
     async function run(fn: () => Promise<void>) { setBusy(true); setError(''); try {
         await fn();
@@ -188,7 +203,7 @@ export default function TemplateStudio() {
         throw Error('Font could not be packaged.'); entries['fonts/book-sanskrit.ttf'] = new Uint8Array(await font.arrayBuffer()); const license = await fetch('/fonts/OFL-NotoSerifDevanagari.txt'); if (!license.ok)
         throw Error('Font license could not be packaged.'); entries['fonts/OFL.txt'] = new Uint8Array(await license.arrayBuffer()); if (draft.source)
         entries['source/' + draft.source.name] = new Uint8Array(await draft.source.arrayBuffer()); download('Editable-Book.zip', new Blob([new Uint8Array(zipSync(entries, { level: 0 }))], { type: 'application/zip' })); }
-    return <main className="ts"><fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}><style>{templateAppearanceCss()}</style><header className="ts-header"><Link href="/">← Book Studio</Link><strong>Books, made your way.</strong><span role="status">{busy ? 'Working…' : notice}</span></header><AccountPanel onSession={setEmail}/><div className="ts-actions ts-library-actions">{draft && <button className="ts-save-primary" disabled={busy} onClick={() => void run(saveNow)}>Save book{email ? ' to account' : ' now'}</button>}<button disabled={busy} onClick={() => setStep(0)}>My saved books</button></div>{email && <section className="ts-panel ts-cloud-library"><header className="ts-cloud-heading"><div><h2>Your cloud library</h2><p>Saved to <strong>{email}</strong></p><span>Open these books from any browser with this account.</span></div><button disabled={busy} onClick={() => void run(refreshCloud)}>Refresh library</button></header>{cloudBooks.length === 0 && <p>No cloud books yet. Open a browser book and choose Save book to account.</p>}<div className="ts-cloud-grid">{cloudBooks.map(item => <button className="ts-cloud-book" disabled={busy} key={item.id} onClick={() => void run(async () => { await writeQueue.current; if (draft) await storage('write', draft); const restored = await downloadDraft(item, email); const existing = saved.find(d => d.id === restored.id); if (existing) { const backupId = crypto.randomUUID(); await storage('write', { ...existing, id: backupId, book: existing.book ? { ...existing.book, projectId: backupId, title: existing.title + ' (local backup)' } : undefined, title: existing.title + ' (local backup)', cloud: undefined }); } await storage('write', restored); setSaved(await storage('read')); setDraft(restored); setStep(restored.book ? 2 : 1); setSelected(0); setUnmatched([]); })}><span className="ts-cloud-cover" aria-hidden="true" style={{background: templates.find(t => t.id === item.templateId)?.paper, color: templates.find(t => t.id === item.templateId)?.ink}}>{item.title}</span><span className="ts-cloud-book-info"><strong>{item.title}</strong><span>{templates.find(t => t.id === item.templateId)?.name}{item.book ? ` · ${item.book.pages.length} spreads` : ' · Draft'}</span><small>Open cloud copy <span aria-hidden="true">→</span></small></span></button>)}</div></section>}<nav aria-label="Book creation steps">{['Choose a template', 'Source & prompt', 'Assemble & edit'].map((label, i) => <button key={label} disabled={busy || !draft && i > 0 || i === 2 && !book} aria-current={step === i ? 'step' : undefined} onClick={() => setStep(i)}>{i + 1}. {label}</button>)}</nav>{error && <p className="ts-error" role="alert">{error}</p>}
+    return <main className="ts"><fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}><style>{templateAppearanceCss()}</style><header className="ts-header"><Link href="/">← Book Studio</Link><strong>Books, made your way.</strong><span role="status">{busy ? 'Working…' : notice}</span></header><details className="ts-account-disclosure"><summary>Account & sign-in{email ? ` · ${email}` : ""}</summary><AccountPanel onSession={setEmail}/></details><div className="ts-actions ts-library-actions">{draft && <button className="ts-save-primary" disabled={busy} onClick={() => void run(saveNow)}>Save book{email ? ' to account' : ' now'}</button>}<button disabled={busy} onClick={() => setStep(0)}>My saved books</button></div>{email && <details className="ts-panel ts-cloud-library"><summary>Cloud library <span>{cloudBooks.length} books</span></summary><header className="ts-cloud-heading"><div><h2>Your cloud library</h2><p>Saved to <strong>{email}</strong></p><span>Open these books from any browser with this account.</span></div><button disabled={busy} onClick={() => void run(refreshCloud)}>Refresh library</button></header>{cloudBooks.length === 0 && <p>No cloud books yet. Open a browser book and choose Save book to account.</p>}<div className="ts-cloud-grid">{cloudBooks.map(item => <button className="ts-cloud-book" disabled={busy} key={item.id} onClick={() => void run(async () => { await writeQueue.current; if (draft) await storage('write', draft); const restored = await downloadDraft(item, email); const existing = saved.find(d => d.id === restored.id); if (existing && !(existing.cloud?.email === email && existing.cloud.revision === item.revision && existing.cloud.savedUpdated === existing.updated)) { const backupId = crypto.randomUUID(); await storage('write', { ...existing, id: backupId, book: existing.book ? { ...existing.book, projectId: backupId, title: existing.title + ' (local backup)' } : undefined, title: existing.title + ' (local backup)', cloud: undefined }); } await storage('write', restored); setSaved(await storage('read')); setDraft(restored); setStep(restored.book ? 2 : 1); setSelected(0); setUnmatched([]); })}><span className="ts-cloud-cover" aria-hidden="true" style={{background: templates.find(t => t.id === item.templateId)?.paper, color: templates.find(t => t.id === item.templateId)?.ink}}>{item.title}</span><span className="ts-cloud-book-info"><strong>{item.title}</strong><span>{templates.find(t => t.id === item.templateId)?.name}{item.book ? ` · ${item.book.pages.length} spreads` : ' · Draft'}</span><small>Open cloud copy <span aria-hidden="true">→</span></small></span></button>)}</div></details>}<nav aria-label="Book creation steps">{['Choose a template', 'Source & prompt', 'Assemble & edit'].map((label, i) => <button key={label} disabled={busy || !draft && i > 0 || i === 2 && !book} aria-current={step === i ? 'step' : undefined} onClick={() => setStep(i)}>{i + 1}. {label}</button>)}</nav>{saveError && <div className="ts-save-warning" role="status"><p>{saveError}</p><button disabled={busy} onClick={() => void run(saveNow)}>{email ? "Save to account" : "Retry save"}</button></div>}{error && <p className="ts-error" role="alert">{error}</p>}
  {step === 0 && <><div className="ts-intro"><p>YOUR SOURCE. YOUR BOOK.</p><h1>Start with a book you can see.</h1><p>Choose a visual direction. Bring your PDF or DOCX. Get one detailed prompt and build the book at your own pace.</p></div><LiteraryGallery onChoose={chooseTemplate} disabled={busy}/><h2>Classic illustrated templates</h2><div className="ts-templates">{selectableTemplates.filter(t => !isLiteraryTemplate(t.id)).sort((a,b) => Number(templateLayout(b.id) !== 'art-right') - Number(templateLayout(a.id) !== 'art-right')).map(t => <article className={t.id} key={t.id} style={{ background: t.paper, color: t.ink }}>{templateLayout(t.id) === 'art-right' && <div className={'ts-demo ' + t.id}><div className={"ts-mini-cover cover " + t.id}><small>AN ILLUSTRATED EDITION</small><h2>Wisdom<br />in every page</h2><span style={{ color: t.accent }}>A reading journey</span></div><img src={t.demo} alt={`${t.name} example artwork`}/></div>}<div className={'ts-mini-spread ' + t.id + ' composition-' + templateLayout(t.id) + (templateLayout(t.id) !== 'art-right' ? ' ts-structural-preview' : '')}><div className="copy"><h2>A moment of stillness</h2><p className="original">शान्तिः<br />A quiet place for the original words.</p><p className="meaning">A separate space to reflect on their meaning.</p></div><div className="art"><img src={t.demo} alt="Interior layout example"/></div></div><h2>{t.name}</h2><p>{t.description}</p><button disabled={busy} onClick={() => { if (draft?.book) {
         setError('Your current book is saved. Open a new template in a new workspace from the saved-books list below.');
         return;
