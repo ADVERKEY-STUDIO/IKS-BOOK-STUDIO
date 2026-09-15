@@ -1,4 +1,5 @@
 'use client';
+import './account-panel.css';
 import { Show, SignInButton, SignUpButton, UserButton, useUser } from '@clerk/nextjs';
 import { useEffect, useRef, useState } from 'react';
 import FirebaseAccountPanel, { type FirebaseConfig } from './firebase-account-panel';

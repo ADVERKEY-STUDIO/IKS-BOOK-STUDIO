@@ -40,7 +40,15 @@ export default function TemplateStudio() {
     const [unmatched, setUnmatched] = useState<File[]>([]);
     const [assignment, setAssignment] = useState('');
     const writeQueue = useRef(Promise.resolve());
-    useEffect(() => { storage('read').then(setSaved).catch(() => setError('Browser storage could not be opened. Export a ZIP to keep your work.')).finally(() => setReady(true)); }, []);
+    useEffect(() => { storage('read').then(books => {
+        setSaved(books);
+        const bookId = new URLSearchParams(window.location.search).get('book');
+        if (bookId) {
+            const existing = books.find(book => book.id === bookId);
+            if (existing) { setDraft(existing); setStep(existing.book ? 2 : 1); }
+            else setError('This book is not available in this browser. Return to Book Studio and open it from your account library.');
+        }
+    }).catch(() => setError('Browser storage could not be opened. Export a ZIP to keep your work.')).finally(() => setReady(true)); }, []);
     useEffect(() => { if (!draft)
         return; writeQueue.current = writeQueue.current.catch(() => { }).then(async () => { setNotice('Saving…'); await storage('write', draft); setSaved(old => [...old.filter(v => v.id !== draft.id), draft]); setNotice(draft.cloud?.savedUpdated === draft.updated ? 'Saved to your account and this browser' : 'Saved in this browser' + (email ? ' · Save to account to sync changes' : '')); }).catch(() => { setNotice('Not saved'); setError('Could not save in browser storage. Download your working ZIP before closing.'); }); }, [draft, email]);
     async function refreshCloud() {
