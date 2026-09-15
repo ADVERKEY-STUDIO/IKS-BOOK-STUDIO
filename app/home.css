@@ -144,3 +144,6 @@
 .saved-delete-confirm button { padding:10px 14px; border:1px solid #b89c89; border-radius:4px; background:white; cursor:pointer; }
 .saved-delete-confirm button:first-child { background:#843b2d; color:white; border-color:#843b2d; }
 .saved-delete-confirm button:disabled,.saved-delete-button:disabled { opacity:.5; cursor:default; }
+.saved-template-details footer .saved-delete-button { position:static; color:#843b2d; border:1px solid #d9cec4; padding:8px 12px; border-radius:4px; background:#fffefa; font-weight:500; }
+.saved-template-details footer time { flex:1; }
+.saved-template-details footer .saved-delete-button:hover { background:#fff0e8; border-color:#843b2d; }
