@@ -1,6 +1,6 @@
 import type { TemplateBook, TemplateId } from './template-book';
 export type Draft = { id: string; templateId: TemplateId; title: string; language: string; source?: File; book?: TemplateBook; images: Record<string, Blob>; updated: number; cloud?: { email: string; revision: number; savedUpdated: number } };
-export async function storage(mode: 'read' | 'write', value?: Draft): Promise<Draft[]> {
+export async function storage(mode: 'read' | 'write' | 'delete', value?: Draft): Promise<Draft[]> {
   const database = await new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open('iks-template-studio', 1);
     request.onupgradeneeded = () => request.result.createObjectStore('books', { keyPath: 'id' });
@@ -10,7 +10,7 @@ export async function storage(mode: 'read' | 'write', value?: Draft): Promise<Dr
   });
   return new Promise((resolve, reject) => {
     const tx = database.transaction('books', mode === 'read' ? 'readonly' : 'readwrite');
-    const request = mode === 'read' ? tx.objectStore('books').getAll() : tx.objectStore('books').put(value!);
+    const request = mode === 'read' ? tx.objectStore('books').getAll() : mode === 'delete' ? tx.objectStore('books').delete(value!.id) : tx.objectStore('books').put(value!);
     tx.oncomplete = () => { database.close(); resolve(mode === 'read' ? request.result as Draft[] : []); };
     tx.onerror = tx.onabort = () => { database.close(); reject(tx.error || new Error('Browser save was interrupted.')); };
   });

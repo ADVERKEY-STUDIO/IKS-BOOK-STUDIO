@@ -85,6 +85,16 @@ export async function libraryApi(request: Request, env: LibraryEnv, verify = fir
     }
   }
   if (path === '/api/library/books') {
+    if (request.method === 'DELETE') {
+      const id = url.searchParams.get('id') || '';
+      const revision = Number(url.searchParams.get('revision'));
+      if (!/^[\w-]{1,100}$/.test(id) || !Number.isSafeInteger(revision) || revision < 1) return reply({ error: 'Invalid book deletion request.' }, 400);
+      const result = await env.DB.prepare('DELETE FROM library_books WHERE owner=? AND id=? AND revision=?').bind(owner, id, revision).run();
+      if (!result.meta.changes) return reply({ error: 'This account book changed or was already removed. Reload the library before deleting.' }, 409);
+      // Assets may be shared by other books; deleting a book must not remove them.
+      return reply({ deleted: id });
+    }
+
     if (request.method === 'GET') {
       const rows = await env.DB.prepare('SELECT data,revision FROM library_books WHERE owner=?').bind(owner).all<{ data: string; revision: number }>();
       return reply({ books: rows.results.map((row: { data: string; revision: number }) => ({ ...JSON.parse(row.data), revision: row.revision })) });
