@@ -1,7 +1,9 @@
+import { childrenTemplates } from './children-templates.ts';
 import { literaryTemplates, literaryCover, literaryCss } from './literary-templates.ts';
 /** Portable contract for template-driven, resumable external book production. */
 export const templates = [
     ...literaryTemplates,
+    ...childrenTemplates,
     { id: 'painted', name: 'Painted devotion', description: 'Expansive paintings, warm ivory and quiet verse pages.', paper: '#fff8ef', ink: '#482f29', accent: '#a4462b', art: 'Watercolor and opaque gouache, expressive sepia outlines, visible paper grain, saffron, coral, leaf green and soft sky blue. Dignified expressive figures.', demo: '/pilot/gita/journey.jpg' },
     { id: 'heritage', name: 'Heritage folio', description: 'Framed paintings, deep red details and balanced text.', paper: '#f4e9d2', ink: '#372b25', accent: '#8c302b', art: 'Detailed miniature-inspired original painting, restrained ornamental frames, mineral pigments, parchment, vermilion and muted gold. Culturally grounded settings.', demo: '/pilot/gita/composite.jpg' },
     { id: 'quiet', name: 'Quiet contemplation', description: 'Small vignettes, generous paper and spacious typography.', paper: '#faf9f3', ink: '#233e36', accent: '#6d7860', art: 'Restrained botanical and devotional vignettes, delicate ink and transparent washes, ivory, sage green and muted ochre. Large quiet areas and few ornaments.', demo: '/pilot/gita/lamp.jpg' },
@@ -18,6 +20,12 @@ export const templates = [
 ] as const;
 /** Shared appearance rules for miniature cards, editor and portable print output. */
 export function templateAppearanceCss() { return literaryCss() + `
+.beanstalk-adventure .copy h2{color:#ad632b;font-style:italic}.beanstalk-adventure .meaning{border-left:1px solid #d5b784;padding-left:5%}.flower-festival .copy h2{color:#b86473}.flower-festival .art img{border-radius:35% 8% 30% 8%}.flower-festival .meaning{border-top:1px solid #e8c7ca;padding-top:5%}
+.little-explorers .copy{border:1px solid #b7c891;border-radius:3% 20% 3% 3%;background:#f6f5df;color:#263f32}.little-explorers .copy h2{color:#637d35}
+.bedtime-skies .copy{background:#fffef6;color:#20474b;border-radius:4% 30% 25% 5%;box-shadow:none}.bedtime-skies .copy h2{color:#188e94;font-family:Arial,sans-serif}.bedtime-skies .meaning{border-top:1px solid #b5ded7;padding-top:5%}
+.paper-play .copy{margin:4%;width:42%;padding:5%;border:3px double #d4c08b;text-align:center}.paper-play .art{padding:2%}.paper-play .copy h2{color:#ae8e43;font-style:italic}
+.cover.little-explorers{border-color:#dce5bd}.cover.bedtime-skies{border-color:#c5ece6}.cover.paper-play{box-shadow:inset 0 0 0 3px #d4c08b}
+
 .moonlit .copy{text-align:center}.moonlit .copy h2{letter-spacing:.12em;text-transform:uppercase}.moonlit .art{padding:8%}.moonlit .art img{border:1px solid #e3b967;padding:3%}.moonlit .meaning,.moonlit small,.moonlit .folio{color:#ddd5c1}
 .botanical .copy{border-left:3px solid #718447;margin:5% 0 5% 3%;width:47%;padding:4%}.botanical .art{padding:8%}.botanical .art img{border-radius:48% 48% 8% 8%}.botanical .copy h2{font-style:italic}
 .vermilion .copy{border-top:8px solid #ad3427;margin-top:4%;height:88%}.vermilion .copy h2{font-family:Arial,sans-serif;font-weight:700;text-transform:uppercase}.vermilion .art{padding:6%}.vermilion .art img{border-bottom:8px solid #ad3427}
@@ -32,7 +40,8 @@ export function templateAppearanceCss() { return literaryCss() + `
 .composition-panorama .copy h2{grid-column:1/-1;margin:0 0 1%}.composition-panorama .meaning{margin:0}
 .composition-immersive{position:relative;isolation:isolate}
 .composition-immersive .art{position:absolute;inset:0;width:100%;height:100%;padding:0;z-index:0}
-.composition-immersive .copy{position:relative;z-index:1;background:#fff8e9;color:#472c24;width:39%;height:84%;margin:4% 0 0 4%;padding:3%;box-shadow:0 1px 8px #0002}
+.composition-immersive:not(.little-explorers):not(.bedtime-skies) .copy{position:relative;z-index:1;background:#fff8e9;color:#472c24;width:39%;height:84%;margin:4% 0 0 4%;padding:3%;box-shadow:0 1px 8px #0002}
+.little-explorers.composition-immersive .copy,.bedtime-skies.composition-immersive .copy{position:relative;z-index:1;width:39%;height:84%;margin:4% 0 0 4%;padding:3%}
 .composition-immersive .folio{z-index:2;background:#fff8e9;color:#472c24;padding:.3%}
 .composition-poetry .copy{width:100%;height:73%;padding:5% 20% 1%;text-align:center;align-items:center}
 .composition-poetry .copy h2{letter-spacing:.14em;text-transform:uppercase}.composition-poetry .meaning{margin-top:3%}
@@ -52,6 +61,14 @@ export const selectableTemplates = templates.filter(t => !retiredTemplateIds.has
 export const layouts = ['art-right', 'art-left', 'vignette', 'panorama', 'immersive', 'poetry', 'study'] as const;
 export type Layout = typeof layouts[number];
 export function templateLayout(id: TemplateId): Layout {
+    if (id === 'snowy-friends') return 'panorama';
+    if (id === 'bedtime-play') return 'immersive';
+    if (id === 'treehouse-days') return 'vignette';
+    if (id === 'painted-memories') return 'art-left';
+    if (id === 'beanstalk-adventure') return 'panorama';
+    if (id === 'flower-festival') return 'vignette';
+    if (id === 'paper-play') return 'art-left';
+    if (id === 'little-explorers' || id === 'bedtime-skies') return 'immersive';
     return (['panorama', 'immersive', 'poetry', 'study'] as string[]).includes(id) ? id as Layout : 'art-right';
 }
 export type BookPage = {
