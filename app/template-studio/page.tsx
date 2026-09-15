@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { strToU8, zipSync } from 'fflate';
-import { templates, selectableTemplates, templateLayout, templateAppearanceCss, parseTemplateBook, bookPrompt, continuationPrompt, renderTemplateBook, assetName, type TemplateId, type BookPage } from '../../lib/template-book';
+import { templates, selectableTemplates, templateLayout, templateAppearanceCss, parseTemplateBook, importTemplateManuscript, bookPrompt, continuationPrompt, renderTemplateBook, assetName, type TemplateId, type BookPage } from '../../lib/template-book';
 import { readTemplateArchive } from '../../lib/template-archive';
 import './studio.css';
 import { validateBookArtwork, ARCHIVE_BYTES, IMAGE_BYTES } from '../../lib/template-capacity';
@@ -40,7 +40,15 @@ export default function TemplateStudio() {
     const [unmatched, setUnmatched] = useState<File[]>([]);
     const [assignment, setAssignment] = useState('');
     const writeQueue = useRef(Promise.resolve());
-    useEffect(() => { storage('read').then(setSaved).catch(() => setError('Browser storage could not be opened. Export a ZIP to keep your work.')).finally(() => setReady(true)); }, []);
+    useEffect(() => { storage('read').then(books => {
+        setSaved(books);
+        const bookId = new URLSearchParams(window.location.search).get('book');
+        if (bookId) {
+            const existing = books.find(book => book.id === bookId);
+            if (existing) { setDraft(existing); setStep(existing.book ? 2 : 1); }
+            else setError('This book is not available in this browser. Return to Book Studio and open it from your account library.');
+        }
+    }).catch(() => setError('Browser storage could not be opened. Export a ZIP to keep your work.')).finally(() => setReady(true)); }, []);
     useEffect(() => { if (!draft)
         return; writeQueue.current = writeQueue.current.catch(() => { }).then(async () => { setNotice('Saving…'); await storage('write', draft); setSaved(old => [...old.filter(v => v.id !== draft.id), draft]); setNotice(draft.cloud?.savedUpdated === draft.updated ? 'Saved to your account and this browser' : 'Saved in this browser' + (email ? ' · Save to account to sync changes' : '')); }).catch(() => { setNotice('Not saved'); setError('Could not save in browser storage. Download your working ZIP before closing.'); }); }, [draft, email]);
     async function refreshCloud() {
@@ -84,23 +92,20 @@ export default function TemplateStudio() {
     }
     function editPage(p: Partial<BookPage>) { if (book)
         patch({ book: { ...book, pages: book.pages.map((v, i) => i === selected ? { ...v, ...p } : v) } }); }
-    async function importFiles(files: File[]) {
+    async function importFiles(files: File[], asNewBook = false) {
         if (!draft)
             return;
         if(files.reduce((n,f)=>n+f.size,0)>ARCHIVE_BYTES)throw Error('Import batches must stay under 550 MB.');
-        let next = book;
+        const importId = asNewBook ? crypto.randomUUID() : draft.id;
+        let next = asNewBook ? undefined : book;
         const incoming: Record<string, Blob> = {};
         const extra: File[] = [];
         for (const file of files) {
             if (/\.zip$/i.test(file.name)) {
                 const archive = readTemplateArchive(new Uint8Array(await file.arrayBuffer()));
                 if (archive['book.json']) {
-                    const parsed = parseTemplateBook(JSON.parse(new TextDecoder().decode(archive['book.json'])), draft.id);
-                    if (parsed.templateId !== draft.templateId)
-                        throw Error('Package template does not match your selected template.');
-                    if (next && JSON.stringify(parsed) !== JSON.stringify(next))
-                        throw Error('A manuscript is already saved. Upload image batches only, or start a new workspace for a replacement manuscript.');
-                    next = parsed;
+                    const input = JSON.parse(new TextDecoder().decode(archive['book.json']));
+                    next = asNewBook ? { ...parseTemplateBook(input), projectId: importId } : importTemplateManuscript(input, draft.id, draft.templateId, next);
                 }
                 for (const [path, bytes] of Object.entries(archive))
                     if (path.startsWith('images/')) {
@@ -111,12 +116,7 @@ export default function TemplateStudio() {
             else if (/\.json$/i.test(file.name)) {
                 if (file.size > 2 * 1024 * 1024)
                     throw Error('Manuscript must be under 2 MB.');
-                const parsed = parseTemplateBook(JSON.parse(await file.text()), draft.id);
-                if (parsed.templateId !== draft.templateId)
-                    throw Error('Template mismatch.');
-                if (next && JSON.stringify(parsed) !== JSON.stringify(next))
-                    throw Error('Manuscript already saved. Start a new workspace to replace it.');
-                next = parsed;
+                next = importTemplateManuscript(JSON.parse(await file.text()), draft.id, draft.templateId, next);
             }
             else if (assetName(file.name)) {
                 incoming[file.name] = await imageBlob(file);
@@ -130,7 +130,7 @@ export default function TemplateStudio() {
         }
         if (!next)
             throw Error('Import the manuscript first, or include book.json in this ZIP.');
-        const images = { ...draft.images };
+        const images = asNewBook ? {} as Record<string, Blob> : { ...draft.images };
         for (const [name, blob] of Object.entries(incoming)) {
             if (next.pages.some(p => p.image === name) || name === 'character-reference.png')
                 images[name] = blob;
@@ -138,15 +138,48 @@ export default function TemplateStudio() {
                 extra.push(new File([blob], name, { type: blob.type }));
         }
         validateBookArtwork(images);
-        patch({ book: next, images });
-        setUnmatched(u => [...u, ...extra]);
+        if (asNewBook) {
+            await writeQueue.current;
+            await storage('write', draft);
+            const imported: Draft = { id: importId, book: next, templateId: next.templateId, title: next.title, language: next.language, images, updated: Date.now() };
+            await storage('write', imported);
+            setDraft(imported);
+            setUnmatched(extra);
+        } else {
+            patch({ book: next, title: next.title, language: next.language, images });
+            setUnmatched(u => [...u, ...extra]);
+        }
         setSelected(0);
         setStep(2);
+        setNotice(`Imported ${next.pages.length} spreads · ${next.pages.filter(p => images[p.image]).length} illustrations placed`);
     }
     async function openPreview() { if (!book || !draft)
         return; const urls: Record<string, string> = {}; for (const [name, blob] of Object.entries(draft.images))
         urls[name] = await new Promise<string>((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result)); r.onerror = () => reject(r.error); r.readAsDataURL(blob); }); const font = await fetch('/fonts/book-sanskrit.ttf'); if (!font.ok)
         throw Error('Book font could not load.'); const fontBlob = await font.blob(); const data = await new Promise<string>((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result)); r.onerror = () => reject(r.error); r.readAsDataURL(fontBlob); }); setPreview(renderTemplateBook(book, urls, data)); }
+    async function downloadPdf() {
+        const doc = previewFrame.current?.contentDocument;
+        if (!doc || !book) throw Error('Open the book preview before downloading a PDF.');
+        const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import('html2canvas'), import('jspdf')]);
+        await doc.fonts.ready;
+        await Promise.all(Array.from(doc.images).map(image => image.decode()));
+        const style = doc.createElement('style');
+        style.textContent = '.spread{zoom:1!important}';
+        doc.head.appendChild(style);
+        try {
+            const spreads = Array.from(doc.querySelectorAll<HTMLElement>('.spread'));
+            const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [420, 250], compress: true });
+            for (let i = 0; i < spreads.length; i++) {
+                setNotice(`Preparing PDF: ${i + 1} of ${spreads.length} pages`);
+                const canvas = await html2canvas(spreads[i], { scale: 1.5, backgroundColor: null, logging: false, windowWidth: 1800, windowHeight: 1200 });
+                if (i) pdf.addPage([420, 250], 'landscape');
+                pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, 420, 250);
+                canvas.width = 0; canvas.height = 0;
+            }
+            download(`${book.title.replace(/[^a-zA-Z0-9_-]+/g, '-')}.pdf`, pdf.output('blob'));
+            setNotice('PDF downloaded — landscape pages, one spread per page');
+        } finally { style.remove(); }
+    }
     async function exportZip() { if (!book || !draft)
         return; const entries: Record<string, Uint8Array> = { 'book.json': strToU8(JSON.stringify(book, null, 2)), 'manuscript.md': strToU8(`# ${book.title}\n\n` + book.pages.map(p => `## ${p.title}\n\n${p.original}\n\n${p.meaning}\n\nSource: ${p.sourceReference}`).join('\n\n')), 'README.txt': strToU8('WORKING EDITABLE BOOK\nOpen preview.html in a browser to read or Print > Save as PDF. Text is editable for printing; save permanent changes in Book Studio. Reimport book.json and images in the matching workspace. Original text and explanations are separate. Layout/font/scale settings are in book.json. Paintings are raster assets, not editable vectors. Review original text, overflow and effective image resolution before publication. Template sample art is not included.\nMissing images: ' + book.pages.filter(p => !draft.images[p.image]).map(p => p.image).join(', ')) }; const urls: Record<string, string> = {}; for (const [name, blob] of Object.entries(draft.images)) {
         entries['images/' + name] = new Uint8Array(await blob.arrayBuffer());
@@ -167,10 +200,10 @@ export default function TemplateStudio() {
         } validateBookArtwork(images); setDraft({ id, templateId: restored.templateId, title: restored.title, language: restored.language, book: restored, images, updated: Date.now() }); setSelected(0); setStep(2); }); }}/></label>{!ready ? <p>Loading…</p> : saved.length === 0 ? <p>Your books will appear here. Saved on this browser; download a ZIP for backup.</p> : [...saved].sort((a, b) => b.updated - a.updated).map(d => <button className="ts-saved" key={d.id} onClick={() => { setDraft(d); setStep(d.book ? 2 : 1); setSelected(0); setUnmatched([]); }}>{d.book?.title || d.title} · {d.book?.pages.length || 0} spreads</button>)}{draft && <button onClick={() => { setDraft(undefined); storage('read').then(setSaved).catch(() => { }); }}>Start another book</button>}</section></>}
  {step === 1 && draft && <section className="ts-source"><div><p>{template.name.toUpperCase()}</p><h1>Bring the words.<br />We’ll prepare the direction.</h1><p>Your source saves in this browser and is included when you save the book to your account. Attach it to ChatGPT with the prompt, or download the request ZIP containing both.</p><label>Book title<input value={draft.title} onChange={e => patch({ title: e.target.value })}/></label><label>Language and meanings<input value={draft.language} onChange={e => patch({ language: e.target.value })}/></label><label className="ts-upload">{draft.source?.name || 'Choose your PDF or DOCX'}<input disabled={busy} type="file" accept=".pdf,.docx" onChange={e => { const f = e.target.files?.[0]; if (f)
         void run(async () => { if (!/\.(pdf|docx)$/i.test(f.name) || f.size > 20 * 1024 * 1024)
-            throw Error('Choose a PDF or DOCX under 20 MB.'); patch({ source: f }); }); }}/></label><p className="ts-help">No automatic source rewriting or paid generation. Old-font PDFs must be read visually and checked by the external AI.</p></div><div className="ts-panel"><h2>Your detailed book prompt</h2><textarea aria-label="Detailed book prompt" readOnly value={prompt}/><div className="ts-actions"><button disabled={!draft.source || !draft.title.trim() || busy} onClick={() => void run(async () => { await navigator.clipboard.writeText(prompt); setNotice('Prompt copied. Attach your source in ChatGPT.'); })}>Copy prompt</button><button disabled={!draft.source || busy} onClick={() => void run(async () => { download('Book-Request.zip', new Blob([new Uint8Array(zipSync({ 'START-HERE.txt': strToU8(prompt), ['source/' + draft.source!.name]: new Uint8Array(await draft.source!.arrayBuffer()) }))], { type: 'application/zip' })); })}>Download request ZIP</button><a href="https://chatgpt.com/" target="_blank" rel="noreferrer">Open ChatGPT ↗</a></div><p>Ask ChatGPT to read the request and attached source. Bring back its manuscript first; illustrations can follow later.</p><label className="ts-upload">Import ChatGPT’s ZIP or book.json<input disabled={busy} type="file" accept=".zip,.json" onChange={e => { const files = Array.from(e.target.files || []); e.target.value = ''; void run(() => importFiles(files)); }}/></label><details><summary>ChatGPT returned text instead of a file?</summary><textarea aria-label="Paste book JSON" value={pasted} onChange={e => setPasted(e.target.value)}/><button disabled={busy || !pasted.trim()} onClick={() => void run(() => importFiles([new File([pasted.replace(/^```(?:json)?\s*|\s*```$/g, '')], 'book.json')]))}>Import pasted response</button></details></div></section>}
- {step === 2 && draft && book && <><div className="ts-bookbar"><div><h1>{book.title}</h1><p>{done} of {book.pages.length} illustrations added · {book.pages.length} editable spreads</p></div><div className="ts-actions"><button disabled={busy} onClick={() => void run(openPreview)}>Read book</button><button disabled={busy} onClick={() => void run(exportZip)}>Download editable ZIP</button></div></div><progress value={done} max={book.pages.length}/><p className="ts-help">Artwork: {(Object.values(draft.images).reduce((n, image) => n + image.size, 0) / 1024 / 1024).toFixed(1)} MB of 512 MB · Up to 25 MB per image. Original image quality is preserved.</p><section className="ts-importbar"><label className="ts-upload">Add image batch or ZIP<input disabled={busy} type="file" multiple accept=".zip,.png,.jpg,.jpeg,.webp" onChange={e => { const files = Array.from(e.target.files || []); e.target.value = ''; void run(() => importFiles(files)); }}/></label><button disabled={busy || done === book.pages.length} onClick={() => void run(async () => { await navigator.clipboard.writeText(continuationPrompt(book, names)); setNotice('Continuation prompt copied. Use the same ChatGPT conversation and character reference.'); })}>Copy missing-artwork prompt</button><button disabled={busy || done === book.pages.length} onClick={() => download('Continue-artwork.txt', new Blob([continuationPrompt(book, names)], { type: 'text/plain' }))}>Download prompt</button></section>{unmatched.length > 0 && <section className="ts-panel"><h2>Match downloaded images</h2><p>ChatGPT sometimes changes filenames. Choose where each image belongs.</p><PreviewImage blob={unmatched[0]} alt={unmatched[0].name}/><p>{unmatched[0].name} · {unmatched.length} to match</p><select aria-label="Image destination" value={assignment} onChange={e => setAssignment(e.target.value)}><option value="">Choose a destination</option><option value="character-reference.png">Character reference</option>{book.pages.map(p => <option key={p.id} value={p.image}>{p.title}{draft.images[p.image] ? ' (replace existing)' : ''}</option>)}</select><button disabled={!assignment || busy} onClick={() => { try { validateBookArtwork({ ...draft.images, [assignment]: unmatched[0] }); } catch (e) { setError(e instanceof Error ? e.message : 'Could not add artwork.'); return; } setError(''); patch({ images: { ...draft.images, [assignment]: unmatched[0] } }); setUnmatched(u => u.slice(1)); setAssignment(''); }}>Use image here</button><button onClick={() => setUnmatched(u => u.slice(1))}>Skip image</button></section>}
+            throw Error('Choose a PDF or DOCX under 20 MB.'); patch({ source: f }); }); }}/></label><p className="ts-help">No automatic source rewriting or paid generation. Old-font PDFs must be read visually and checked by the external AI.</p></div><div className="ts-panel"><h2>Your detailed book prompt</h2><textarea aria-label="Detailed book prompt" readOnly value={prompt}/><div className="ts-actions"><button disabled={!draft.source || !draft.title.trim() || busy} onClick={() => void run(async () => { await navigator.clipboard.writeText(prompt); setNotice('Prompt copied. Attach your source in ChatGPT.'); })}>Copy prompt</button><button disabled={!draft.source || busy} onClick={() => void run(async () => { download('Book-Request.zip', new Blob([new Uint8Array(zipSync({ 'START-HERE.txt': strToU8(prompt), ['source/' + draft.source!.name]: new Uint8Array(await draft.source!.arrayBuffer()) }))], { type: 'application/zip' })); })}>Download request ZIP</button><a href="https://chatgpt.com/" target="_blank" rel="noreferrer">Open ChatGPT ↗</a></div><p>Ask ChatGPT to read the request and attached source. The prompt asks ChatGPT to generate every illustration in one go and return one ZIP. Upload that ZIP below to place the whole book at once. If generation limits interrupt it, import the finished work and request the missing images.</p><label className="ts-upload">Import ChatGPT’s ZIP or book.json<input disabled={busy} type="file" accept=".zip,.json" onChange={e => { const files = Array.from(e.target.files || []); e.target.value = ''; void run(() => importFiles(files)); }}/></label><details><summary>ChatGPT returned text instead of a file?</summary><textarea aria-label="Paste book JSON" value={pasted} onChange={e => setPasted(e.target.value)}/><button disabled={busy || !pasted.trim()} onClick={() => void run(() => importFiles([new File([pasted.replace(/^```(?:json)?\s*|\s*```$/g, '')], 'book.json')]))}>Import pasted response</button></details></div></section>}
+ {step === 2 && draft && book && <><div className="ts-bookbar"><div><h1>{book.title}</h1><p>{done} of {book.pages.length} illustrations added · {book.pages.length} editable spreads</p></div><div className="ts-actions"><button disabled={busy} onClick={() => void run(openPreview)}>Read book</button><button disabled={busy} onClick={() => void run(exportZip)}>Download editable ZIP</button></div></div><progress value={done} max={book.pages.length}/><p className="ts-help">Artwork: {(Object.values(draft.images).reduce((n, image) => n + image.size, 0) / 1024 / 1024).toFixed(1)} MB of 512 MB · Up to 25 MB per image. Original image quality is preserved.</p><section className="ts-importbar"><label className="ts-upload">Import ZIP as a separate book<input disabled={busy} type="file" accept=".zip" onChange={e => { const files = Array.from(e.target.files || []); e.target.value = ''; if (files.length) void run(() => importFiles(files, true)); }}/></label><label className="ts-upload">Upload all images ZIP<input disabled={busy} type="file" multiple accept=".zip,.png,.jpg,.jpeg,.webp" onChange={e => { const files = Array.from(e.target.files || []); e.target.value = ''; void run(() => importFiles(files)); }}/></label><button disabled={busy || done === book.pages.length} onClick={() => void run(async () => { await navigator.clipboard.writeText(continuationPrompt(book, names)); setNotice('All-images ZIP prompt copied. Use the same ChatGPT conversation and character reference.'); })}>Copy all missing images prompt</button><button disabled={busy || done === book.pages.length} onClick={() => download('Generate-All-Images.txt', new Blob([continuationPrompt(book, names)], { type: 'text/plain' }))}>Download images prompt</button><p className="ts-help">Send this prompt in your book’s ChatGPT conversation. It requests all remaining pictures in one downloadable ZIP. Upload it here: exact filenames inside images/ place each picture automatically. Generation limits may require a continuation.</p></section>{unmatched.length > 0 && <section className="ts-panel"><h2>Match downloaded images</h2><p>ChatGPT sometimes changes filenames. Choose where each image belongs.</p><PreviewImage blob={unmatched[0]} alt={unmatched[0].name}/><p>{unmatched[0].name} · {unmatched.length} to match</p><select aria-label="Image destination" value={assignment} onChange={e => setAssignment(e.target.value)}><option value="">Choose a destination</option><option value="character-reference.png">Character reference</option>{book.pages.map(p => <option key={p.id} value={p.image}>{p.title}{draft.images[p.image] ? ' (replace existing)' : ''}</option>)}</select><button disabled={!assignment || busy} onClick={() => { try { validateBookArtwork({ ...draft.images, [assignment]: unmatched[0] }); } catch (e) { setError(e instanceof Error ? e.message : 'Could not add artwork.'); return; } setError(''); patch({ images: { ...draft.images, [assignment]: unmatched[0] } }); setUnmatched(u => u.slice(1)); setAssignment(''); }}>Use image here</button><button onClick={() => setUnmatched(u => u.slice(1))}>Skip image</button></section>}
  <div className="ts-editor"><aside>{book.pages.map((p, i) => <button key={p.id} aria-current={i === selected ? 'page' : undefined} onClick={() => setSelected(i)}><PreviewImage blob={draft.images[p.image]} alt={p.title}/><span>{i + 1}. {p.title}</span></button>)}</aside>{page && <section className="ts-panel"><div className={'ts-live ' + page.layout + ' ' + template.id + ' composition-' + page.layout} style={{ background: template.paper, color: template.ink }}><div className="copy"><h2>{page.title}</h2><p style={{fontSize:`${page.fontSize * .6}px`}}>{page.original}</p><small className="meaning">{page.meaning}</small></div><div className="art" style={{ padding: page.layout === 'vignette' ? '8%' : undefined }}><div style={{ width: `${page.imageScale}%` }}><PreviewImage blob={draft.images[page.image]} alt={page.scene}/></div></div></div><div className="ts-fields"><label>Spread title<input value={page.title} onChange={e => editPage({ title: e.target.value })}/></label><label>Composition<select value={page.layout} onChange={e => editPage({ layout: e.target.value as BookPage['layout'] })}><option value="art-right">Artwork right</option><option value="art-left">Artwork left</option><option value="vignette">Quiet vignette</option><option value="panorama">Panorama & reading band</option><option value="immersive">Painting with text inset</option><option value="poetry">Poetry & small artwork</option><option value="study">Art strip & commentary columns</option></select></label><label>Original text<textarea value={page.original} onChange={e => editPage({ original: e.target.value })}/></label><label>Meaning / explanation<textarea value={page.meaning} onChange={e => editPage({ meaning: e.target.value })}/></label><label>Text size: {page.fontSize} pt<input type="range" min="14" max="32" value={page.fontSize} onChange={e => editPage({ fontSize: Number(e.target.value) })}/></label><label>Artwork scale: {page.imageScale}%<input type="range" min="40" max="100" value={page.imageScale} onChange={e => editPage({ imageScale: Number(e.target.value) })}/></label><label>Scene prompt<textarea value={page.scene} onChange={e => editPage({ scene: e.target.value })}/></label><label>Source reference<input value={page.sourceReference} onChange={e => editPage({ sourceReference: e.target.value })}/></label></div><p className="ts-help">Edits save automatically. Check original wording against your source. Read the book to check fit before exporting. This is a working proof, not an approved print release.</p></section>}</div></>}
- {preview && <div className="ts-preview" role="dialog" aria-label="Book reading preview"><div className="ts-actions"><button onClick={() => setPreview('')}>Close book preview</button><button onClick={() => previewFrame.current?.contentWindow?.print()}>Print / Save PDF</button><span>{proofWarnings.length ? proofWarnings.join(' · ') : 'Working proof. Check wording and page layout before printing.'}</span></div><iframe ref={previewFrame} title="Your assembled book" sandbox="allow-same-origin allow-modals" srcDoc={preview} onLoad={() => { void (async () => { const doc = previewFrame.current?.contentDocument; if (!doc)
+ {preview && <div className="ts-preview" role="dialog" aria-label="Book reading preview"><div className="ts-actions"><button onClick={() => setPreview('')}>Close book preview</button><button disabled={busy} onClick={() => void run(downloadPdf)}>{busy ? 'Preparing PDF…' : 'Download PDF'}</button><button disabled={busy} onClick={() => previewFrame.current?.contentWindow?.print()}>Print options</button><span role="status">{busy ? notice : 'PDF download uses the correct landscape size automatically. PDF pages are flattened; keep the editable ZIP for editing.'}</span>{proofWarnings.length > 0 && <details className="ts-proof-notes"><summary>{proofWarnings.length} print-quality notes — review details</summary><p>Lower-resolution artwork can look soft in a large print. This does not prevent reading or downloading. Larger original images are needed for sharper printing.</p>{proofWarnings.map((warning, i) => <p key={i}>{warning}</p>)}</details>}</div><iframe ref={previewFrame} title="Your assembled book" sandbox="allow-same-origin allow-modals" srcDoc={preview} onLoad={() => { void (async () => { const doc = previewFrame.current?.contentDocument; if (!doc)
         return; await doc.fonts.ready; await Promise.all(Array.from(doc.images).map(i => i.decode().catch(() => { }))); const warnings: string[] = []; doc.querySelectorAll<HTMLElement>('.copy').forEach((el, i) => { if (el.scrollHeight > el.clientHeight + 2)
         warnings.push(`Spread ${i + 1}: text overflow; reduce text size or split content`); }); doc.querySelectorAll<HTMLImageElement>('.art img').forEach((im, i) => { if (!im.naturalWidth)
         warnings.push(`Image ${i + 1} did not load`);

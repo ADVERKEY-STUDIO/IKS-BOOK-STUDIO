@@ -1,0 +1,46 @@
+.book-account.account-card {
+  padding:28px;
+  gap:24px;
+  border:1px solid #d4dacf;
+  border-radius:10px;
+  background:#f5f7f2;
+  color:#243e35;
+}
+.book-account .account-intro { display:flex; align-items:center; gap:18px; flex:1; min-width:240px; }
+.book-account .account-monogram { display:grid; place-items:center; flex:0 0 48px; height:48px; border:1px solid #cbd5c7; border-radius:50%; background:#e8eee3; color:#244737; font:24px Georgia,serif; }
+.book-account .account-eyebrow { display:block; font:9px/1.4 Arial,sans-serif; letter-spacing:.14em; color:#52694e; margin-bottom:7px; }
+.book-account.account-card .account-intro strong { display:block; font:normal 24px/1.2 Georgia,serif; }
+.book-account.account-card .account-intro p { font:13px/1.6 Arial,sans-serif; color:#5b685e; max-width:410px; margin:9px 0 0; }
+.book-account .account-email { display:block; margin-top:8px; font-size:14px; font-weight:600; overflow-wrap:anywhere; }
+.book-account.account-card .book-account-actions { gap:9px; max-width:440px; }
+.book-account.account-card button { min-height:42px; font-size:13px; border-radius:5px; transition:background .15s; }
+.book-account.account-card button:disabled { cursor:default; opacity:.55; }
+.book-account.account-card .account-google { background:#fff; border:1px solid #b9c6b6; padding:12px 18px; font-weight:600; }
+.book-account.account-card .account-email-button,.book-account.account-card .account-submit { background:#234735; color:#fff; border:1px solid #234735; padding:12px 18px; }
+.book-account.account-card .account-email-button:hover,.book-account.account-card .account-submit:hover { background:#183727; }
+.book-account.account-card .account-create { background:transparent; border-color:transparent; text-decoration:underline; text-underline-offset:4px; }
+.book-account.account-card .account-session-actions { justify-content:flex-end; }
+.book-account.account-card .book-account-form { display:grid; grid-template-columns:1fr 1fr auto; gap:18px; padding-top:24px; border-top:1px solid #d4dacf; margin:0; align-items:end; }
+.book-account .account-form-heading { grid-column:1/-1; }
+.book-account .account-form-heading h3 { font:normal 22px Georgia,serif; margin:0 0 6px; }
+.book-account .account-form-heading p { margin:0; font-size:13px; color:#5b685e; }
+.book-account.account-card .book-account-form label { margin:0; display:grid; gap:8px; font:13px Arial,sans-serif; }
+.book-account.account-card .book-account-form input { width:100%; min-width:0; height:46px; border:1px solid #b8c5b3; padding:12px; border-radius:5px; font:14px Arial,sans-serif; background:#fff; color:#243e35; }
+.book-account.account-card input::placeholder { color:#667360; }
+.book-account.account-card .account-text-action { border:0; padding:0; background:transparent; color:#36573e; justify-self:start; text-decoration:underline; text-underline-offset:3px; min-height:32px; }
+.book-account.account-card .account-feedback { flex-basis:100%; margin:0; padding:12px 16px; border-left:3px solid #688561; background:#e8eee3; font:13px/1.6 Arial,sans-serif; color:#2d4935; }
+.book-account.account-card :is(input,button):focus-visible { outline:3px solid #527349; outline-offset:3px; }
+@media(max-width:900px) {
+  .book-account.account-card .book-account-form { grid-template-columns:1fr 1fr; }
+  .book-account.account-card .account-submit { grid-column:1/-1; }
+}
+@media(max-width:600px) {
+  .book-account.account-card { padding:20px; gap:22px; }
+  .book-account .account-intro { min-width:0; align-items:flex-start; gap:13px; }
+  .book-account .account-monogram { flex-basis:38px; height:38px; font-size:20px; }
+  .book-account.account-card .account-intro strong { font-size:23px; }
+  .book-account.account-card .book-account-actions { width:100%; max-width:none; display:grid; grid-template-columns:1fr; }
+  .book-account.account-card .book-account-form { grid-template-columns:1fr; width:100%; gap:16px; }
+  .book-account.account-card .account-session-actions { display:flex; flex-wrap:wrap; justify-content:flex-start; }
+}
+@media(prefers-reduced-motion:reduce) { .book-account.account-card button { transition:none; } }

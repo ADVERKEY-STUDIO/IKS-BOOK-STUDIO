@@ -1,6 +1,8 @@
 "use client";
 
-import AccountPanel from "./components/account-panel";
+import SavedTemplateLibrary from "./components/saved-template-library";
+import TemplateCoverPreview from "./components/template-cover-preview";
+import "./home.css";
 import type { ArtUpload } from "./components/art-production-workspace";
 import { ChangeEvent, CSSProperties, forwardRef, MouseEvent as ReactMouseEvent, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { SourceBookOptions, SourceBookOptionsReview } from "./components/source-book-options";
@@ -14,8 +16,7 @@ import { jsPDF } from "jspdf";
 import type { ReferenceUpload } from "./components/visual-reference-workspace";
 import { EditionDesk } from "./components/edition-desk";
 import { newEdition, type Edition, type EditionAction } from "../lib/devotional-edition";
-import { BookInspirationGallery, InspirationShelf } from "./components/book-inspiration";
-import { applyInspiration, inspirationBrief, inspirationPaletteStyle, normalizeInspiration, type BookInspiration } from "../lib/book-inspiration";
+import { inspirationBrief, inspirationPaletteStyle, normalizeInspiration, type BookInspiration } from "../lib/book-inspiration";
 import { placeBookIllustrations } from "../lib/book-illustrations";
 import { renderBookPageCanvas } from "../lib/book-raster";
 import { measureBookContent, pageFlowHtml, paginateFlowBlocks, refreshBookPageNumbers, assertFlowPreserved, inspectBookPage } from "../lib/book-layout";
@@ -29,7 +30,7 @@ import { assignIllustrationsToReaderPages, buildExternalAiPrompt, buildExternalI
 import { assessPublication, chapterRequiresIllustration, paginateContents, pdfRasterSettings, readerSafeImageCaption, sanitizeReaderHtml, sanitizeReaderImageHtml, type ContentsEntry } from "../lib/publication";
 import { BOOK_FORMATS, DEFAULT_NEW_BOOK_FORMAT, LEGACY_BOOK_FORMAT, assessBookFormatPreview, bookFormat, bookFormatCapacityRatio, bookFormatCssVariables, isBookFormatId, type BookFormatId, type BookFormatPreviewResult, type BookPageMetric } from "../lib/book-format";
 
-type View = "edition" | "inspiration" | "dashboard" | "wizard" | "external" | "analysis" | "brief" | "editor";
+type View = "edition" | "dashboard" | "wizard" | "external" | "analysis" | "brief" | "editor";
 type EditorWorkspace = "designer" | "workflow";
 
 type SourceSection = { title: string; page: number; excerpt: string };
@@ -1427,8 +1428,6 @@ function printableChapters(chapters: Chapter[]) {
 
 export default function Home() {
   const [view, setView] = useState<View>("dashboard");
-  const [inspirationReturn, setInspirationReturn] = useState<View>("dashboard");
-  const [inspirationProjectId, setInspirationProjectId] = useState<string>();
   const [project, setProject] = useState<Project>(seedProject);
   const [projects, setProjects] = useState<Project[]>([seedProject]);
   const [activeChapter, setActiveChapter] = useState(1);
@@ -1505,27 +1504,6 @@ export default function Home() {
     if (designChanged || "bookPersona" in patch) return { ...next, chapters: attachChapterVisuals(next, next.chapters) };
     return next;
   });
-
-  async function openInspiration() {
-    if (view === "editor" && editorWorkspace === "designer") {
-      try { await designerStudioRef.current?.saveWholeBook(); }
-      catch (error) { notify(error instanceof Error ? error.message : "Save designer changes before opening inspiration."); return; }
-    }
-    setInspirationReturn(view);
-    setInspirationProjectId(view === "dashboard" ? undefined : project.id);
-    setView("inspiration");
-  }
-
-  async function saveInspiration(targetId: string, inspiration: BookInspiration, title: string) {
-    const target = targetId === "new"
-      ? { ...emptyProject, id: makeId(), title, editorialPreferences: [...designerPreferences], chapters: emptyProject.chapters.map(chapter => ({ ...chapter })) }
-      : targetId === project.id ? project : projects.find(item => item.id === targetId);
-    if (!target) throw new Error("That book is no longer available. Choose another project.");
-    const next = { ...target, ...applyInspiration(target.bookPersona, inspiration) };
-    await persistProject(next);
-    setInspirationProjectId(next.id);
-    if (targetId === "new") { setWizardStep(0); setEditorWorkspace("workflow"); setView("wizard"); }
-  }
 
   async function startEdition() {
     const next = { ...emptyProject, id: makeId(), title: "Untitled devotional edition", edition: newEdition(), chapters: [] };
@@ -2726,10 +2704,9 @@ OUTPUT REQUIREMENTS
     else openPreview();
   }
 
-  if (view === "edition" && project.edition) return <EditionDesk onSnapshot={async final=>{const response=await fetch(`/api/edition/release-snapshot?projectId=${encodeURIComponent(project.id)}&revision=${project.edition!.revision}&final=${final}`,{headers:ownerHeaders()});const data=await response.json();if(!response.ok)throw new Error(data.error||"Snapshot unavailable.");return data.edition;}} onBackup={async()=>{const response=await fetch(`/api/edition/backup?projectId=${encodeURIComponent(project.id)}&revision=${project.edition!.revision}`,{headers:ownerHeaders()});if(!response.ok){const data=await response.json();throw new Error(data.error||"Backup unavailable.");}return response.blob();}} onRestore={async file=>{if(file.size>42*1024*1024)throw new Error("Backup exceeds 42 MB.");const response=await fetch('/api/edition/restore',{method:'POST',headers:ownerHeaders(),body:file});const data=await response.json();if(!response.ok)throw new Error(data.error||"Restore failed.");setProjects(current=>[data.project,...current]);setProject(data.project);}} onArtUpload={async input=>{if(input.file.size>10*1024*1024)throw new Error("Choose an image up to 10 MB.");const bitmap=await createImageBitmap(input.file);const oversized=bitmap.width*bitmap.height>64000000;bitmap.close();if(oversized)throw new Error("Image exceeds 64 megapixels.");await editionRequest(undefined,input.file,undefined,input);}} onArtPackage={async id=>{const response=await fetch(`/api/edition/art-package?projectId=${encodeURIComponent(project.id)}&requestId=${encodeURIComponent(id)}`,{headers:ownerHeaders()});if(!response.ok){const data=await response.json() as {error?:string};throw new Error(data.error||"Package unavailable.");}const url=URL.createObjectURL(await response.blob());const a=document.createElement("a");a.href=url;a.download=`art-request-${id}.zip`;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}} key={project.id} edition={project.edition} onReferenceUpload={async input => { if (input.file.size > 10 * 1024 * 1024) throw new Error("Choose an image up to 10 MB."); let bitmap: ImageBitmap; try { bitmap = await createImageBitmap(input.file); } catch { throw new Error("This image could not be decoded. Use a valid PNG, JPEG, or WebP file."); } const oversized = bitmap.width * bitmap.height > 64000000; bitmap.close(); if (oversized) throw new Error("Use a reference image up to 64 megapixels."); await editionRequest(undefined, input.file, input); }} onReferenceImage={async key => { const response = await fetch(`/api/edition/reference-asset?projectId=${encodeURIComponent(project.id)}&key=${encodeURIComponent(key)}`, { headers: ownerHeaders() }); if (!response.ok) throw new Error("Reference image unavailable."); return response.blob(); }} onReferencePackage={async id => { const response = await fetch(`/api/edition/reference-package?projectId=${encodeURIComponent(project.id)}&referenceId=${encodeURIComponent(id)}`, { headers: ownerHeaders() }); if (!response.ok) { const error = await response.json() as { error?: string }; throw new Error(error.error || "Could not build reference package."); } const url = URL.createObjectURL(await response.blob()); const a = document.createElement("a"); a.href = url; a.download = `reference-${id}.zip`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 30000); }} inspiration={project.inspiration} onInspiration={() => void openInspiration()} onBrief={async () => { const response = await fetch(`/api/edition/art-brief?projectId=${encodeURIComponent(project.id)}`, { headers: ownerHeaders() }); if (!response.ok) { const data = await response.json() as { error?: string }; throw new Error(data.error || "Approve the current art guide before production."); } return response.text(); }} onBack={() => setView("dashboard")} onAction={action => editionRequest(action)} onUpload={file => editionRequest(undefined, file)} onReload={async () => { const response = await fetch(`/api/edition?projectId=${encodeURIComponent(project.id)}`, { headers: ownerHeaders() }); const data = await response.json() as { project: Project; error?: string }; if (!response.ok) throw new Error(data.error); setProject(data.project); setProjects(current => [data.project, ...current.filter(p => p.id !== data.project.id)]); }} onDownload={async (key, name) => { const response = await fetch(`/api/source/download?key=${encodeURIComponent(key)}`, { headers: ownerHeaders() }); if (!response.ok) throw new Error("Could not retrieve original source."); const url = URL.createObjectURL(await response.blob()); const a = document.createElement("a"); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 30000); }} onExport={async () => { const response = await fetch(`/api/edition/export?projectId=${encodeURIComponent(project.id)}`, { headers: ownerHeaders() }); if (!response.ok) { const data = await response.json() as { error?: string }; throw new Error(data.error || "Review the edition before export."); } return response.text(); }}/>;
-  if (view === "inspiration") return <BookInspirationGallery projects={[project, ...projects.filter(item => item.id !== project.id)]} initialProjectId={inspirationProjectId} onBack={() => setView(inspirationReturn)} onApply={saveInspiration}/>;
+  if (view === "edition" && project.edition) return <EditionDesk onSnapshot={async final=>{const response=await fetch(`/api/edition/release-snapshot?projectId=${encodeURIComponent(project.id)}&revision=${project.edition!.revision}&final=${final}`,{headers:ownerHeaders()});const data=await response.json();if(!response.ok)throw new Error(data.error||"Snapshot unavailable.");return data.edition;}} onBackup={async()=>{const response=await fetch(`/api/edition/backup?projectId=${encodeURIComponent(project.id)}&revision=${project.edition!.revision}`,{headers:ownerHeaders()});if(!response.ok){const data=await response.json();throw new Error(data.error||"Backup unavailable.");}return response.blob();}} onRestore={async file=>{if(file.size>42*1024*1024)throw new Error("Backup exceeds 42 MB.");const response=await fetch('/api/edition/restore',{method:'POST',headers:ownerHeaders(),body:file});const data=await response.json();if(!response.ok)throw new Error(data.error||"Restore failed.");setProjects(current=>[data.project,...current]);setProject(data.project);}} onArtUpload={async input=>{if(input.file.size>10*1024*1024)throw new Error("Choose an image up to 10 MB.");const bitmap=await createImageBitmap(input.file);const oversized=bitmap.width*bitmap.height>64000000;bitmap.close();if(oversized)throw new Error("Image exceeds 64 megapixels.");await editionRequest(undefined,input.file,undefined,input);}} onArtPackage={async id=>{const response=await fetch(`/api/edition/art-package?projectId=${encodeURIComponent(project.id)}&requestId=${encodeURIComponent(id)}`,{headers:ownerHeaders()});if(!response.ok){const data=await response.json() as {error?:string};throw new Error(data.error||"Package unavailable.");}const url=URL.createObjectURL(await response.blob());const a=document.createElement("a");a.href=url;a.download=`art-request-${id}.zip`;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}} key={project.id} edition={project.edition} onReferenceUpload={async input => { if (input.file.size > 10 * 1024 * 1024) throw new Error("Choose an image up to 10 MB."); let bitmap: ImageBitmap; try { bitmap = await createImageBitmap(input.file); } catch { throw new Error("This image could not be decoded. Use a valid PNG, JPEG, or WebP file."); } const oversized = bitmap.width * bitmap.height > 64000000; bitmap.close(); if (oversized) throw new Error("Use a reference image up to 64 megapixels."); await editionRequest(undefined, input.file, input); }} onReferenceImage={async key => { const response = await fetch(`/api/edition/reference-asset?projectId=${encodeURIComponent(project.id)}&key=${encodeURIComponent(key)}`, { headers: ownerHeaders() }); if (!response.ok) throw new Error("Reference image unavailable."); return response.blob(); }} onReferencePackage={async id => { const response = await fetch(`/api/edition/reference-package?projectId=${encodeURIComponent(project.id)}&referenceId=${encodeURIComponent(id)}`, { headers: ownerHeaders() }); if (!response.ok) { const error = await response.json() as { error?: string }; throw new Error(error.error || "Could not build reference package."); } const url = URL.createObjectURL(await response.blob()); const a = document.createElement("a"); a.href = url; a.download = `reference-${id}.zip`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 30000); }} inspiration={project.inspiration} onBrief={async () => { const response = await fetch(`/api/edition/art-brief?projectId=${encodeURIComponent(project.id)}`, { headers: ownerHeaders() }); if (!response.ok) { const data = await response.json() as { error?: string }; throw new Error(data.error || "Approve the current art guide before production."); } return response.text(); }} onBack={() => setView("dashboard")} onAction={action => editionRequest(action)} onUpload={file => editionRequest(undefined, file)} onReload={async () => { const response = await fetch(`/api/edition?projectId=${encodeURIComponent(project.id)}`, { headers: ownerHeaders() }); const data = await response.json() as { project: Project; error?: string }; if (!response.ok) throw new Error(data.error); setProject(data.project); setProjects(current => [data.project, ...current.filter(p => p.id !== data.project.id)]); }} onDownload={async (key, name) => { const response = await fetch(`/api/source/download?key=${encodeURIComponent(key)}`, { headers: ownerHeaders() }); if (!response.ok) throw new Error("Could not retrieve original source."); const url = URL.createObjectURL(await response.blob()); const a = document.createElement("a"); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 30000); }} onExport={async () => { const response = await fetch(`/api/edition/export?projectId=${encodeURIComponent(project.id)}`, { headers: ownerHeaders() }); if (!response.ok) { const data = await response.json() as { error?: string }; throw new Error(data.error || "Review the edition before export."); } return response.text(); }}/>;
 
-  if (view === "dashboard") return <><AccountPanel reloadOnChange/><Dashboard onNewEdition={() => void startEdition()} onInspiration={() => void openInspiration()} projects={projects} onNew={startNewBook} onOpen={openProject} onDuplicate={duplicateProject} onDelete={deleteProject} /></>;
+  if (view === "dashboard") return <><Dashboard onNewEdition={() => void startEdition()} projects={projects} onNew={startNewBook} onOpen={openProject} onDuplicate={duplicateProject} onDelete={deleteProject} /></>;
 
   return (
     <div className="studio-shell">
@@ -2737,7 +2714,6 @@ OUTPUT REQUIREMENTS
         <button className="brand" onClick={() => setView("dashboard")}><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></button>
         <div className="current-project"><i /> <span><strong>{project.title}</strong><small>{project.source}</small></span></div>
         <div className="top-actions"><button onClick={saveProject} disabled={draftBusy || sourceBusy}>Save book</button>
-          <button className="inspiration-nav-button" onClick={() => void openInspiration()} disabled={draftBusy || sourceBusy}>Book inspiration</button>
           {view === "editor" && <><button className={editorWorkspace === "designer" ? "designer-nav-button active" : "designer-nav-button"} onClick={() => setEditorWorkspace("designer")}>{editorWorkspace === "workflow" ? "Return to Designer" : "Designer"}</button><button className="pdf-button" onClick={openWorkspacePreview}>Preview & PDF</button></>}
           {(view === "editor" || view === "brief") && <details className="advanced-tools"><summary>Advanced</summary><div>{view === "editor" && <><button onClick={() => void openProductionWorkflow("top")}>Production workflow</button><button onClick={() => void openProductionWorkflow("chapters")}>Chapters</button><button onClick={() => setShowReviewQueue(true)}>Review queue · {project.chapters.filter((chapter) => !isPublishApproved(chapter)).length || "complete"}</button><button onClick={() => void openProductionWorkflow("illustrations")}>Illustrations</button>{project.creationMode === "external" && <button onClick={() => setView("external")}>External illustration package</button>}<button onClick={() => setView("brief")}>Book plan</button></>}<label className="advanced-upload">{sourceBusy ? "Reading source…" : "Replace source book"}<input type="file" accept=".pdf,.docx,.txt,.md" disabled={sourceBusy || draftBusy} onChange={(event) => event.target.files?.[0] && refreshSource(event.target.files[0])}/></label>{project.sourceManifest && <button onClick={() => void openSourceReview()}>Review source images & Sanskrit</button>}<button onClick={openVersions}>Version history</button><button onClick={() => setShowOperations(true)}>Request history</button><button onClick={saveProject}>Save project now</button><button onClick={exportDoc} disabled={exportBusy}>{exportBusy ? "Preparing DOCX…" : "Download DOCX"}</button><button className="package-import-button" onClick={() => setShowPackageImport(true)}>ChatGPT ZIP workflow</button><small>Generation, review, source, versions and export tools</small></div></details>}
         </div>
@@ -2875,25 +2851,27 @@ function ThemeSwitcher(){
   const [theme,setTheme]=useState(()=>typeof window!=="undefined"?localStorage.getItem("iks-theme")||"original":"original");
   useEffect(()=>{if(theme==="original"){document.documentElement.removeAttribute("data-theme")}else{document.documentElement.setAttribute("data-theme",theme)} localStorage.setItem("iks-theme",theme)},[theme]);
   useEffect(()=>{const saved=typeof window!=="undefined"?localStorage.getItem("iks-theme"):null; if(saved && saved!=="original"){document.documentElement.setAttribute("data-theme",saved)}},[]);
-  return <div className="theme-switcher"><label>Theme</label><select value={theme} onChange={e=>setTheme((e.target as HTMLSelectElement).value)}><option value="original">Original Forest</option><option value="banyan">Banyan Library</option><option value="curious">Curious Lab</option><option value="scholar">Scholar&apos;s Desk</option></select></div>;
+  return <div className="theme-switcher"><label htmlFor="studio-theme">Theme</label><select id="studio-theme" value={theme} onChange={e=>setTheme((e.target as HTMLSelectElement).value)}><option value="original">Original Forest</option><option value="banyan">Banyan Library</option><option value="curious">Curious Lab</option><option value="scholar">Scholar&apos;s Desk</option></select></div>;
 }
 
-function Dashboard({ onNewEdition, projects, onNew, onOpen, onDuplicate, onDelete, onInspiration }: { onNewEdition: () => void; onInspiration: () => void; projects: Project[]; onNew: () => void; onOpen: (project: Project) => void; onDuplicate: (project: Project) => void; onDelete: (project: Project) => void }) {
-  return <main className="dashboard">
-    <header><div className="brand"><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></div><div style={{display:"flex",alignItems:"center",gap:"12px"}}><ThemeSwitcher/><a className="primary" href="/template-studio">Create from a template</a><button className="secondary" onClick={onNewEdition}>New devotional edition</button><button className="primary" onClick={onNew}>＋ New book</button></div></header>
-    <InspirationShelf onOpen={onInspiration}/>
+function Dashboard({ onNewEdition, projects, onNew, onOpen, onDuplicate, onDelete }: { onNewEdition: () => void; projects: Project[]; onNew: () => void; onOpen: (project: Project) => void; onDuplicate: (project: Project) => void; onDelete: (project: Project) => void }) {
+  return <main className="dashboard template-home">
+    <header><div className="brand"><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></div><div className="home-nav"><ThemeSwitcher/><a className="primary" href="/template-studio">Create from a template</a><button className="secondary" onClick={onNewEdition}>New devotional edition</button><button className="secondary" onClick={onNew}>＋ New book</button></div></header>
     <section className="hero">
-      <div><p className="eyebrow">CHILDREN’S ADAPTATION STUDIO</p><h1>Turn any source into a book<br/><em>children want to read.</em></h1><p className="hero-copy">Preserve every original chapter, then reshape the writing, activities and visual world for children aged 7–15.</p><button className="hero-cta" onClick={onNew}>Start a children’s adaptation <span>→</span></button><small>AGES 7–15 · PDF · DOCX · TXT · NATURAL LENGTH · 100-PAGE CEILING</small></div>
-      <div className="hero-books" aria-hidden="true"><div className="book back"><span>THE SOURCE</span></div><div className="book front"><span>A BOOK FOR</span><strong>CURIOUS<br/>YOUNG MINDS</strong><i>READ · DISCOVER · CREATE</i><b>✦</b></div></div>
+      <div><p className="eyebrow">CREATE FROM A TEMPLATE</p><h1>Books,<br/><em>made your way.</em></h1><p className="hero-copy">Choose a template, bring your source, and create your illustrated book.</p><a className="hero-cta" href="/template-studio">Create from a template <span>→</span></a></div>
+      <TemplateCoverPreview/>
     </section>
+    <section className="home-steps" aria-label="How template creation works"><div><span>01</span><div><h2>Choose your template</h2><p>Find a design that fits your words.</p></div></div><div><span>02</span><div><h2>Bring your source</h2><p>Add your document and prepare your prompt.</p></div></div><div><span>03</span><div><h2>Make it yours</h2><p>Assemble, edit, and export your book.</p></div></div></section>
     <section className="library-section">
-      <div className="section-title"><div><p className="eyebrow">YOUR LIBRARY</p><h2>Continue where you left off</h2></div><span>{projects.length} {projects.length === 1 ? "project" : "projects"}</span></div>
+      <div className="section-title"><div><h2>Continue where you left off</h2><p className="home-library-intro">Your books, ready for the next chapter.</p></div></div>
+      <SavedTemplateLibrary/>
+      <div className="saved-library-heading home-other-projects"><h3>Adaptations & devotional editions</h3><span>{projects.length} {projects.length === 1 ? "project" : "projects"}</span></div>
       <div className="project-grid">
         <button className="new-card" onClick={onNew}><b>＋</b><strong>New adaptation</strong><small>Begin with any source book</small></button>
         {projects.map((project) => <article className="project-card" key={project.id}><button className="project-open" onClick={() => onOpen(project)}><div className="mini-cover"><span>{project.edition ? project.edition.passages.filter(p => !p.retired).length : project.chapters.length}</span><small>{project.edition ? "PASSAGES" : "CHAPTERS"}</small></div><div><span className="status">IN EDITING</span><h3>{project.title}</h3><p>{project.edition ? `${project.edition.metadata.type} · ${project.edition.metadata.audience}` : project.source}</p><footer><span>{project.updatedAt}</span><strong>Open project →</strong></footer></div></button><div className="project-menu"><button onClick={() => onDuplicate(project)}>Duplicate</button>{project.id !== "arthashastra-sample" && <button onClick={() => onDelete(project)}>Delete</button>}</div></article>)}
       </div>
     </section>
-    <section className="workflow"><div><span>01</span><b>Upload</b><small>Any source book</small></div><i>→</i><div><span>02</span><b>Choose</b><small>Age, language and book world</small></div><i>→</i><div><span>03</span><b>Adapt</b><small>Child-friendly text and visuals</small></div><i>→</i><div><span>04</span><b>Publish</b><small>PDF or editable file</small></div></section>
+
   </main>;
 }
 

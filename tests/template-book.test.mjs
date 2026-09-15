@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {templates,selectableTemplates,templateLayout,parseTemplateBook,bookPrompt,continuationPrompt,renderTemplateBook} from '../lib/template-book.ts';
+import {templates,selectableTemplates,templateLayout,parseTemplateBook,importTemplateManuscript,bookPrompt,continuationPrompt,renderTemplateBook} from '../lib/template-book.ts';
 import {readTemplateArchive} from '../lib/template-archive.ts';
 import {zipSync,strToU8} from 'fflate';
 const fixture=()=>({format:'iks-template-book-v1',projectId:'test-book',templateId:'painted',title:'Devotion',language:'Awadhi',characterGuide:'Golden Hanuman',pages:[{id:'spread-01',title:'Invocation',original:'श्री गुरु चरन',meaning:'A prayer',sourceReference:'PDF page 1',scene:'Hanuman by a river',image:'spread-01.png',layout:'art-right',fontSize:22,imageScale:100},{id:'spread-02',title:'Courage',original:'जय हनुमान',meaning:'',sourceReference:'PDF page 2',scene:'Mountain flight',image:'spread-02.png',layout:'art-left',fontSize:22,imageScale:100}]});
@@ -47,4 +47,21 @@ test('chooser retires repetitive variants without breaking existing saved books'
   assert.equal(parseTemplateBook(input).templateId,id);
   assert.ok(renderTemplateBook(parseTemplateBook(input)).includes(`spread cover ${id}`));
  }
+});
+
+
+test('a fresh workspace accepts a manuscript from an earlier request without changing the source object',()=>{
+ const input=fixture();
+ const imported=importTemplateManuscript(input,'fresh-workspace','painted');
+ assert.equal(imported.projectId,'fresh-workspace');
+ assert.equal(input.projectId,'test-book');
+ assert.deepEqual(imported.pages,input.pages);
+});
+test('manuscript import preserves template and existing-book safeguards',()=>{
+ const input=fixture();
+ assert.throws(()=>importTemplateManuscript(input,'fresh-workspace','panorama'),/template/i);
+ assert.throws(()=>importTemplateManuscript(input,'fresh-workspace','painted',input),/another book/);
+ assert.deepEqual(importTemplateManuscript(input,'test-book','painted',input),input);
+ const changed=fixture();changed.pages[0].original='Changed verse';
+ assert.throws(()=>importTemplateManuscript(changed,'test-book','painted',input),/already saved/);
 });
