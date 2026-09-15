@@ -32,6 +32,9 @@ export default function SavedTemplateLibrary() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [opening, setOpening] = useState('');
+  const [deleting, setDeleting] = useState('');
+  const [removeCloud, setRemoveCloud] = useState(false);
+  const [notice, setNotice] = useState('');
   useEffect(() => {
     let active = true;
     const refresh = () => storage('read').then(books => { if (active) setLocal(books); }).catch(() => { if (active) setError('Your browser library could not be loaded. Reload to try again.'); }).finally(() => { if (active) setLoading(false); });
@@ -57,13 +60,32 @@ export default function SavedTemplateLibrary() {
       window.location.assign(`/template-studio?book=${encodeURIComponent(book.id)}`);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not open this book.'); setOpening(''); }
   }
+  async function deleteBook(draft: Draft | CloudBook, inBrowser: boolean) {
+    setOpening(draft.id); setError(''); setNotice('');
+    try {
+      const accountBook = cloudBooks.find(book => book.id === draft.id);
+      if ((!inBrowser || removeCloud) && accountBook) {
+        await cloudRequest(`/api/library/books?id=${encodeURIComponent(draft.id)}&revision=${accountBook.revision}`, { method: 'DELETE' });
+        setCloud(current => current ? { ...current, books: current.books.filter(book => book.id !== draft.id) } : current);
+      }
+      if (inBrowser) {
+        await storage('delete', draft as Draft);
+        setLocal(current => current.filter(book => book.id !== draft.id));
+      }
+      setDeleting(''); setNotice(`“${draft.title}” deleted.`);
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not delete this book.'); }
+    finally { setOpening(''); }
+  }
   return <div className="saved-template-library">
     <AccountPanel onSession={setEmail} reloadOnChange/>
     <div className="saved-library-heading"><h3>Your template books</h3><span>{loading ? 'Loading…' : `${books.length} ${books.length === 1 ? 'book' : 'books'}`}</span></div>
     {error && <p className="saved-library-error" role="alert">{error}</p>}
+    {notice && <p role="status">{notice}</p>}
     <div className="saved-template-grid">
       <a className="saved-template-new" href="/template-studio"><span aria-hidden="true">＋</span><strong>Create from a template</strong><p>A new design. Your next book.</p><span className="saved-new-arrow" aria-hidden="true">→</span></a>
       {books.map(({ draft, local: inBrowser }) => <article className="saved-template-card" key={draft.id}>
+        <button className="saved-delete-button" disabled={!!opening} aria-label={`Delete ${draft.title}`} onClick={() => { setDeleting(draft.id); setRemoveCloud(false); }}>Delete</button>
+        {deleting === draft.id && <div className="saved-delete-confirm" role="group" aria-label={`Confirm deletion of ${draft.title}`}><strong>Delete “{draft.title}”?</strong><p>{inBrowser ? 'This removes the saved book from this browser.' : 'This removes the saved book from your account.'} This cannot be undone. Other browser copies and downloaded files are kept.</p>{inBrowser && cloudBooks.some(book => book.id === draft.id) && <label><input type="checkbox" checked={removeCloud} onChange={event => setRemoveCloud(event.target.checked)} disabled={!!opening}/> Also delete the account copy</label>}<div><button disabled={!!opening} onClick={() => void deleteBook(draft, inBrowser)}>{opening === draft.id ? 'Deleting…' : 'Delete book'}</button><button disabled={!!opening} onClick={() => setDeleting('')}>Cancel</button></div></div>}
         <SavedCover draft={draft}/>
         <div className="saved-template-details"><span className="saved-location">{inBrowser ? 'Saved in this browser' : 'Saved to your account'}</span><h4>{draft.title}</h4><p>{templates.find(template => template.id === draft.templateId)?.name}{draft.book ? ` · ${draft.book.pages.length} spreads` : ' · Source & prompt'}</p><footer><time dateTime={new Date(draft.updated).toISOString()}>{new Date(draft.updated).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</time>{inBrowser ? <a href={`/template-studio?book=${encodeURIComponent(draft.id)}`}>Continue book <span aria-hidden="true">→</span></a> : <button disabled={!!opening} onClick={() => void openCloud(draft as CloudBook)}>{opening === draft.id ? 'Opening…' : 'Open book →'}</button>}</footer></div>
       </article>)}
