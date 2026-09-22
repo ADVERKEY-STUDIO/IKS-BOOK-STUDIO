@@ -69,3 +69,22 @@ test('manuscript import preserves template and existing-book safeguards',()=>{
  test('new children books include at least three distinct preview images', async()=>{const {childrenTemplates}=await import('../lib/children-templates.ts');for(const id of ['beanstalk-adventure','flower-festival']){const t=childrenTemplates.find(t=>t.id===id);assert.ok(t);assert.ok(new Set(t.images).size>=3);assert.ok(t.source.startsWith('https://'));}});
 
 test("five additional children templates have three interior text previews",async()=>{const {childrenTemplates}=await import("../lib/children-templates.ts");for(const id of ["snowy-friends","bedtime-play","treehouse-days","colourful-journey","painted-memories"]){const t=childrenTemplates.find(t=>t.id===id);assert.ok(t);assert.equal(new Set(t.images).size,3);assert.ok(!t.images.includes(t.demo));assert.match(t.previewLabel,/text & illustration/);}});
+
+test('storybook adventure renders integrated art rather than a panorama band',()=>{
+ const b=fixture(); b.templateId='beanstalk-adventure'; b.pages.forEach(p=>p.layout=templateLayout(b.templateId));
+ assert.equal(b.pages[0].layout,'story-scene');
+ const html=renderTemplateBook(parseTemplateBook(b));
+ assert.match(html,/spread story-scene beanstalk-adventure composition-story-scene/);
+ assert.match(bookPrompt('a',b.templateId,'Book','source.pdf','Hindi'),/Reserve x=7–43%, y=8–64%/);
+});
+test('continuation retains template art when character notes are supplied',()=>{
+ const b=fixture();b.templateId='beanstalk-adventure';b.pages.forEach(p=>p.layout='story-scene');
+ const prompt=continuationPrompt(parseTemplateBook(b),['spread-01.png'],'Keep the red scarf');
+ assert.match(prompt,/textured gouache/);assert.match(prompt,/Keep the red scarf/);assert.match(prompt,/story-scene/);
+ assert.doesNotMatch(prompt,/images\/spread-01.png/);
+});
+test('source request uses only its selected composition and retains art direction',async()=>{
+ const {sourceBookPrompt}=await import('../lib/visual-direction.ts');
+ const prompt=sourceBookPrompt({id:'book',templateId:'beanstalk-adventure',title:'Book',language:'Hindi',visualDirection:{audience:'Families',characters:'A child',notes:'Red scarf'}});
+ assert.match(prompt,/ART DIRECTION: Original children/);assert.match(prompt,/story-scene/);assert.doesNotMatch(prompt,/For Ocean discovery use panorama/);
+});
