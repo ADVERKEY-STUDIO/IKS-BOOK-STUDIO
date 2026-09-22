@@ -6,8 +6,8 @@ import { uploadDraft, downloadDraft } from '../lib/template-storage.ts';
 const fixture = () => ({ id:'chapter-test', templateId:'bedtime-skies', title:'Chanakya for kids', language:'Sanskrit, Hindi and English', source:new File(['chapter content'],'chapter.docx'), images:{}, references:{'reference-style.png':new Blob(['reference'],{type:'image/png'})}, visualDirection:{audience:'9–14',characters:'A boy, a girl and Chanakya',notes:'Soft textured painting, warm light'},updated:1 });
 test('request combines chapter and visual direction without treating references as pages',async()=>{
  const draft=fixture();const prompt=sourceBookPrompt(draft);
- for(const text of ['9–14','A boy, a girl and Chanakya','references/reference-style.png','character-reference.png','same sheet','single test chapter','separately labelled paragraphs','white text band']) assert.ok(prompt.includes(text),text);
- assert.doesNotMatch(prompt,/ART DIRECTION: Original children’s discovery/);
+ for(const text of ['9–14','A boy, a girl and Chanakya','references/reference-style.png','character-reference.png','same sheet','single test chapter','separately labelled paragraphs','separate white reading band']) assert.ok(prompt.includes(text),text);
+ assert.match(prompt,/ART DIRECTION: Original children’s discovery/);
  const entries=await sourceRequestEntries(draft);
  assert.deepEqual(Object.keys(entries).sort(),['START-HERE.txt','references/reference-style.png','source/chapter.docx']);
  assert.equal(new TextDecoder().decode(entries['references/reference-style.png']),'reference');
