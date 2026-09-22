@@ -1,3 +1,4 @@
+import { parseVisualDirection } from '../lib/visual-direction.ts';
 import { verifyClerkIdentity, clerkConfigured, type ClerkEnvironment } from './clerk-identity.ts';
 import { verifyFirebaseIdentity, firebaseConfigured, type FirebaseEnvironment } from './firebase-identity.ts';
 import { parseTemplateBook, templates } from '../lib/template-book.ts';
@@ -124,8 +125,17 @@ export async function libraryApi(request: Request, env: LibraryEnv, verify = fir
         const head = await env.BUCKET.head(prefix + data.source.hash);
         if (!head || head.size > 20 * 1024 * 1024) return reply({ error: 'Source upload missing or too large.' }, 400);
       }
+      const visualDirection = parseVisualDirection(data.visualDirection);
+      const references = data.references ?? {};
+      if (!references || typeof references !== 'object' || Array.isArray(references) || Object.keys(references).length > 3) return reply({ error: 'Choose up to three style references.' }, 400);
+      for (const [name, value] of Object.entries(references)) {
+        const asset = value as { hash: string; type: string };
+        if (!/^reference-[\w-]+\.(png|jpe?g|webp)$/i.test(name) || !asset || !/^[a-f0-9]{64}$/.test(asset.hash) || !['image/png', 'image/jpeg', 'image/webp'].includes(asset.type)) return reply({ error: 'Invalid style reference.' }, 400);
+        const head = await env.BUCKET.head(prefix + asset.hash);
+        if (!head || head.size > 25 * 1024 * 1024) return reply({ error: 'Style reference upload missing or too large.' }, 400);
+      }
       const revision = data.revision + 1;
-      const clean = { id: data.id, title: data.title, language: data.language, templateId: data.templateId, book: data.book, images: data.images, source: data.source, updated: Date.now() };
+      const clean = { id: data.id, title: data.title, language: data.language, templateId: data.templateId, book: data.book, visualDirection, references, images: data.images, source: data.source, updated: Date.now() };
       const result = data.revision === 0
         ? await env.DB.prepare('INSERT OR IGNORE INTO library_books(owner,id,revision,data) VALUES (?,?,?,?)').bind(owner, data.id, revision, JSON.stringify(clean)).run()
         : await env.DB.prepare('UPDATE library_books SET revision=?,data=? WHERE owner=? AND id=? AND revision=?').bind(revision, JSON.stringify(clean), owner, data.id, data.revision).run();

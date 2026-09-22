@@ -6,6 +6,7 @@ export function readTemplateArchive(bytes: Uint8Array): Record<string, Uint8Arra
         throw Error('ZIP must be under 550 MB.');
     const entries: Record<string, Uint8Array> = Object.create(null);
     let total = 0, count = 0;
+    let requestBundle = false;
     let failure: Error | undefined;
     const unzip = new Unzip(file => {
         if (failure)
@@ -16,6 +17,7 @@ export function readTemplateArchive(bytes: Uint8Array): Record<string, Uint8Arra
         }
         if (file.name.endsWith('/'))
             return;
+        if (file.name === 'START-HERE.txt') requestBundle = true;
         if (file.name.startsWith('/') || file.name.split(/[\\/]/).some(p => p === '..') || file.name.includes('\\')) {
             failure = Error('Unsafe archive path.');
             return;
@@ -52,5 +54,7 @@ export function readTemplateArchive(bytes: Uint8Array): Record<string, Uint8Arra
     unzip.push(bytes, true);
     if (failure)
         throw failure;
+    if (requestBundle && !entries['book.json'])
+        throw Error('This is a request for ChatGPT, not a completed book. Attach it in ChatGPT with the copied prompt. Then return here with the generated images or completed book ZIP.');
     return entries;
 }
