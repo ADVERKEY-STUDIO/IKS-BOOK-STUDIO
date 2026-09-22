@@ -1,5 +1,6 @@
+import type { VisualDirection } from './visual-direction';
 import type { TemplateBook, TemplateId } from './template-book';
-export type Draft = { id: string; templateId: TemplateId; title: string; language: string; source?: File; book?: TemplateBook; images: Record<string, Blob>; updated: number; cloud?: { email: string; revision: number; savedUpdated: number } };
+export type Draft = { id: string; templateId: TemplateId; title: string; language: string; source?: File; visualDirection?: VisualDirection; references?: Record<string, Blob>; book?: TemplateBook; images: Record<string, Blob>; updated: number; cloud?: { email: string; revision: number; savedUpdated: number } };
 export async function storage(mode: 'read' | 'write' | 'delete', value?: Draft): Promise<Draft[]> {
   const database = await new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open('iks-template-studio', 1);
@@ -16,7 +17,7 @@ export async function storage(mode: 'read' | 'write' | 'delete', value?: Draft):
   });
 }
 type Asset = { hash: string; type: string; name?: string };
-export type CloudBook = Omit<Draft, 'source' | 'images' | 'cloud'> & { revision: number; source?: Asset; images: Record<string, Asset> };
+export type CloudBook = Omit<Draft, 'source' | 'images' | 'references' | 'cloud'> & { revision: number; source?: Asset; references?: Record<string, Asset>; images: Record<string, Asset> };
 export async function cloudRequest(path: string, options?: RequestInit) {
   const response = await fetch(path, options);
   if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error || 'Cloud library is unavailable. Your browser copy is still here.'); }
@@ -61,8 +62,10 @@ export async function uploadDraft(draft: Draft, email: string): Promise<Draft> {
   }
   const images: Record<string, Asset> = {};
   for (const [name, blob] of Object.entries(draft.images)) images[name] = await upload(blob, name);
+  const references: Record<string, Asset> = {};
+  for (const [name, blob] of Object.entries(draft.references || {})) references[name] = await upload(blob, name);
   const source = draft.source ? { ...await upload(draft.source, draft.source.name), type: draft.source.type, name: draft.source.name } : undefined;
-  const response = await cloudRequest('/api/library/books', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...draft, images, source, cloud: undefined, revision: draft.cloud?.email === email ? draft.cloud.revision : 0 }) });
+  const response = await cloudRequest('/api/library/books', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...draft, images, references, source, cloud: undefined, revision: draft.cloud?.email === email ? draft.cloud.revision : 0 }) });
   const { revision } = await response.json();
   return { ...draft, cloud: { email, revision, savedUpdated: draft.updated } };
 }
@@ -70,6 +73,8 @@ export async function downloadDraft(book: CloudBook, email: string): Promise<Dra
   async function get(asset: Asset) { const response = await cloudRequest(`/api/library/asset?hash=${asset.hash}`); return new Blob([await response.arrayBuffer()], { type: asset.type }); }
   const images: Record<string, Blob> = {};
   for (const [name, asset] of Object.entries(book.images)) images[name] = await get(asset);
+  const references: Record<string, Blob> = {};
+  for (const [name, asset] of Object.entries(book.references || {})) references[name] = await get(asset);
   const source = book.source ? new File([await get(book.source)], book.source.name || 'source.pdf', { type: book.source.type }) : undefined;
-  return { ...book, images, source, cloud: { email, revision: book.revision, savedUpdated: book.updated } };
+  return { ...book, images, references, source, cloud: { email, revision: book.revision, savedUpdated: book.updated } };
 }
