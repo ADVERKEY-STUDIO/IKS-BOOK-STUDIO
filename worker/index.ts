@@ -1,3 +1,4 @@
+import { templateReferenceApi } from './template-reference';
 import { libraryApi, libraryUser, librarySchema, libraryOwner } from './library';
 import { bookReleaseApi } from './book-release';
 import { openReviewFindings, releaseReviewIssues, renderReviewCurrent } from '../lib/book-review';
@@ -1487,6 +1488,7 @@ const worker = {
     const url = new URL(request.url);
 
     try {
+      if (url.pathname === '/api/template-reference') return await templateReferenceApi(request);
       if (url.pathname.startsWith('/api/account/') || url.pathname.startsWith('/api/library/')) return await libraryApi(request, env);
       if (url.pathname.startsWith('/api/')) {
         await librarySchema(env);

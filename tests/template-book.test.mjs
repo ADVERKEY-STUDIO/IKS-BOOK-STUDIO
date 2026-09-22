@@ -75,7 +75,7 @@ test('storybook adventure renders integrated art rather than a panorama band',()
  assert.equal(b.pages[0].layout,'story-scene');
  const html=renderTemplateBook(parseTemplateBook(b));
  assert.match(html,/spread story-scene beanstalk-adventure composition-story-scene/);
- assert.match(bookPrompt('a',b.templateId,'Book','source.pdf','Hindi'),/Reserve x=7–43%, y=8–64%/);
+ assert.match(bookPrompt('a',b.templateId,'Book','source.pdf','Hindi'),/TEXT-SAFE REGIONS/);
 });
 test('continuation retains template art when character notes are supplied',()=>{
  const b=fixture();b.templateId='beanstalk-adventure';b.pages.forEach(p=>p.layout='story-scene');
