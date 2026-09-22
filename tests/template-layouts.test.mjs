@@ -136,3 +136,34 @@ test('reference ZIP includes the same detailed prompt and per-spread source mapp
  assert.match(spec.prompt,/Thin rough dark outlines/);
  assert.equal(spec.typography.exactReferenceFontVerified,false);
 });
+
+test('versioned import ignores obsolete composition metadata when its blueprint is valid',()=>{
+ const book=planTemplateBook(fixture());book.pages[0].blueprint='reference-beanstalk-diagonal';book.pages[0].composition='diagonal-two-scenes';
+ const parsed=parseTemplateBook(book);
+ assert.equal(parsed.pages[0].blueprint,'reference-beanstalk-diagonal');
+ assert.equal(parsed.pages[0].composition,undefined);
+ assert.equal(parsed.pages[0].original,book.pages[0].original);
+ assert.match(renderTemplatePage(parsed,0),/data-blueprint="reference-beanstalk-diagonal"/);
+});
+
+test('custom text positions survive import and render without changing words or other spreads',()=>{
+ const book=planTemplateBook(fixture()),before=structuredClone(book);
+ const boxes=plannedTextBlocks(book.pages[0],templateBlueprints(book.templateId)[0]);
+ book.pages[0].textPositions=boxes.map(({x,y,w,h})=>({x,y,w,h}));
+ book.pages[0].textPositions[0]={x:20,y:40,w:35,h:25};
+ const parsed=parseTemplateBook(JSON.parse(JSON.stringify(book)));
+ assert.deepEqual(parsed.pages[0].textPositions,book.pages[0].textPositions);
+ assert.equal(parsed.pages[0].original,before.pages[0].original);
+ assert.deepEqual(parsed.pages[1],before.pages[1]);
+ assert.match(renderTemplatePage(parsed,0),/left:20%;top:40%;width:35%;height:25%/);
+ assert.match(renderTemplateBook(parsed),/left:20%;top:40%;width:35%;height:25%/);
+ for(const invalid of [[{x:99,y:0,w:20,h:20}],boxes.map(()=>({x:0,y:0,w:NaN,h:20})),boxes.map(()=>({x:-1,y:0,w:20,h:20}))]){
+  assert.throws(()=>parseTemplateBook({...book,pages:[{...book.pages[0],textPositions:invalid}]}),/Text|text/);
+ }
+ assert.equal(planTemplateBook(parsed).pages[0].textPositions,undefined);
+});
+test('text drag and resize clamp to page edges',async()=>{
+ const {moveTextBox}=await import('../lib/text-placement.ts');const b={x:20,y:20,w:30,h:30};
+ assert.deepEqual(moveTextBox(b,100,-100),{x:70,y:0,w:30,h:30});
+ assert.deepEqual(moveTextBox(b,100,-100,true),{x:20,y:20,w:80,h:1});
+});

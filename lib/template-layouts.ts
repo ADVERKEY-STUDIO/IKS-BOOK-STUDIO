@@ -83,7 +83,7 @@ export function distributeText(text:string,count:number):string[] {
 }
 export function plannedTextBlocks(page:BookPage,b:Blueprint) {
  const parts=distributeText(page.original,b.original.length);
- return [...b.original.map((a,i)=>({...a,role:'original' as const,text:parts[i]})),{...b.meaning,role:'meaning' as const,text:page.meaning}];
+ return [...b.original.map((a,i)=>({...a,role:'original' as const,text:parts[i]})),{...b.meaning,role:'meaning' as const,text:page.meaning}].map((block,i)=>({...block,...page.textPositions?.[i]}));
 }
 export function planTemplateBook(book:TemplateBook):TemplateBook {
  const options=templateBlueprints(book.templateId);
@@ -103,6 +103,7 @@ export function planTemplateBook(book:TemplateBook):TemplateBook {
   const b=ranked[0].b;
   const planned={...p,blueprint:b.id,layoutReason:`${b.intent} Selected from the template’s supported arrangements; repetition is allowed.`,fontSize:Math.min(p.fontSize,18),imageScale:100};
   delete planned.artworkBlueprint;
+  delete planned.textPositions;
   return planned;
  });
  return {...book,templateRevision:TEMPLATE_REVISION,pages};
