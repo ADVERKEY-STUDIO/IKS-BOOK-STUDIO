@@ -12,7 +12,7 @@ export function BookSpreadPreview({ book, index, images, onLoad }: { book:Templa
   queueMicrotask(()=>setUrls(url?{[name]:url}:{}));
   return ()=>{if(url)URL.revokeObjectURL(url);};
  },[image,name]);
- const size=templateSize(book.templateId);
+ const size=templateSize(book.templateId,book.templateRevision||1);
  return <iframe className="ts-spread-frame" title={`Spread ${index+1}: ${book.pages[index].title}`} sandbox="allow-same-origin" style={{aspectRatio:`${size.width}/${size.height}`}} srcDoc={renderTemplatePage(book,index,urls)} onLoad={e=>{const doc=e.currentTarget.contentDocument;if(doc)void doc.fonts.ready.then(()=>onLoad?.(doc));}}/>;
 }
 export function LayoutDiagram({templateId,blueprint}:{templateId:string;blueprint:string}){

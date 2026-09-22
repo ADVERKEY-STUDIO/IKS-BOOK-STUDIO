@@ -44,3 +44,13 @@ Local changes require deployment before they appear on the production website. K
 `lib/template-layout-sample.ts` renders the sample through the real spread renderer. The gallery includes arrangement thumbnails, the actual sample text, and the selected template’s art direction. The same arrangements feed book prompts, request specifications, planning and exports. Shaded illustration regions are explicitly labelled as layout guides, not finished paintings.
 
 Verification: 47 focused tests pass, including uniqueness across all 29 default geometries, sample/prompt agreement and saved-layout compatibility. All 62 arrangements were browser-rendered with no text overflow; contact sheets are in `output/template-fidelity/all-template-samples/`.
+
+## Revision 2 — reference-led contracts (22 September 2026)
+
+This supersedes the earlier 62-arrangement design. New books use 42 supported arrangements across 29 catalogue entries (including retired entries). Revision 1 remains importable and retains its old geometry, dimensions and font.
+
+`lib/template-reference-contracts.ts` records observed composition, matching source-image index, page proportions, character shape language, medium, palette and typography treatment for all ten children's reference templates. Book prompts, continuation prompts, request ZIP specifications, layout guides, editor previews and export consume the same definitions. Automatic mirrored variants and repetition penalties are removed. Coloured reading areas remain coloured; Larousse uses one right-page frame. Sans-serif templates package Noto Sans Devanagari with its license.
+
+References with no interior lettering (Woodland and Meera) explicitly disclose adapted text placement. Six literary references show covers only; their app-designed interiors are labelled accordingly. Other templates are app-authored. Measured coordinates and paper/ink colours are approximations; the original font identities are unknown. This implementation does not promise identical AI artwork or claim verification of newly generated illustrations. The external image model must inspect the supplied references and correct its results.
+
+Validation: 50 focused tests pass; `scripts/verify-reference-samples.mjs` checks all 42 arrangements for rendered sample overflow; `scripts/verify-template-layouts.mjs` verifies the browser redesign, source preservation and downloaded reference package. Production build succeeds. Focused lint has no errors (native-image warnings only). Unrelated pre-existing TypeScript errors remain outside these modules.

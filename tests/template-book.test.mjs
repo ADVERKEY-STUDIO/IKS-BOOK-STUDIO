@@ -1,3 +1,4 @@
+import {referenceContracts} from '../lib/template-reference-contracts.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {templates,selectableTemplates,templateLayout,parseTemplateBook,importTemplateManuscript,bookPrompt,continuationPrompt,renderTemplateBook} from '../lib/template-book.ts';
@@ -15,7 +16,7 @@ test('twenty-nine distinct templates retain identity through import, prompt and 
  assert.equal(templates.length,29);
  assert.equal(new Set(templates.map(t=>t.id)).size,29);
  assert.equal(new Set(templates.map(t=>t.art)).size,29);
- for(const t of templates){const input=fixture();input.templateId=t.id;const b=parseTemplateBook(input);const html=renderTemplateBook(b);assert.ok(html.includes(`spread cover ${t.id}`));assert.ok(html.includes(`art-right ${t.id}`));assert.ok(bookPrompt('test',t.id,'Book','source.pdf','Awadhi').includes(t.art));}
+ for(const t of templates){const input=fixture();input.templateId=t.id;const b=parseTemplateBook(input);const html=renderTemplateBook(b);assert.ok(html.includes(`spread cover ${t.id}`));assert.ok(html.includes(`art-right ${t.id}`));assert.ok(bookPrompt('test',t.id,'Book','source.pdf','Awadhi').includes(referenceContracts[t.id]?.art||t.art));}
 });
 
 test('structural templates carry their primary composition through prompt, import and export',()=>{for(const id of ['panorama','immersive','poetry','study']){const input=fixture();input.templateId=id;input.pages[0].layout=templateLayout(id);const book=parseTemplateBook(input);assert.match(renderTemplateBook(book),new RegExp('composition-'+id));assert.ok(bookPrompt('test',id,'Book','source.pdf','Hindi').includes('"layout": "'+id+'"'));}const input=fixture();input.pages[0].layout='unknown';assert.throws(()=>parseTemplateBook(input),/allowed layout/);});
@@ -86,5 +87,5 @@ test('continuation retains template art when character notes are supplied',()=>{
 test('source request uses only its selected composition and retains art direction',async()=>{
  const {sourceBookPrompt}=await import('../lib/visual-direction.ts');
  const prompt=sourceBookPrompt({id:'book',templateId:'beanstalk-adventure',title:'Book',language:'Hindi',visualDirection:{audience:'Families',characters:'A child',notes:'Red scarf'}});
- assert.match(prompt,/ART DIRECTION: Original children/);assert.match(prompt,/story-scene/);assert.doesNotMatch(prompt,/For Ocean discovery use panorama/);
+ assert.match(prompt,/ART DIRECTION: Flat textured gouache/);assert.match(prompt,/story-scene/);assert.doesNotMatch(prompt,/For Ocean discovery use panorama/);
 });
