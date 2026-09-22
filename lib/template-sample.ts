@@ -1,14 +1,15 @@
+import { planTemplateBook } from './template-layouts.ts';
 import { literaryTemplates } from './literary-templates.ts';
 import { renderTemplateBook, type TemplateBook, type TemplateId } from './template-book.ts';
 /** One front cover plus one facing-page spread (two interior pages). */
 export function templateSample(id: TemplateId): TemplateBook {
  const t=literaryTemplates.find(t=>t.id===id);
  if(!t)throw Error('No literary sample for this template.');
- return {format:'iks-template-book-v1',projectId:'sample-'+id,templateId:id,title:t.sampleTitle,language:'Essays on attention & everyday wisdom',characterGuide:'Editorial sample; no recurring characters.',pages:[{
+ return planTemplateBook({format:'iks-template-book-v1',projectId:'sample-'+id,templateId:id,title:t.sampleTitle,language:'Essays on attention & everyday wisdom',characterGuide:'Editorial sample; no recurring characters.',pages:[{
  id:'sample-spread',title:id==='wild'?'The life around us':id==='fragments'?'What objects remember':id==='chromatic'?'A different perspective':id==='echo'?'Learning to notice':id==='haze'?'An unhurried moment':'Begin with attention',
  original:'A leaf turns toward the light.\nA river finds its way through stone.\n\nAttention is where learning begins.',
  meaning:'Look closely\n\nNotice a shape, a sound, or the work of someone’s hands. Let the details lead you toward a question.\n\nWhat did you notice today?',
- sourceReference:'Original demonstration text',scene:'Illustrative sample artwork',image:'sample.png',layout:'art-right',fontSize:22,imageScale:100}]};
+ sourceReference:'Original demonstration text',scene:'Illustrative sample artwork',image:'sample.png',layout:'art-right',fontSize:22,imageScale:100}]});
 }
 export function renderTemplateSample(id:TemplateId){
  const t=literaryTemplates.find(t=>t.id===id)!;

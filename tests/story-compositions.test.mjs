@@ -21,7 +21,7 @@ test('three distinct blueprints retain exact Unicode and whitespace through spli
 test('reference package includes actual images, attribution and blueprint guides, never scene assets',async()=>{
  const requests=[];const entries=await templateReferenceEntries('beanstalk-adventure',async url=>{requests.push(url);return new Response(new Uint8Array([1,2,3]),{headers:{'content-type':'image/jpeg'}})});
  assert.equal(requests.length,4);assert.equal(Object.keys(entries).filter(n=>n.endsWith('.jpg')).length,4);
- assert.equal(Object.keys(entries).filter(n=>n.endsWith('.svg')).length,3);
+ assert.equal(Object.keys(entries).filter(n=>n.endsWith('.svg')).length,6);
  assert.ok(Object.keys(entries).every(n=>n.startsWith('template-references/')));
  await assert.rejects(templateReferenceEntries('beanstalk-adventure',async()=>new Response('bad',{status:502})),/Could not package/);
 });
@@ -40,4 +40,13 @@ test('template sample cannot override selected art direction with a generic pain
  assert.match(prompt,/ART LOCK: Flat stylised/);
  assert.match(prompt,/diagonal-scenes/);
  assert.doesNotMatch(prompt,/template must not override|LAYOUT ONLY/);
+});
+
+test('catalogue references can be served locally when upstream hosts reject worker requests',async()=>{
+ const response=await templateReferenceApi(new Request('https://studio.test/api/template-reference?template=beanstalk-adventure&index=2'),async()=>{throw Error('Upstream must not be needed');},true);
+ assert.equal(response.status,307);assert.equal(response.headers.get('location'),'https://studio.test/templates/references/beanstalk-adventure-3.webp');
+ const {referenceAssets}=await import('../lib/template-reference-assets.ts');
+ const {childrenTemplates}=await import('../lib/children-templates.ts');
+ const {existsSync}=await import('node:fs');
+ for(const t of childrenTemplates)for(let i=0;i<t.images.length;i++)assert.ok(existsSync(new URL('../public'+referenceAssets[`${t.id}:${i}`],import.meta.url)),`${t.id} reference ${i}`);
 });

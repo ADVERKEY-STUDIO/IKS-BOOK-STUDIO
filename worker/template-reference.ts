@@ -1,11 +1,14 @@
+import { referenceAssets } from '../lib/template-reference-assets.ts';
 import { childrenTemplates } from '../lib/children-templates.ts';
 /** Only catalogued public reference images are fetchable; never accepts arbitrary URLs. */
-export async function templateReferenceApi(request: Request, fetchImage: typeof fetch = fetch) {
+export async function templateReferenceApi(request: Request, fetchImage: typeof fetch = fetch, preferLocal = false) {
   if (request.method !== 'GET') return new Response('Method not allowed', { status: 405 });
   const params = new URL(request.url).searchParams;
   const template = childrenTemplates.find(t => t.id === params.get('template'));
   const index = Number(params.get('index'));
   if (!template || !Number.isInteger(index) || index < 0 || index >= template.images.length) return new Response('Unknown reference', { status: 404 });
+  const cachedPath = referenceAssets[`${template.id}:${index}`];
+  if(preferLocal && cachedPath)return Response.redirect(new URL(cachedPath,request.url).href,307);
   try {
     const upstream = await fetchImage(template.images[index], { redirect: 'error', signal: AbortSignal.timeout(15000) });
     const type = upstream.headers.get('content-type')?.split(';')[0];
