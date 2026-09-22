@@ -1,3 +1,4 @@
+import { blueprintPrompt, templateBlueprints } from './template-layouts.ts';
 import { strToU8 } from 'fflate';
 import type { Draft } from './template-storage.ts';
 import { sourceBookPrompt, sourceRequestEntries } from './visual-direction.ts';
@@ -27,7 +28,8 @@ LANGUAGE: ${draft.language}
 CHARACTERS: ${d?.characters || 'Identify recurring characters from the source and describe your choices.'}
 ART DIRECTION: ${d?.notes || ''}
 ${templateDesignPrompt(draft.templateId)}
-SELECTED TEMPLATE: ${t.name}: ${t.description}. Composition: ${templateLayout(draft.templateId)}. The sample must match the selected template’s medium, shape language and spread geometry. User notes refine source-specific characters, not replace the selected template style. For panorama compose a wide 2.4:1 painting. Keep text outside artwork and essential subjects away from the gutter.
+${blueprintPrompt(templateBlueprints(draft.templateId).find(b => b.id === 'diagonal-scenes')?.id || templateBlueprints(draft.templateId)[0].id)}
+SELECTED TEMPLATE: ${t.name}: ${t.description}. Composition: ${templateLayout(draft.templateId)}. The sample must match the selected template’s medium, shape language and spread geometry. User notes refine source-specific characters, not replace the selected template style. Use one full-spread canvas at the dimensions in template-specification.json. Follow only the selected blueprint above. Keep text outside artwork and essential subjects away from the gutter.
 Inspect the attached references themselves. Ignore screenshot UI. Generate original illustrations, not copies of the reference scene.
 First return character-reference.png with all recurring characters, relative heights, fixed clothing, front and side views and expressions. Then use that sheet to generate style-sample.png depicting one specific passage from the supplied source. Include a short plain-text explanation of which passage it illustrates. These must be separate actual raster images, not a montage replacing both files. Keep lettering out of the sample scene.
 ${d?.feedback?.trim() ? `REVISION REQUEST: ${d.feedback}\nUse the attached previous sheet and sample as edit targets; change the requested qualities while preserving everything else. Return both updated files.\n` : ''}Wait for the user's approval before producing the remaining images.`;

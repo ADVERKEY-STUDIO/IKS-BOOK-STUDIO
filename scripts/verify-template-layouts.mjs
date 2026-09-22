@@ -1,0 +1,44 @@
+/** Browser regression against a running local app. PLAYWRIGHT_MODULE may point to a bundled Playwright index.mjs. */
+import fs from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
+import { unzipSync } from 'fflate';
+import { planTemplateBook } from '../lib/template-layouts.ts';
+import { parseTemplateBook } from '../lib/template-book.ts';
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const origin=process.env.IKS_LOCAL_URL || 'http://127.0.0.1:5173';
+if(!['localhost','127.0.0.1'].includes(new URL(origin).hostname))throw Error('This regression writes test books to local browser storage; use a local app.');
+const root=fileURLToPath(new URL('../',import.meta.url));
+const out=root+'output/template-fidelity';await fs.mkdir(out,{recursive:true});
+const original=process.env.TEMPLATE_FIXTURE?JSON.parse(await fs.readFile(process.env.TEMPLATE_FIXTURE,'utf8')):{format:'iks-template-book-v1',projectId:'fixture',templateId:'beanstalk-adventure',title:'Layout regression',language:'Hindi',characterGuide:'Original family characters',pages:Array.from({length:6},(_,i)=>({id:`spread-${i+1}`,title:['Opening','Family prayer','A journey','Two acts of service','Offering flowers','A humble ending'][i],original:'सुबह की धूप आँगन में आई।\nबच्चे ने एक पौधा लगाया।\n\nसबने मिलकर उसे पानी दिया।\nछोटी-सी कोशिश से बगीचा खिल उठा।',meaning:'A small act of care becomes something everyone can share.',sourceReference:'Original demonstration text',scene:'Two family moments of kindness and care',image:`spread-${i+1}.png`,layout:'story-scene',fontSize:16,imageScale:100}))};
+const planned=planTemplateBook({...original,projectId:'fidelity-browser-test'});
+const browser=await chromium.launch({headless:true});
+try{
+ const page=await browser.newPage({viewport:{width:1500,height:1100}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(origin+'/template-studio');await page.getByText('Loading…',{exact:true}).waitFor({state:'hidden'});
+ await page.getByRole('button',{name:'Look inside The Never Starting Tale of Jack and the Beanstalk'}).click();await page.locator('dialog[open]').getByRole('button',{name:'App layout samples',exact:true}).click();
+ await page.locator('dialog[open] .ts-template-layout-samples select').selectOption('diagonal-scenes');
+ await page.frameLocator('dialog[open] .ts-template-layout-samples iframe').locator('.planned-text').first().waitFor();await page.screenshot({path:out+'/gallery-layouts.png'});
+ await page.getByRole('button',{name:'Close',exact:true}).click();
+ await page.evaluate(async book=>{await new Promise((resolve,reject)=>{const q=indexedDB.open('iks-template-studio',1);q.onsuccess=()=>{const db=q.result;const tx=db.transaction('books','readwrite');tx.objectStore('books').put({id:book.projectId,templateId:book.templateId,title:book.title,language:book.language,book,images:{},updated:Date.now()});tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>reject(tx.error);};});},planned);
+ await page.goto(origin+'/template-studio?book=fidelity-browser-test');await page.getByRole('button',{name:'Review layouts & rebuild artwork'}).waitFor();
+ await page.getByRole('button',{name:'Show whole-book review'}).click();assert.equal(await page.locator('.ts-layout-contact iframe').count(),planned.pages.length);
+ await page.getByRole('button',{name:'Review layouts & rebuild artwork'}).click();assert.equal(await page.locator('.ts-layout-grid article').count(),planned.pages.length);
+ await page.locator('.ts-layout-grid select').first().selectOption('paired-scenes');
+ await page.screenshot({path:out+'/layout-plan-review.png',fullPage:true});
+ const requestPromise=page.waitForEvent('download');await page.getByRole('button',{name:'Create redesign copy & download request'}).click();const request=await requestPromise;
+ const archive=unzipSync(await fs.readFile(await request.path()));
+ const rebuilt=parseTemplateBook(JSON.parse(new TextDecoder().decode(archive['book.json'])));assert.equal(rebuilt.pages[0].blueprint,'paired-scenes');assert.notEqual(rebuilt.projectId,planned.projectId);
+ assert.ok(archive['template-references/template-specification.json']);assert.equal(Object.keys(archive).filter(p=>p.startsWith('spread-prompts/')).length,planned.pages.length);
+ const saved=await page.evaluate(()=>new Promise(resolve=>{const q=indexedDB.open('iks-template-studio',1);q.onsuccess=()=>{const db=q.result;const r=db.transaction('books').objectStore('books').getAll();r.onsuccess=()=>{db.close();resolve(r.result)};};}));
+ assert.deepEqual(saved.find(b=>b.id===planned.projectId).book,planned);assert.ok(saved.find(b=>b.id===rebuilt.projectId));
+ await page.getByRole('button',{name:'Read book',exact:true}).click();
+ const frame=page.frameLocator('iframe[title="Your assembled book"]');await frame.locator('.planned-spread').first().waitFor();
+ await frame.locator('body').evaluate(()=>document.fonts.ready);
+ const data=await frame.locator('.planned-spread').evaluateAll(spreads=>spreads.map(s=>({blueprint:s.dataset.blueprint,ratio:s.clientWidth/s.clientHeight,texts:[...s.querySelectorAll('.planned-text')].map(t=>({overflow:t.scrollHeight>t.clientHeight+2,text:t.textContent}))})));
+ assert.ok(data.every(s=>Math.abs(s.ratio-2)<.01));assert.equal(data.length,planned.pages.length);
+ for(let i=0;i<data.length;i++)assert.equal(data[i].texts.slice(0,-1).map(t=>t.text).join(''),original.pages[i].original);
+ assert.ok(data.every(s=>s.texts.every(t=>!t.overflow)));assert.deepEqual(errors,[]);
+ const result={errors,spreads:data.length,blueprints:data.map(s=>s.blueprint),sourcePreserved:true,originalDraftPreserved:true,referencePackageVerified:true,overflow:[]};
+ await fs.writeFile(out+'/browser-regression.json',JSON.stringify(result,null,2));console.log(result);
+}finally{await browser.close();}

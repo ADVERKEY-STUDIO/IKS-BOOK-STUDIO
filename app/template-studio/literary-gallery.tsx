@@ -1,4 +1,5 @@
 'use client';
+import TemplateLayoutSamples from './template-layout-samples';
 import { useEffect, useRef, useState } from 'react';
 import { literaryTemplates, literaryReferenceUrl } from '../../lib/literary-templates';
 import { renderTemplateSample } from '../../lib/template-sample';
@@ -16,7 +17,7 @@ export default function LiteraryGallery({onChoose,disabled}:{onChoose:(id:Templa
  </article>)}</div>
  <p className="ts-help">Interior pages are original sample designs, not pages from the referenced books. Your source text and artwork replace the examples.</p>
  <dialog ref={dialog} className="ts-sample-dialog" onCancel={()=>setOpened(undefined)} onClose={()=>setOpened(undefined)}>
- {opened&&<><div className="ts-sample-toolbar"><div><strong>{opened.name}</strong><span>Cover + 2 interior pages</span></div><div className="ts-actions"><button disabled={disabled} onClick={()=>{onChoose(opened.id);setOpened(undefined);}}>Use template</button><button autoFocus onClick={()=>setOpened(undefined)} aria-label="Close template preview">Close</button></div></div><iframe title={`${opened.name} full book sample`} sandbox="allow-same-origin" srcDoc={samples[opened.id]}/></>}
+ {opened&&<><div className="ts-sample-toolbar"><div><strong>{opened.name}</strong><span>Cover + 2 interior pages</span></div><div className="ts-actions"><button disabled={disabled} onClick={()=>{onChoose(opened.id);setOpened(undefined);}}>Use template</button><button autoFocus onClick={()=>setOpened(undefined)} aria-label="Close template preview">Close</button></div></div><TemplateLayoutSamples key={opened.id} id={opened.id}/></>}
  </dialog>
  </section>
 }

@@ -1488,7 +1488,7 @@ const worker = {
     const url = new URL(request.url);
 
     try {
-      if (url.pathname === '/api/template-reference') return await templateReferenceApi(request);
+      if (url.pathname === '/api/template-reference') return await templateReferenceApi(request, fetch, true);
       if (url.pathname.startsWith('/api/account/') || url.pathname.startsWith('/api/library/')) return await libraryApi(request, env);
       if (url.pathname.startsWith('/api/')) {
         await librarySchema(env);
