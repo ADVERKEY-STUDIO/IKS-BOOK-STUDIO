@@ -1,10 +1,11 @@
+import { referenceContracts, referencePalette } from './template-reference-contracts.ts';
 import { signatureBlueprints } from './template-signatures.ts';
 import type { BookPage, TemplateBook } from './template-book.ts';
 
-/** Version 1 is immutable: saved books pin geometry rather than inheriting future redesigns. */
-export const TEMPLATE_REVISION = 1;
+/** Saved books pin geometry and proportions; revision 2 uses inspected reference compositions. */
+export const TEMPLATE_REVISION = 2;
 export type Region = { x: number; y: number; w: number; h: number };
-export type Blueprint = { id: string; name: string; intent: string; art: Region[]; original: Region[]; meaning: Region; integrated?: boolean; panel?: boolean };
+export type Blueprint = { id: string; name: string; intent: string; art: Region[]; original: Region[]; meaning: Region; integrated?: boolean; panel?: boolean; referenceIndex?: number; coloured?: boolean };
 const r = (x:number,y:number,w:number,h:number):Region => ({x,y,w,h});
 const bp = (id:string,name:string,intent:string,art:Region[],original:Region[],meaning:Region,extra:Partial<Blueprint> = {}):Blueprint => ({id,name,intent,art,original,meaning,...extra});
 export const blueprints: Record<string, Blueprint> = Object.fromEntries([
@@ -29,6 +30,7 @@ export const blueprints: Record<string, Blueprint> = Object.fromEntries([
 ].map(b=>[b.id,b]));
 // New named blueprints extend revision one; existing saved coordinates stay unchanged.
 for(const options of Object.values(signatureBlueprints))for(const b of options)blueprints[b.id]=b;
+for(const contract of Object.values(referenceContracts))for(const b of contract.layouts)blueprints[b.id]=b;
 const story = ['landscape-opening','diagonal-scenes','open-vignette','paired-scenes','journey-scenes','quiet-ending'];
 const band = ['band-below','band-above','paired-band'];
 const inset = ['inset-left','inset-right','inset-bottom'];
@@ -42,22 +44,27 @@ const families:Record<string,string[]> = {
  manifesto:plates,wild:plates,fragments:['paired-plates','art-left','art-right'],chromatic:plates,echo:['verse-seal','verse-pair'],haze:['verse-seal','art-left','verse-pair'],
  poetry:['verse-seal','verse-pair'],study:['study-pair','band-below','paired-band'],painted:plates,heritage:plates,quiet:['open-vignette','quiet-ending','verse-seal'],moonlit:['verse-seal','verse-pair'],botanical:['open-vignette','paired-scenes','quiet-ending'],vermilion:plates,storybook:plates,archive:['study-pair','paired-plates','art-right'],festival:plates,
 };
-export function templateBlueprints(id:string):Blueprint[] {
+export function templateBlueprints(id:string,revision=2):Blueprint[] {
  const ids = families[id]; if(!ids) throw Error(`No layout specification for template ${id}.`);
+ if(revision===2)return referenceContracts[id]?.layouts || (signatureBlueprints[id] || ids.map(key=>blueprints[key])).slice(0,1);
  return signatureBlueprints[id] || ids.map(key=>blueprints[key]);
 }
-export function templateSize(id:string) { return {width:420,height:id==='beanstalk-adventure'?210:250}; }
-export function templatePrintSize(id:string,cover=false) { const size=templateSize(id);return {...size,width:cover&&['manifesto','wild','fragments','chromatic','echo','haze'].includes(id)?210:size.width}; }
+export function templateSize(id:string,revision=2) { return {width:420,height:revision===2&&referenceContracts[id]?420/referenceContracts[id].ratio:id==='beanstalk-adventure'?210:250}; }
+export function templatePrintSize(id:string,cover=false,revision=2) { const size=templateSize(id,revision);return {...size,width:cover&&['manifesto','wild','fragments','chromatic','echo','haze'].includes(id)?210:size.width}; }
 export function blueprintFor(book:Pick<TemplateBook,'templateId'|'templateRevision'>,page:Pick<BookPage,'blueprint'>) {
- if(book.templateRevision!==TEMPLATE_REVISION) throw Error('This book needs a supported template specification.');
- const found=[...templateBlueprints(book.templateId),...(families[book.templateId]||[]).map(id=>blueprints[id])].find(b=>b.id===page.blueprint);
+ if(![1,2].includes(book.templateRevision||0)) throw Error('This book needs a supported template specification.');
+ const found=[...templateBlueprints(book.templateId,book.templateRevision),...(book.templateRevision===1?(families[book.templateId]||[]).map(id=>blueprints[id]):[])].find(b=>b.id===page.blueprint);
  if(!found)throw Error(`Choose a supported spread blueprint for ${book.templateId}.`);
  return found;
 }
 export function blueprintPrompt(id:string) {
  const b=blueprints[id];if(!b)throw Error('Unknown blueprint.');
+ if(b.referenceIndex!==undefined){
+ const coord=(a:Region)=>`x=${a.x}%, y=${a.y}%, width=${a.w}%, height=${a.h}%`;
+ return `SELECTED SPREAD BLUEPRINT: ${b.id} — ${b.name}\nUse template-references/spread-${b.referenceIndex+1} as the matching visual reference. Crop away any photographed table, outer margin, shadow or cover mockup; use the actual page artwork as the canvas. Coordinates are percentages of that canvas.\n${b.intent}\nART REGIONS: ${b.art.map(coord).join('; ')}. These are composition envelopes, not rectangular panels.\nTEXT-SAFE REGIONS: ${[...b.original,b.meaning].map(coord).join('; ')}. Keep these exact areas free of subjects and high-contrast detail. ${b.coloured?'Continue the reference’s flat background colour through the reading areas; do not add white or cream boxes.':'Retain the reference’s quiet paper/sky background in reading areas; do not add opaque text boxes.'} Narrow caption regions hold only one or two short lines; plan additional spreads for longer source material, never enlarge these regions. Match the reference edges and overlaps. Do not move or mirror scenes or text. Generate ONE composite full-spread image with no lettering; the app places editable text. Keep important faces clear of the gutter. Check placement against the guide before accepting.`;
+ }
  const coords=(a:Region)=>`x=${a.x}%, y=${a.y}%, width=${a.w}%, height=${a.h}%`;
- return `SELECTED SPREAD BLUEPRINT: ${b.id} — ${b.name}\n${b.intent}\nART REGIONS: ${b.art.map((a,i)=>`Scene ${b.id === "diagonal-scenes" && i > 0 ? 2 : i+1} region: ${coords(a)}`).join('; ')}. ${b.art.length>1?'Create visibly distinct story moments, not one repeated scene or a wallpaper panorama. Regions belonging to the same diagonal scene may connect.':''}\nTEXT-SAFE REGIONS: ${[...b.original,b.meaning].map(coords).join('; ')}. ${b.integrated?'Generate ONE full-spread image with these regions left as blank pale paper, free of every object, leaf, branch, roof, ground edge, face and high-contrast mark. Leave a further 3% canvas clearance around each text-safe region; shrink or reposition artwork to achieve this, never shrink or move the text.':'Generate ONE full-spread canvas with illustrations ONLY in the art regions; keep all other areas unmarked paper.'} No text, borders, panel rectangles, labels, mockups or lettering in the image. The website adds editable words. Keep important subjects clear of the central gutter. Return one composite image per spread, not a contact sheet of pages.`;
+ return `SELECTED SPREAD BLUEPRINT: ${b.id} — ${b.name}\n${b.intent}\nART REGIONS: ${b.art.map((a,i)=>`Scene ${["diagonal-scenes","reference-beanstalk-diagonal"].includes(b.id) && i > 0 ? 2 : i+1} region: ${coords(a)}`).join('; ')}. ${b.art.length>1?'Create visibly distinct story moments, not one repeated scene or a wallpaper panorama. Regions belonging to the same diagonal scene may connect.':''}\nTEXT-SAFE REGIONS: ${[...b.original,b.meaning].map(coords).join('; ')}. ${b.integrated?'Generate ONE full-spread image with these regions left as blank pale paper, free of every object, leaf, branch, roof, ground edge, face and high-contrast mark. Leave a further 3% canvas clearance around each text-safe region; shrink or reposition artwork to achieve this, never shrink or move the text.':'Generate ONE full-spread canvas with illustrations ONLY in the art regions; keep all other areas unmarked paper.'} No text, borders, panel rectangles, labels, mockups or lettering in the image. The website adds editable words. Keep important subjects clear of the central gutter. Return one composite image per spread, not a contact sheet of pages.`;
 }
 /** Split at verse/paragraph boundaries first, preserving exact Unicode and whitespace. */
 export function distributeText(text:string,count:number):string[] {
@@ -79,11 +86,11 @@ export function plannedTextBlocks(page:BookPage,b:Blueprint) {
  return [...b.original.map((a,i)=>({...a,role:'original' as const,text:parts[i]})),{...b.meaning,role:'meaning' as const,text:page.meaning}];
 }
 export function planTemplateBook(book:TemplateBook):TemplateBook {
- const options=templateBlueprints(book.templateId),usage:Record<string,number>={};let previous='';
+ const options=templateBlueprints(book.templateId);
  const pages=book.pages.map((p,index)=>{
   const words=`${p.title} ${p.scene} ${p.meaning}`.toLowerCase();
   const ranked=options.map((b,order)=>{
-   let score=-(usage[b.id]||0)*3-(previous===b.id?10:0)-order*.01;
+   let score=-order*.01;
    if(index===0&&/opening|band-below|art-left/.test(b.id))score+=5;
    if(index===book.pages.length-1&&/ending|seal|band-above/.test(b.id))score+=6;
    if(/journey|travel|walk|across|through|seasons/.test(words)&&/journey|band/.test(b.id))score+=5;
@@ -93,8 +100,8 @@ export function planTemplateBook(book:TemplateBook):TemplateBook {
    score+=b.original.reduce((sum,a)=>sum+a.w*a.h,0)*(p.original.length>300?.003:.0003);
    return {b,score};
   }).sort((a,b)=>b.score-a.score);
-  const b=ranked[0].b;usage[b.id]=(usage[b.id]||0)+1;previous=b.id;
-  const planned={...p,blueprint:b.id,layoutReason:`${b.intent} Selected for this passage and varied against neighbouring spreads.`,fontSize:Math.min(p.fontSize,18),imageScale:100};
+  const b=ranked[0].b;
+  const planned={...p,blueprint:b.id,layoutReason:`${b.intent} Selected from the template’s supported arrangements; repetition is allowed.`,fontSize:Math.min(p.fontSize,18),imageScale:100};
   delete planned.artworkBlueprint;
   return planned;
  });
@@ -106,22 +113,22 @@ export function layoutIssues(book:TemplateBook):string[] {
  for(const [i,p] of book.pages.entries()){
   const b=blueprintFor(book,p);
   if(p.artworkBlueprint && p.artworkBlueprint!==p.blueprint)notes.push(`Spread ${i+1}: artwork belongs to another arrangement; regenerate or replace it before exporting.`);
-  if(i&&p.blueprint===book.pages[i-1].blueprint)notes.push(`Spread ${i+1}: same arrangement as the previous spread; review the story rhythm.`);
+
   for(const block of plannedTextBlocks(p,b))if(block.text.length>block.w*block.h*.45)notes.push(`Spread ${i+1}: long ${block.role} text; check actual font fit or split at a source boundary.`);
  }
- if(book.pages.length>=4&&new Set(book.pages.map(p=>p.blueprint)).size<Math.min(3,templateBlueprints(book.templateId).length))notes.push('The book uses too few of this template’s arrangements. Review whether the repetition serves the story.');
  return notes;
 }
 export function imageGeometryIssue(book:TemplateBook,page:BookPage,width:number,height:number) {
  if(!book.templateRevision)return undefined;
- const size=templateSize(book.templateId),expected=size.width/size.height;
+ const size=templateSize(book.templateId,book.templateRevision||1),expected=size.width/size.height;
  if(Math.abs(width/height/expected-1)>.025)return `${page.title}: image is ${width} × ${height}; this template requires a ${size.width}:${size.height} full-spread canvas. Regenerate or crop deliberately before import.`;
 }
 const esc=(s:string)=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 const position=(r:Region)=>`left:${r.x}%;top:${r.y}%;width:${r.w}%;height:${r.h}%;`;
 export function renderPlannedSpread(book:TemplateBook,page:BookPage,url:string|undefined,palette:{paper:string;ink:string;accent:string},index:number) {
- const b=blueprintFor(book,page),size=templateSize(book.templateId);
- return `<section class="spread planned-spread ${esc(book.templateId)}" data-blueprint="${b.id}" data-spread="${index+1}" style="--paper:${palette.paper};--ink:${palette.ink};--accent:${palette.accent};width:${size.width}mm;height:${size.height}mm">${url?`<img class="planned-art" alt="${esc(page.scene)}" src="${esc(url)}">`:'<div class="missing">Artwork pending — '+esc(page.image)+'</div>'}${b.art.map(a=>`<div aria-hidden="true" class="planned-art-frame" style="${position(a)}"></div>`).join('')}${plannedTextBlocks(page,b).map((block,i)=>`<div class="planned-text ${block.role}${b.panel?' planned-panel':''}" data-text-region="${i+1}" style="${position(block)}font-size:${(block.role==='meaning'?Math.max(14,page.fontSize*.875):page.fontSize)/11.9055}cqw" contenteditable="true">${esc(block.text)}</div>`).join('')}</section>`;
+ if(book.templateRevision===2)palette=referencePalette(book.templateId,palette);
+ const b=blueprintFor(book,page),size=templateSize(book.templateId,book.templateRevision||1);
+ return `<section class="spread planned-spread ${esc(book.templateId)}" data-revision="${book.templateRevision}" data-blueprint="${b.id}" data-spread="${index+1}" style="--paper:${palette.paper};--ink:${palette.ink};--accent:${palette.accent};width:${size.width}mm;height:${size.height}mm">${url?`<img class="planned-art" alt="${esc(page.scene)}" src="${esc(url)}">`:'<div class="missing">Artwork pending — '+esc(page.image)+'</div>'}${b.art.map(a=>`<div aria-hidden="true" class="planned-art-frame" style="${position(a)}"></div>`).join('')}${plannedTextBlocks(page,b).map((block,i)=>`<div class="planned-text ${block.role}${b.panel?' planned-panel':''}" data-text-region="${i+1}" style="${position(block)}${book.templateRevision===2?`font-family:${referenceContracts[book.templateId]?.sans?'Book,Arial,sans-serif':'Book,Georgia,serif'};text-align:${referenceContracts[book.templateId]?.centered?'center':'left'};font-style:${book.templateId==='beanstalk-adventure'&&block.role==='meaning'?'italic':'normal'};line-height:1.4;`:''}font-size:${(block.role==='meaning'?Math.max(14,page.fontSize*.875):page.fontSize)/11.9055}cqw" contenteditable="true">${esc(block.text)}</div>`).join('')}</section>`;
 }
 export function plannedSpreadCss(){return `
 .planned-spread{container-type:inline-size;position:relative;isolation:isolate;background:var(--paper);color:var(--ink);font-family:Book,Georgia,serif}
@@ -129,18 +136,19 @@ export function plannedSpreadCss(){return `
 .planned-spread .planned-text{position:absolute;z-index:1;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5;margin:0;padding:0;border:0;background:transparent;color:var(--ink);font-family:Book,Georgia,serif;font-weight:400;text-align:left}
 .planned-spread .meaning{font-style:italic}.planned-spread .planned-panel{background:var(--paper);outline:2mm solid var(--paper)}
 .planned-spread .planned-art-frame{position:absolute;pointer-events:none;z-index:1}
-.planned-spread.paper-play .planned-text{outline:1px solid var(--accent);outline-offset:3mm}.planned-spread.paper-play .meaning{outline:0}
+.planned-spread.paper-play[data-revision="1"] .planned-text{outline:1px solid var(--accent);outline-offset:3mm}.planned-spread.paper-play .meaning{outline:0}
 .planned-spread.heritage .planned-art-frame,.planned-spread.moonlit .planned-art-frame{border:1px solid var(--accent)}
 .planned-spread.festival .planned-art-frame{border:2mm double var(--accent)}
 .planned-spread.vermilion .planned-art-frame{border-bottom:2mm solid var(--accent)}
 .planned-spread.archive .planned-art-frame{border:1px solid var(--accent)}
 .planned-spread.echo .original,.planned-spread.poetry .original{text-align:center;line-height:1.8}
 .planned-spread.manifesto .original{font-weight:700}.planned-spread.fragments .meaning{border-top:1px solid var(--accent);padding-top:2mm}
+.planned-spread.paper-play[data-revision="2"]::after{content:"";position:absolute;left:57%;top:10%;width:36%;height:80%;border:1px solid #d2bd80;pointer-events:none}
 .planned-spread .missing{position:absolute;right:5%;bottom:3%;font-size:12px;max-width:40%}
 `;}
 export function blueprintSvg(b:Blueprint,paper='#fff9e9',accent='#38766c',height=500) {
  const rect=(a:Region,fill:string,label:string)=>`<rect x="${a.x*10}" y="${a.y*height/100}" width="${a.w*10}" height="${a.h*height/100}" rx="12" fill="${fill}"/><text x="${a.x*10+12}" y="${a.y*height/100+22}" font-family="sans-serif" font-size="15" fill="#172e27">${label}</text>`;
- return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 ${height}"><rect width="1000" height="${height}" fill="${paper}"/>${b.art.map((a,i)=>rect(a,accent,`Scene ${b.id === "diagonal-scenes" && i > 0 ? 2 : i+1}`)).join('')}${b.original.map((a,i)=>rect(a,'#ede5d4',`Passage ${i+1}`)).join('')}${rect(b.meaning,'#e3eaf0','Meaning')}<path d="M500 0V${height}" stroke="#777" stroke-dasharray="5 8" opacity=".3"/></svg>`;
+ return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 ${height}"><rect width="1000" height="${height}" fill="${paper}"/>${b.art.map((a,i)=>rect(a,accent,`Scene ${["diagonal-scenes","reference-beanstalk-diagonal"].includes(b.id) && i > 0 ? 2 : i+1}`)).join('')}${b.original.map((a,i)=>rect(a,'#ede5d4',`Passage ${i+1}`)).join('')}${rect(b.meaning,'#e3eaf0','Meaning')}<path d="M500 0V${height}" stroke="#777" stroke-dasharray="5 8" opacity=".3"/></svg>`;
 }
 /** Run after document.fonts.ready and image.decode; shared by preview and download. */
 export function inspectRenderedBook(doc:Document):string[]{

@@ -21,7 +21,7 @@ test('three distinct blueprints retain exact Unicode and whitespace through spli
 test('reference package includes actual images, attribution and blueprint guides, never scene assets',async()=>{
  const requests=[];const entries=await templateReferenceEntries('beanstalk-adventure',async url=>{requests.push(url);return new Response(new Uint8Array([1,2,3]),{headers:{'content-type':'image/jpeg'}})});
  assert.equal(requests.length,4);assert.equal(Object.keys(entries).filter(n=>n.endsWith('.jpg')).length,4);
- assert.equal(Object.keys(entries).filter(n=>n.endsWith('.svg')).length,6);
+ assert.equal(Object.keys(entries).filter(n=>n.endsWith('.svg')).length,3);
  assert.ok(Object.keys(entries).every(n=>n.startsWith('template-references/')));
  await assert.rejects(templateReferenceEntries('beanstalk-adventure',async()=>new Response('bad',{status:502})),/Could not package/);
 });
@@ -37,8 +37,8 @@ test('reference endpoint fetches only catalog entries and rejects upstream surpr
 test('template sample cannot override selected art direction with a generic painting style',async()=>{
  const {samplePrompt}=await import('../lib/chatgpt-handoff.ts');
  const prompt=samplePrompt({templateId:'beanstalk-adventure',title:'Prayer',language:'Hindi',visualDirection:{notes:'Detailed painting',characters:'Lakshmi',audience:'Families'}});
- assert.match(prompt,/ART LOCK: Flat stylised/);
- assert.match(prompt,/diagonal-scenes/);
+ assert.match(prompt,/ILLUSTRATION AND CHARACTERS: Flat textured/);
+ assert.match(prompt,/reference-beanstalk-diagonal/);
  assert.doesNotMatch(prompt,/template must not override|LAYOUT ONLY/);
 });
 
