@@ -1,9 +1,9 @@
-import { ARCHIVE_BYTES, UNPACKED_BYTES, IMAGE_BYTES } from './template-capacity.ts';
+import { MiB, ARCHIVE_BYTES, UNPACKED_BYTES, IMAGE_BYTES } from './template-capacity.ts';
 import { Unzip, UnzipInflate } from 'fflate';
 /** Stream decompression with an actual output limit, not just untrusted ZIP metadata. */
 export function readTemplateArchive(bytes: Uint8Array): Record<string, Uint8Array> {
     if (bytes.length > ARCHIVE_BYTES)
-        throw Error('ZIP must be under 550 MB.');
+        throw Error(`ZIP must be under ${ARCHIVE_BYTES/MiB} MB.`);
     const entries: Record<string, Uint8Array> = Object.create(null);
     let total = 0, count = 0;
     let requestBundle = false;
