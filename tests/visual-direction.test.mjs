@@ -6,8 +6,8 @@ import { uploadDraft, downloadDraft } from '../lib/template-storage.ts';
 const fixture = () => ({ id:'chapter-test', templateId:'bedtime-skies', title:'Chanakya for kids', language:'Sanskrit, Hindi and English', source:new File(['chapter content'],'chapter.docx'), images:{}, references:{'reference-style.png':new Blob(['reference'],{type:'image/png'})}, visualDirection:{audience:'9–14',characters:'A boy, a girl and Chanakya',notes:'Soft textured painting, warm light'},updated:1 });
 test('request combines chapter and visual direction without treating references as pages',async()=>{
  const draft=fixture();const prompt=sourceBookPrompt(draft);
- for(const text of ['9–14','A boy, a girl and Chanakya','references/reference-style.png','character-reference.png','same sheet','single test chapter','separately labelled paragraphs','separate white reading band']) assert.ok(prompt.includes(text),text);
- assert.match(prompt,/ART DIRECTION: Original children’s discovery/);
+ for(const text of ['9–14','A boy, a girl and Chanakya','references/reference-style.png','character-reference.png','same sheet','single test chapter','separately labelled paragraphs','clean white reading band']) assert.ok(prompt.includes(text),text);
+ assert.match(prompt,/ART DIRECTION: Flat textured turquoise/);
  const entries=await sourceRequestEntries(draft);
  assert.deepEqual(Object.keys(entries).sort(),['START-HERE.txt','references/reference-style.png','source/chapter.docx']);
  assert.equal(new TextDecoder().decode(entries['references/reference-style.png']),'reference');
@@ -42,4 +42,20 @@ test('account round trip preserves references and direction without adding refer
   assert.equal(await restored.references['reference-style.png'].text(),'reference');
   assert.equal(await restored.source.text(),'chapter content');
  }finally{globalThis.fetch=original;}
+});
+
+test('notebook mode changes depth consistently in copied and downloaded prompts', async()=>{
+ for(const mode of ['summary','full']){
+  const draft={...fixture(),templateId:'iks-notes',visualDirection:{...fixture().visualDirection,notebookMode:mode,notes:''}};
+  const prompt=sourceBookPrompt(draft);
+  assert.match(prompt,new RegExp('SELECTED CONTENT MODE: '+(mode==='summary'?'DETAILED SUMMARY':'FULL BOOK')));
+  assert.match(prompt,/Both modes use exactly the same B5 template/);
+  assert.match(prompt,/Render a full page with text AND artwork/);
+  assert.match(prompt,/review.md/);
+  assert.equal(new TextDecoder().decode((await sourceRequestEntries(draft))['START-HERE.txt']),prompt);
+  assert.equal(parseVisualDirection(draft.visualDirection).notebookMode,mode);
+  if(mode==='summary')assert.doesNotMatch(prompt,/Cover the supplied source in full\.|Preserve every substantive topic/);
+ }
+ assert.throws(()=>parseVisualDirection({...fixture().visualDirection,notebookMode:'tiny'}),/notebook mode/);
+ assert.match(sourceBookPrompt({...fixture(),templateId:'iks-notes'}),/SELECTED CONTENT MODE: FULL BOOK/);
 });
