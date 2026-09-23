@@ -1,3 +1,4 @@
+import {notebookOriginal} from './notebook-content.ts';
 import {referencePalette} from './template-reference-contracts.ts';
 import { templates, templateLayout, renderTemplatePage, type TemplateId, type TemplateBook } from './template-book.ts';
 import { TEMPLATE_REVISION, templateBlueprints, templateSize, type Blueprint } from './template-layouts.ts';
@@ -17,6 +18,18 @@ export function renderLayoutSample(id:TemplateId,blueprintId?:string){
  const b=templateBlueprints(id).find(b=>b.id===blueprintId)||templateBlueprints(id)[0];
  const compact=b.original.some(r=>r.h<25);
  const book:TemplateBook={format:'iks-template-book-v1',templateRevision:TEMPLATE_REVISION,projectId:'sample-'+id,templateId:id,title:'A moment of kindness',language:'Hindi and English',characterGuide:'Original demonstration',pages:[{id:'sample',title:'A moment of kindness',original:compact?'एक पौधा लगाया।':'सुबह की धूप आँगन में आई।\nबच्चे ने एक पौधा लगाया।\n\nसबने मिलकर उसे पानी दिया।\nछोटी-सी कोशिश से बगीचा खिल उठा।',meaning:b.meaning.h<15?'A little care.':'A small act of care becomes something everyone can share.',sourceReference:'Original demonstration text; not scripture',scene:b.intent,image:'sample.png',layout:templateLayout(id),blueprint:b.id,layoutReason:b.intent,fontSize:id==='iks-notes'?12:16,imageScale:100}]};
- if(id==='iks-notes'){book.pages[0].title='KNOWLEDGE & EVERYDAY LIFE';book.pages[0].original=b.original.map((_,i)=>['KNOWLEDGE\n• Learn by observing.','ASK WHY\n• Question an idea.','TRY IT\nObserve one leaf.','REFLECT\n• Share a discovery.'][i]).join('\n\n');book.pages[0].meaning='Remember: **observe**, __question__, record and reflect.';}
+ if(id==='iks-notes'){
+  book.pages[0].title='KNOWLEDGE & EVERYDAY LIFE';book.pages[0].fontSize=10.5;
+  const headings=['Observe and record','Ask useful questions','Try a comparison','Explain the result'];
+  const bodies=[
+   '• Begin with a clear observation: what changed, where it happened and when it occurred.\n• Record details in a notebook so someone else can follow the same process. Separate what you saw from what you think caused it.\n• For example, compare two leaves from the same plant. Sketch their shape, note the colour and describe the visible veins. A specific record is more useful than a general impression.',
+   '• Turn an observation into a question that can be investigated.\n• Compare similar examples and identify the feature that differs.\n• Ask what evidence would support the explanation and what evidence might challenge it. Keep the question focused so the comparison remains meaningful.',
+   '• Change one condition at a time.\n• Record the result before interpreting it.\n• A repeated observation is stronger evidence than one isolated result. Notice exceptions and report them rather than hiding them.',
+   '• Explain the process in its original order. Include the starting conditions, each action and the final observation.\n• Connect your conclusion to the evidence. State what remains uncertain.\n• Share the record so another learner can check or repeat it.'];
+  book.pages[0].noteSections=b.original.map((r,i)=>({heading:headings[i],body:r.w<25?'Keep a short record of what you observe. Explain the evidence before drawing a conclusion.':bodies[i],sourceReference:'Original demonstration text'}));
+  book.pages[0].original=notebookOriginal(book.pages[0].noteSections);
+  book.pages[0].meaning=b.id.endsWith('roles')?'':'**Observe → question → compare → explain.** A clear record lets someone else check your reasoning.';
+ }
+
  return renderTemplatePage(book,0,{'sample.png':`data:image/svg+xml;charset=utf-8,${encodeURIComponent(sampleArtwork(id,b))}`}).replace('<title>',`<title>${esc(templates.find(t=>t.id===id)!.name)} · `);
 }
