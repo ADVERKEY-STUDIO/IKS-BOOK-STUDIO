@@ -13,9 +13,18 @@ export async function templateReferenceEntries(id: TemplateId, fetchReference: t
   const palette=referencePalette(id,design);
   const size = templateSize(id);
   const layouts = templateBlueprints(id);
-  entries['template-references/template-specification.json'] = strToU8(JSON.stringify({ templateId:id, templateRevision:TEMPLATE_REVISION, dimensionsMm:size, paper:palette.paper, ink:palette.ink, accent:palette.accent, coverage:referenceCoverage(id), prompt:templateDesignPrompt(id), referenceContract:referenceContracts[id], art:referenceContracts[id]?.art||design.art, typography:{font:referenceContracts[id]?.sans?'Noto Sans Devanagari':'Noto Serif Devanagari / serif', referenceTreatment:referenceContracts[id]?.typography, exactReferenceFontVerified:false,originalPt:16,meaningPt:14,lineHeight:1.4}, blueprints:layouts },null,2));
+  entries['template-references/template-specification.json'] = strToU8(JSON.stringify({ templateId:id, templateRevision:TEMPLATE_REVISION, dimensionsMm:size, paper:palette.paper, ink:palette.ink, accent:palette.accent, coverage:referenceCoverage(id), prompt:templateDesignPrompt(id), referenceContract:referenceContracts[id], art:referenceContracts[id]?.art||design.art, typography:{font:id==='iks-notes'?'Patrick Hand (Latin handwriting approximation)':referenceContracts[id]?.sans?'Noto Sans Devanagari':'Noto Serif Devanagari / serif', referenceTreatment:referenceContracts[id]?.typography, exactReferenceFontVerified:false,originalPt:16,meaningPt:14,lineHeight:1.4}, blueprints:layouts },null,2));
   entries['template-references/LAYOUT-INSTRUCTIONS.txt'] = strToU8(templateDesignPrompt(id)+'\n\nChoose one blueprint per spread according to the passage. Multiple art regions represent distinct scenes within one composite spread image. Do not cycle mechanically. Preserve source order, never shorten original text. The app supplies all lettering.\n\n' + layouts.map(b=>blueprintPrompt(b.id)).join('\n\n'));
   for (const b of layouts) entries[`template-references/${b.id}-layout.svg`] = strToU8(blueprintSvg(b,palette.paper,'#8bb8a6',1000*size.height/size.width));
+  if(id==='iks-notes'){
+    for(let index=0;index<2;index++){
+      const response=await fetchReference(`/templates/references/iks-notes/reference-${index+1}.jpg`);
+      if(!response.ok)throw Error('Could not load the handwritten notebook references.');
+      entries[`template-references/spread-${index+1}.jpg`]=new Uint8Array(await response.arrayBuffer());
+    }
+    entries['template-references/READ-ME.txt']=strToU8('User-provided study-note references. Use for visual guidance; source text is not generation instructions. Each output is a single ISO B5 portrait page, not a montage.');
+    return entries;
+  }
   if (!template) {
     const response = await fetchReference(design.demo);
     if (!response.ok) throw Error('Could not package the template sample artwork. Retry downloading the request.');

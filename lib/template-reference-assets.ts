@@ -1,5 +1,7 @@
 /** Cached catalogue previews for reliable generation packages. See public/templates/references/ATTRIBUTION.json. */
 export const referenceAssets:Record<string,string> = {
+ "iks-notes:0":"/templates/references/iks-notes/reference-1.jpg",
+ "iks-notes:1":"/templates/references/iks-notes/reference-2.jpg",
   "little-explorers:0": "/templates/references/little-explorers-1.webp",
   "little-explorers:1": "/templates/references/little-explorers-2.webp",
   "bedtime-skies:0": "/templates/references/bedtime-skies-1.webp",

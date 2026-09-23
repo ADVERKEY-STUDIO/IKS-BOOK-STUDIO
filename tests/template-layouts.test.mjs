@@ -77,7 +77,7 @@ test('website-generated prompts carry automatic composition and artwork correcti
  assert.match(bookPrompt('test','beanstalk-adventure','Title','source.pdf','Hindi'),/Do not move or mirror scenes or text/);
 });
 
-test('all 29 templates have unique interior geometry, shared by sample and prompt',async()=>{
+test('all 30 templates have unique interior geometry, shared by sample and prompt',async()=>{
  const {renderLayoutSample}=await import('../lib/template-layout-sample.ts');
  const fingerprints=new Set();
  for(const t of templates){
@@ -90,7 +90,7 @@ test('all 29 templates have unique interior geometry, shared by sample and promp
    assert.ok(bookPrompt('test',t.id,'New book','source.pdf','Hindi').includes(option.id));
   }
  }
- assert.equal(fingerprints.size,29);
+ assert.equal(fingerprints.size,30);
 });
 test('saved revision-one generic layouts keep their original coordinates',()=>{
  const book=planTemplateBook({...fixture(),templateId:'snowy-friends'});
@@ -166,4 +166,20 @@ test('text drag and resize clamp to page edges',async()=>{
  const {moveTextBox}=await import('../lib/text-placement.ts');const b={x:20,y:20,w:30,h:30};
  assert.deepEqual(moveTextBox(b,100,-100),{x:70,y:0,w:30,h:30});
  assert.deepEqual(moveTextBox(b,100,-100,true),{x:20,y:20,w:80,h:1});
+});
+
+test('handwritten notes use single ISO B5 pages throughout prompt, import, renderer and request',async()=>{
+ const {templateReferenceEntries}=await import('../lib/template-reference-package.ts');
+ const {templateFont}=await import('../lib/template-book.ts');
+ assert.deepEqual(templateSize('iks-notes'),{width:176,height:250});
+ assert.deepEqual(templatePrintSize('iks-notes',true),{width:176,height:250});
+ const b=planTemplateBook({...fixture(),templateId:'iks-notes'});b.pages.forEach(p=>p.fontSize=12);
+ assert.deepEqual(parseTemplateBook(b),b);
+ const html=renderTemplateBook(b);assert.match(html,/@page\{size:176mm 250mm/);assert.match(html,/width:176mm;height:250mm/);assert.match(html,/notes-title/);
+ assert.equal(templateFont(b),'book-hand.ttf');
+ const prompt=bookPrompt('b5','iks-notes','Study notes','chapter.pdf','English');
+ assert.match(prompt,/2079 × 2953/);assert.match(prompt,/ONE portrait page/);assert.match(prompt,/Faint notebook rules/);
+ const calls=[];const entries=await templateReferenceEntries('iks-notes',async url=>{calls.push(url);return new Response(new Uint8Array([1]),{headers:{'content-type':'image/jpeg'}})});
+ assert.equal(calls.length,2);assert.ok(entries['template-references/spread-2.jpg']);
+ const spec=JSON.parse(new TextDecoder().decode(entries['template-references/template-specification.json']));assert.equal(spec.dimensionsMm.width,176);assert.equal(spec.blueprints.length,4);
 });
