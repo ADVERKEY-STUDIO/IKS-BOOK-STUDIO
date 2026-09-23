@@ -121,6 +121,13 @@ export function layoutIssues(book:TemplateBook):string[] {
   const b=blueprintFor(book,p);
   if(p.artworkBlueprint && p.artworkBlueprint!==p.blueprint)notes.push(`Spread ${i+1}: artwork belongs to another arrangement; regenerate or replace it before exporting.`);
 
+  if(book.templateId==='iks-notes'&&p.noteSections){
+   for(const [sectionIndex,section] of p.noteSections.entries()){
+    const region=b.original[sectionIndex];
+    if(region&&region.w>=25&&section.body.trim().split(/\s+/).length<region.w*region.h/40)
+     notes.push(`Spread ${i+1}, section ${sectionIndex+1}: sparse notebook section; compare with the reference and combine related source material or choose a better-fitting arrangement. Do not pad or invent facts.`);
+   }
+  }
   for(const block of plannedTextBlocks(p,b))if(block.text.length>block.w*block.h*.45)notes.push(`Spread ${i+1}: long ${block.role} text; check actual font fit or split at a source boundary.`);
  }
  return notes;
@@ -142,7 +149,7 @@ export function renderPlannedSpread(book:TemplateBook,page:BookPage,url:string|u
  const b=blueprintFor(book,page),size=templateSize(book.templateId,book.templateRevision||1);
  return `<section class="spread planned-spread ${esc(book.templateId)}" data-revision="${book.templateRevision}" data-blueprint="${b.id}" data-spread="${index+1}" style="--paper:${palette.paper};--ink:${palette.ink};--accent:${palette.accent};width:${size.width}mm;height:${size.height}mm">${renderPlannedArtwork(book,b,url,page.scene,page.image)}${book.templateId==='iks-notes'?`<div class="note-rules" aria-hidden="true">${Array.from({length:41},(_,line)=>`<i style="top:${(line+1)*2.4}%"></i>`).join('')}</div><header class="notes-title"><span>Page ${index+1}</span><h2>${esc(page.title)}</h2></header>`:''}${b.art.map(a=>`<div aria-hidden="true" class="planned-art-frame" style="${position(a)}"></div>`).join('')}${plannedTextBlocks(page,b).map((block,i)=>`<div class="planned-text ${block.role}${b.panel?' planned-panel':''}" data-text-region="${i+1}" style="${!block.text?'display:none;':''}${position(block)}${book.templateRevision===2?`font-family:${referenceContracts[book.templateId]?.sans?'Book,Arial,sans-serif':'Book,Georgia,serif'};text-align:${referenceContracts[book.templateId]?.centered?'center':'left'};font-style:${book.templateId==='beanstalk-adventure'&&block.role==='meaning'?'italic':'normal'};line-height:1.4;`:''}font-size:${(block.role==='meaning'?Math.max(book.templateId==='iks-notes'?10:14,page.fontSize*.875):page.fontSize)/(size.width*72/25.4/100)}cqw" contenteditable="true">${book.templateId==='iks-notes'?`${'heading' in block&&block.heading?`<strong class="note-heading"><span>${esc(block.heading)}</span></strong>`:''}${renderNoteText(block.text)}`:esc(block.text)}</div>`).join('')}</section>`;
 }
-function renderNoteText(text:string){return esc(text).replace(/\*\*([^*\n]+)\*\*/g,'<mark>$1</mark>').replace(/__([^_\n]+)__/g,'<u>$1</u>');}
+function renderNoteText(text:string){return esc(text).replace(/\*\*([^*\n]+)\*\*/g,(_,phrase:string)=>phrase.split(/(\s+)/).map(word=>/^\s+$/.test(word)?word:`<mark>${word}</mark>`).join('')).replace(/__([^_\n]+)__/g,'<u>$1</u>');}
 export function plannedSpreadCss(){return `
 .planned-spread{container-type:inline-size;position:relative;isolation:isolate;background:var(--paper);color:var(--ink);font-family:Book,Georgia,serif}
 .planned-spread .planned-art{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:0}
@@ -161,11 +168,11 @@ export function plannedSpreadCss(){return `
 .note-rules{position:absolute;inset:0;pointer-events:none}.note-rules i{position:absolute;left:0;width:100%;border-top:1px solid #deddd7}
 .planned-spread.iks-notes .planned-art{mix-blend-mode:multiply}
 .iks-notes .notes-title{position:absolute;left:8%;top:3%;width:84%;z-index:2;line-height:1.2}.notes-title span{font-size:2cqw;border:1px solid #b63332;padding:1px 4px}.notes-title h2{display:inline;margin-left:3%;font-size:3.2cqw;text-decoration:underline wavy #b63332;text-underline-offset:4px}
-.planned-spread.iks-notes .note-heading{display:block;font-weight:400;margin-bottom:.3em}.note-heading span{background:#fff37a;box-decoration-break:clone;-webkit-box-decoration-break:clone}.planned-spread.iks-notes .meaning{outline:1px solid #b63332;outline-offset:2mm;color:#244a75}
-.iks-notes[data-blueprint="reference-notes-concept"] [data-text-region="3"]{border:1px solid #b63332;border-radius:12%;padding:2%;box-sizing:border-box}
-.iks-notes[data-blueprint="reference-notes-roles"] .original{border-bottom:1px solid #aaa}
-.iks-notes[data-blueprint="reference-notes-examples"] .original{border-bottom:1px solid #aaa}
-.planned-spread.iks-notes mark{background:#fff37a;color:inherit}.planned-spread.iks-notes u{text-decoration-color:#b63332;text-underline-offset:3px}
+.planned-spread.iks-notes .note-heading{display:block;text-transform:uppercase;font-weight:400;margin-bottom:.3em}.note-heading span{display:inline-block;line-height:1.15;background:#fff37a;box-decoration-break:clone;-webkit-box-decoration-break:clone}.planned-spread.iks-notes .meaning{outline:1px solid #b63332;outline-offset:2mm;color:#244a75}
+.iks-notes[data-blueprint="reference-notes-dense-concept"] [data-text-region="3"],.iks-notes[data-blueprint="reference-notes-concept"] [data-text-region="3"]{border:1px solid #b63332;border-radius:12%;padding:2%;box-sizing:border-box}
+.iks-notes[data-blueprint="reference-notes-dense-roles"] .original,.iks-notes[data-blueprint="reference-notes-roles"] .original{border-bottom:1px solid #aaa}
+.iks-notes[data-blueprint="reference-notes-dense-examples"] .original,.iks-notes[data-blueprint="reference-notes-examples"] .original{border-bottom:1px solid #aaa}
+.planned-spread.iks-notes mark{display:inline-block;line-height:1; padding:0; background:#fff37a;color:inherit}.planned-spread.iks-notes u{text-decoration-color:#b63332;text-underline-offset:3px}
 .planned-spread .missing{position:absolute;right:5%;bottom:3%;font-size:12px;max-width:40%}
 `;}
 export function blueprintSvg(b:Blueprint,paper='#fff9e9',accent='#38766c',height=500) {
