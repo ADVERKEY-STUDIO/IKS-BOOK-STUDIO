@@ -21,3 +21,17 @@ test('a 26-illustration exported ZIP can be restored above the old 40 MB ceiling
  assert.equal(Object.keys(restored).length,26);
  assert.equal(restored['images/spread-25.png'].length,2*MiB);
 });
+
+test('source PDFs and DOCX accept 500 MB while rejecting larger or unsupported files',async()=>{
+ const {SOURCE_BYTES,validateSourceFile}=await import('../lib/template-capacity.ts');
+ for(const name of ['scan.pdf','book.docx'])for(const size of [21*MiB,75*MiB,SOURCE_BYTES])assert.doesNotThrow(()=>validateSourceFile({name,size}));
+ assert.throws(()=>validateSourceFile({name:'scan.pdf',size:SOURCE_BYTES+1}),/500 MB/);
+ assert.throws(()=>validateSourceFile({name:'image.jpg',size:MiB}),/PDF or DOCX/);
+});
+test('artwork accepts up to one GiB and ZIP bounds accommodate the larger book',async()=>{
+ const {ARCHIVE_BYTES,UNPACKED_BYTES}=await import('../lib/template-capacity.ts');
+ assert.equal(BOOK_ARTWORK_BYTES,1024*MiB);
+ assert.doesNotThrow(()=>validateBookArtwork({a:{size:600*MiB},b:{size:424*MiB}}));
+ assert.throws(()=>validateBookArtwork({a:{size:BOOK_ARTWORK_BYTES+1}}),/1024 MB/);
+ assert.ok(ARCHIVE_BYTES>UNPACKED_BYTES&&UNPACKED_BYTES>BOOK_ARTWORK_BYTES);
+});

@@ -104,3 +104,24 @@ test('Firebase migration preserves verified-email books and isolates another acc
  const foreign = new Request('https://studio.test/api/account/firebase-session', { method: 'POST', headers: { origin: 'https://attacker.test' } });
  assert.equal((await libraryApi(foreign, env)).status, 403);
 });
+
+test('large source uploads are chunked and restored byte-for-byte; missing chunks are rejected',async()=>{
+ const {uploadDraft,downloadDraft}=await import('../lib/template-storage.ts');
+ const {SOURCE_CHUNK_BYTES}=await import('../lib/template-capacity.ts');
+ const env=environment(),session=(await signIn(env,'large@example.com')).cookie,originalFetch=globalThis.fetch;
+ const sizes=[];
+ globalThis.fetch=async(path,options={})=>{
+  if(options.method==='PUT'&&String(path).includes('/asset?'))sizes.push(options.body.size);
+  const headers=new Headers(options.headers);headers.set('origin','https://studio.test');headers.set('cookie',session);
+  return libraryApi(new Request(new URL(path,'https://studio.test'),{...options,headers}),env);
+ };
+ try{
+  const bytes=new Uint8Array(SOURCE_CHUNK_BYTES+123);bytes[0]=31;bytes[SOURCE_CHUNK_BYTES]=79;bytes[bytes.length-1]=55;
+  const draft={id:'large-source',templateId:'iks-notes',title:'Large PDF',language:'English',updated:1,images:{},source:new File([bytes],'scan.pdf',{type:'application/pdf'})};
+  await uploadDraft(draft,'large@example.com');assert.deepEqual(sizes,[SOURCE_CHUNK_BYTES,123]);
+  const {books}=await(await globalThis.fetch('/api/library/books')).json();assert.equal(books[0].source.chunks.length,2);
+  const restored=await downloadDraft(books[0],'large@example.com');assert.deepEqual(new Uint8Array(await restored.source.arrayBuffer()),bytes);
+  const bad={...books[0],source:{...books[0].source,chunks:[{hash:'a'.repeat(64),type:'application/pdf'}]}};
+  assert.equal((await libraryApi(req('/api/library/books','PUT',bad,session),env)).status,400);
+ }finally{globalThis.fetch=originalFetch;}
+});

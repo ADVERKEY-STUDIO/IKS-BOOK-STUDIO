@@ -2,7 +2,7 @@ import { parseVisualDirection } from '../lib/visual-direction.ts';
 import { verifyClerkIdentity, clerkConfigured, type ClerkEnvironment } from './clerk-identity.ts';
 import { verifyFirebaseIdentity, firebaseConfigured, type FirebaseEnvironment } from './firebase-identity.ts';
 import { parseTemplateBook, templates } from '../lib/template-book.ts';
-import { BOOK_ARTWORK_BYTES, IMAGE_BYTES } from '../lib/template-capacity.ts';
+import { BOOK_ARTWORK_BYTES, IMAGE_BYTES, SOURCE_BYTES, SOURCE_CHUNK_BYTES, MiB } from '../lib/template-capacity.ts';
 type Statement = { bind(...values: unknown[]): Statement; first<T>(): Promise<T | null>; all<T>(): Promise<{ results: T[] }>; run(): Promise<{ meta: { changes?: number } }> };
 export type LibraryEnv = ClerkEnvironment & FirebaseEnvironment & { DB: { prepare(sql: string): Statement; batch(statements: Statement[]): Promise<unknown> }; BUCKET: { put(key: string, bytes: ArrayBuffer, options?: unknown): Promise<unknown>; get(key: string): Promise<{ body: ReadableStream } | null>; head(key: string): Promise<{ size: number } | null> }; };
 const reply = (data: unknown, status = 200, headers = {}) => Response.json(data, { status, headers: { 'cache-control': 'no-store', ...headers } });
@@ -78,9 +78,9 @@ export async function libraryApi(request: Request, env: LibraryEnv, verify = fir
     }
     if (request.method === 'PUT') {
       const size = Number(request.headers.get('content-length'));
-      if (size > IMAGE_BYTES) return reply({ error: 'File exceeds 25 MB.' }, 413);
-      const bytes = await readLimited(request, IMAGE_BYTES);
-      if (bytes.byteLength > IMAGE_BYTES || await digest(bytes) !== hash) return reply({ error: 'Invalid file or file exceeds 25 MB.' }, 400);
+      if (size > SOURCE_CHUNK_BYTES) return reply({ error: 'File exceeds 25 MB.' }, 413);
+      const bytes = await readLimited(request, SOURCE_CHUNK_BYTES);
+      if (bytes.byteLength > SOURCE_CHUNK_BYTES || await digest(bytes) !== hash) return reply({ error: 'Invalid file or file exceeds 25 MB.' }, 400);
       await env.BUCKET.put(prefix + hash, bytes, { httpMetadata: { contentType: 'application/octet-stream' } });
       return reply({ hash });
     }
@@ -117,13 +117,22 @@ export async function libraryApi(request: Request, env: LibraryEnv, verify = fir
         if (!/^[\w .-]{1,180}$/.test(name) || !/^[a-f0-9]{64}$/.test(asset.hash) || !['image/png','image/jpeg','image/webp'].includes(asset.type)) return reply({ error: 'Invalid artwork entry.' }, 400);
         const head = await env.BUCKET.head(prefix + asset.hash);
         if (!head) return reply({ error: 'Artwork upload is incomplete. Retry saving.' }, 400);
+        if(head.size>IMAGE_BYTES)return reply({error:'Each artwork image must be under 25 MB.'},413);
         total += head.size;
       }
-      if (total > BOOK_ARTWORK_BYTES) return reply({ error: 'Book artwork exceeds 512 MB.' }, 413);
+      if (total > BOOK_ARTWORK_BYTES) return reply({ error: `Book artwork exceeds ${BOOK_ARTWORK_BYTES/MiB} MB.` }, 413);
       if (data.source) {
-        if (!/^[a-f0-9]{64}$/.test(data.source.hash) || typeof data.source.name !== 'string' || data.source.name.length > 250 || !['application/pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document',''].includes(data.source.type)) return reply({ error: 'Invalid source file.' }, 400);
-        const head = await env.BUCKET.head(prefix + data.source.hash);
-        if (!head || head.size > 20 * 1024 * 1024) return reply({ error: 'Source upload missing or too large.' }, 400);
+        if(typeof data.source.name!=='string'||data.source.name.length>250||!['application/pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document',''].includes(data.source.type))return reply({error:'Invalid source file.'},400);
+        const parts=data.source.chunks===undefined?[data.source]:data.source.chunks;
+        if(!Array.isArray(parts)||!parts.length||parts.length>Math.ceil(SOURCE_BYTES/SOURCE_CHUNK_BYTES))return reply({error:'Invalid source chunks.'},400);
+        let sourceSize=0;
+        for(const part of parts){
+          if(!part||typeof part.hash!=='string'||!/^[a-f0-9]{64}$/.test(part.hash))return reply({error:'Invalid source file.'},400);
+          const head=await env.BUCKET.head(prefix+part.hash);
+          if(!head||head.size>SOURCE_CHUNK_BYTES)return reply({error:'Source upload missing or too large.'},400);
+          sourceSize+=head.size;
+        }
+        if(sourceSize>SOURCE_BYTES)return reply({error:'Source file exceeds 500 MB.'},413);
       }
       const visualDirection = parseVisualDirection(data.visualDirection);
       const references = data.references ?? {};

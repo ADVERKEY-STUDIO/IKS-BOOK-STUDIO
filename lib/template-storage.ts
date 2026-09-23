@@ -1,3 +1,4 @@
+import {SOURCE_CHUNK_BYTES,validateSourceFile} from './template-capacity.ts';
 import type { VisualDirection } from './visual-direction';
 import type { TemplateBook, TemplateId } from './template-book';
 export type Draft = { id: string; templateId: TemplateId; title: string; language: string; source?: File; visualDirection?: VisualDirection; references?: Record<string, Blob>; book?: TemplateBook; images: Record<string, Blob>; updated: number; cloud?: { email: string; revision: number; savedUpdated: number } };
@@ -17,7 +18,7 @@ export async function storage(mode: 'read' | 'write' | 'delete', value?: Draft):
   });
 }
 type Asset = { hash: string; type: string; name?: string };
-export type CloudBook = Omit<Draft, 'source' | 'images' | 'references' | 'cloud'> & { revision: number; source?: Asset; references?: Record<string, Asset>; images: Record<string, Asset> };
+export type CloudBook = Omit<Draft, 'source' | 'images' | 'references' | 'cloud'> & { revision: number; source?: Asset | {chunks:Asset[];name:string;type:string}; references?: Record<string, Asset>; images: Record<string, Asset> };
 export async function cloudRequest(path: string, options?: RequestInit) {
   const response = await fetch(path, options);
   if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error || 'Cloud library is unavailable. Your browser copy is still here.'); }
@@ -64,7 +65,15 @@ export async function uploadDraft(draft: Draft, email: string): Promise<Draft> {
   for (const [name, blob] of Object.entries(draft.images)) images[name] = await upload(blob, name);
   const references: Record<string, Asset> = {};
   for (const [name, blob] of Object.entries(draft.references || {})) references[name] = await upload(blob, name);
-  const source = draft.source ? { ...await upload(draft.source, draft.source.name), type: draft.source.type, name: draft.source.name } : undefined;
+  let source:CloudBook['source'];
+  if(draft.source){
+    validateSourceFile(draft.source);
+    if(draft.source.size>SOURCE_CHUNK_BYTES){
+      const chunks:Asset[]=[];
+      for(let offset=0;offset<draft.source.size;offset+=SOURCE_CHUNK_BYTES)chunks.push(await upload(draft.source.slice(offset,offset+SOURCE_CHUNK_BYTES),`${draft.source.name} part ${chunks.length+1}`));
+      source={chunks,name:draft.source.name,type:draft.source.type};
+    }else source={...await upload(draft.source,draft.source.name),name:draft.source.name,type:draft.source.type};
+  }
   const response = await cloudRequest('/api/library/books', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...draft, images, references, source, cloud: undefined, revision: draft.cloud?.email === email ? draft.cloud.revision : 0 }) });
   const { revision } = await response.json();
   return { ...draft, cloud: { email, revision, savedUpdated: draft.updated } };
@@ -75,6 +84,8 @@ export async function downloadDraft(book: CloudBook, email: string): Promise<Dra
   for (const [name, asset] of Object.entries(book.images)) images[name] = await get(asset);
   const references: Record<string, Blob> = {};
   for (const [name, asset] of Object.entries(book.references || {})) references[name] = await get(asset);
-  const source = book.source ? new File([await get(book.source)], book.source.name || 'source.pdf', { type: book.source.type }) : undefined;
+  let source:File|undefined;
+  if(book.source){const parts:Blob[]=[];for(const asset of ('chunks' in book.source?book.source.chunks:[book.source]))parts.push(await get(asset));source=new File(parts,book.source.name||'source.pdf',{type:book.source.type});}
+
   return { ...book, images, references, source, cloud: { email, revision: book.revision, savedUpdated: book.updated } };
 }
