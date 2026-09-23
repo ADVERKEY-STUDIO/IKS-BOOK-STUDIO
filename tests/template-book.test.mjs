@@ -12,10 +12,10 @@ test('render preserves original and meaning, escapes untrusted HTML and marks mi
 test('archive accepts partial manifest and ignores executable content',()=>{const files=readTemplateArchive(zipSync({'book.json':strToU8(JSON.stringify(fixture())),'evil.js':strToU8('alert(1)')}));assert.deepEqual(Object.keys(files),['book.json']);assert.equal(parseTemplateBook(JSON.parse(new TextDecoder().decode(files['book.json']))).pages.length,2);});
 test('archive rejects traversal and bounded decompression rejects huge JSON',()=>{assert.throws(()=>readTemplateArchive(zipSync({'../book.json':strToU8('{}')})),/Unsafe/);assert.throws(()=>readTemplateArchive(zipSync({'book.json':new Uint8Array(3*1024*1024)})),/size limit/);});
 
-test('twenty-nine distinct templates retain identity through import, prompt and export',()=>{
- assert.equal(templates.length,29);
- assert.equal(new Set(templates.map(t=>t.id)).size,29);
- assert.equal(new Set(templates.map(t=>t.art)).size,29);
+test('thirty distinct templates retain identity through import, prompt and export',()=>{
+ assert.equal(templates.length,30);
+ assert.equal(new Set(templates.map(t=>t.id)).size,30);
+ assert.equal(new Set(templates.map(t=>t.art)).size,30);
  for(const t of templates){const input=fixture();input.templateId=t.id;const b=parseTemplateBook(input);const html=renderTemplateBook(b);assert.ok(html.includes(`spread cover ${t.id}`));assert.ok(html.includes(`art-right ${t.id}`));assert.ok(bookPrompt('test',t.id,'Book','source.pdf','Awadhi').includes(referenceContracts[t.id]?.art||t.art));}
 });
 
@@ -42,7 +42,7 @@ test('literary samples contain a cover and exactly two interior pages, using val
 
 
 test('chooser retires repetitive variants without breaking existing saved books',()=>{
- assert.deepEqual(selectableTemplates.map(t=>t.id),['manifesto','wild','fragments','chromatic','echo','haze','little-explorers','bedtime-skies','paper-play','beanstalk-adventure','flower-festival','snowy-friends','bedtime-play','treehouse-days','colourful-journey','painted-memories','panorama','immersive','poetry','study']);
+ assert.deepEqual(selectableTemplates.map(t=>t.id),['manifesto','wild','fragments','chromatic','echo','haze','little-explorers','bedtime-skies','paper-play','beanstalk-adventure','flower-festival','snowy-friends','bedtime-play','treehouse-days','colourful-journey','painted-memories','iks-notes','panorama','immersive','poetry','study']);
  for(const id of ['painted','heritage','quiet','moonlit','botanical','vermilion','storybook','archive','festival']){
   const input=fixture();input.templateId=id;
   assert.equal(parseTemplateBook(input).templateId,id);

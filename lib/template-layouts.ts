@@ -37,7 +37,7 @@ const inset = ['inset-left','inset-right','inset-bottom'];
 const plates = ['art-right','art-left','paired-plates'];
 /** Each catalogue entry has an explicit supported family, including retained legacy templates. */
 const families:Record<string,string[]> = {
- 'beanstalk-adventure':story, 'flower-festival':['open-vignette','paired-scenes','quiet-ending'], 'treehouse-days':['open-vignette','paired-scenes','journey-scenes','quiet-ending'],
+ 'iks-notes':['study-pair'], 'beanstalk-adventure':story, 'flower-festival':['open-vignette','paired-scenes','quiet-ending'], 'treehouse-days':['open-vignette','paired-scenes','journey-scenes','quiet-ending'],
  'bedtime-skies':band,'snowy-friends':band,panorama:band,
  'little-explorers':inset,'bedtime-play':inset,immersive:inset,
  'paper-play':['art-left','art-right','paired-plates'],'painted-memories':['art-left','paired-plates','art-right'],'colourful-journey':plates,
@@ -49,7 +49,7 @@ export function templateBlueprints(id:string,revision=2):Blueprint[] {
  if(revision===2)return referenceContracts[id]?.layouts || (signatureBlueprints[id] || ids.map(key=>blueprints[key])).slice(0,1);
  return signatureBlueprints[id] || ids.map(key=>blueprints[key]);
 }
-export function templateSize(id:string,revision=2) { return {width:420,height:revision===2&&referenceContracts[id]?420/referenceContracts[id].ratio:id==='beanstalk-adventure'?210:250}; }
+export function templateSize(id:string,revision=2) { if(id==='iks-notes')return {width:176,height:250};return {width:420,height:revision===2&&referenceContracts[id]?420/referenceContracts[id].ratio:id==='beanstalk-adventure'?210:250}; }
 export function templatePrintSize(id:string,cover=false,revision=2) { const size=templateSize(id,revision);return {...size,width:cover&&['manifesto','wild','fragments','chromatic','echo','haze'].includes(id)?210:size.width}; }
 export function blueprintFor(book:Pick<TemplateBook,'templateId'|'templateRevision'>,page:Pick<BookPage,'blueprint'>) {
  if(![1,2].includes(book.templateRevision||0)) throw Error('This book needs a supported template specification.');
@@ -61,7 +61,7 @@ export function blueprintPrompt(id:string) {
  const b=blueprints[id];if(!b)throw Error('Unknown blueprint.');
  if(b.referenceIndex!==undefined){
  const coord=(a:Region)=>`x=${a.x}%, y=${a.y}%, width=${a.w}%, height=${a.h}%`;
- return `SELECTED SPREAD BLUEPRINT: ${b.id} — ${b.name}\nUse template-references/spread-${b.referenceIndex+1} as the matching visual reference. Crop away any photographed table, outer margin, shadow or cover mockup; use the actual page artwork as the canvas. Coordinates are percentages of that canvas.\n${b.intent}\nART REGIONS: ${b.art.map(coord).join('; ')}. These are composition envelopes, not rectangular panels.\nTEXT-SAFE REGIONS: ${[...b.original,b.meaning].map(coord).join('; ')}. Keep these exact areas free of subjects and high-contrast detail. ${b.coloured?'Continue the reference’s flat background colour through the reading areas; do not add white or cream boxes.':'Retain the reference’s quiet paper/sky background in reading areas; do not add opaque text boxes.'} Narrow caption regions hold only one or two short lines; plan additional spreads for longer source material, never enlarge these regions. Match the reference edges and overlaps. Do not move or mirror scenes or text. Generate ONE composite full-spread image with no lettering; the app places editable text. Keep important faces clear of the gutter. Check placement against the guide before accepting.`;
+ return `SELECTED SPREAD BLUEPRINT: ${b.id} — ${b.name}\nUse template-references/spread-${b.referenceIndex+1} as the matching visual reference. Crop away any photographed table, outer margin, shadow or cover mockup; use the actual page artwork as the canvas. Coordinates are percentages of that canvas.\n${b.intent}\nART REGIONS: ${b.art.map(coord).join('; ')}. These are composition envelopes, not rectangular panels.\nTEXT-SAFE REGIONS: ${[...b.original,b.meaning].map(coord).join('; ')}. Keep these exact areas free of subjects and high-contrast detail. ${b.coloured?'Continue the reference’s flat background colour through the reading areas; do not add white or cream boxes.':'Retain the reference’s quiet paper/sky background in reading areas; do not add opaque text boxes.'} ${b.id.startsWith('reference-notes-')?`For original, supply exactly ${b.original.length} sections separated by blank lines, one per original text region in order. Each starts with its short heading; put the final takeaway in meaning.`:''} Narrow caption regions hold only one or two short lines; plan additional spreads for longer source material, never enlarge these regions. Match the reference edges and overlaps. Do not move or mirror scenes or text. Generate ONE composite full-spread image with no lettering; the app places editable text. Keep important faces clear of the gutter. Check placement against the guide before accepting.`;
  }
  const coords=(a:Region)=>`x=${a.x}%, y=${a.y}%, width=${a.w}%, height=${a.h}%`;
  return `SELECTED SPREAD BLUEPRINT: ${b.id} — ${b.name}\n${b.intent}\nART REGIONS: ${b.art.map((a,i)=>`Scene ${["diagonal-scenes","reference-beanstalk-diagonal"].includes(b.id) && i > 0 ? 2 : i+1} region: ${coords(a)}`).join('; ')}. ${b.art.length>1?'Create visibly distinct story moments, not one repeated scene or a wallpaper panorama. Regions belonging to the same diagonal scene may connect.':''}\nTEXT-SAFE REGIONS: ${[...b.original,b.meaning].map(coords).join('; ')}. ${b.integrated?'Generate ONE full-spread image with these regions left as blank pale paper, free of every object, leaf, branch, roof, ground edge, face and high-contrast mark. Leave a further 3% canvas clearance around each text-safe region; shrink or reposition artwork to achieve this, never shrink or move the text.':'Generate ONE full-spread canvas with illustrations ONLY in the art regions; keep all other areas unmarked paper.'} No text, borders, panel rectangles, labels, mockups or lettering in the image. The website adds editable words. Keep important subjects clear of the central gutter. Return one composite image per spread, not a contact sheet of pages.`;
@@ -82,7 +82,8 @@ export function distributeText(text:string,count:number):string[] {
  result.push(text.slice(start));return result;
 }
 export function plannedTextBlocks(page:BookPage,b:Blueprint) {
- const parts=distributeText(page.original,b.original.length);
+ const sections=page.original.match(/[^]*?(?:\n\s*\n|$)/g)?.filter(Boolean)||[];
+ const parts=b.id.startsWith('reference-notes-')&&sections.length===b.original.length?sections:distributeText(page.original,b.original.length);
  return [...b.original.map((a,i)=>({...a,role:'original' as const,text:parts[i]})),{...b.meaning,role:'meaning' as const,text:page.meaning}].map((block,i)=>({...block,...page.textPositions?.[i]}));
 }
 export function planTemplateBook(book:TemplateBook):TemplateBook {
@@ -129,8 +130,9 @@ const position=(r:Region)=>`left:${r.x}%;top:${r.y}%;width:${r.w}%;height:${r.h}
 export function renderPlannedSpread(book:TemplateBook,page:BookPage,url:string|undefined,palette:{paper:string;ink:string;accent:string},index:number) {
  if(book.templateRevision===2)palette=referencePalette(book.templateId,palette);
  const b=blueprintFor(book,page),size=templateSize(book.templateId,book.templateRevision||1);
- return `<section class="spread planned-spread ${esc(book.templateId)}" data-revision="${book.templateRevision}" data-blueprint="${b.id}" data-spread="${index+1}" style="--paper:${palette.paper};--ink:${palette.ink};--accent:${palette.accent};width:${size.width}mm;height:${size.height}mm">${url?`<img class="planned-art" alt="${esc(page.scene)}" src="${esc(url)}">`:'<div class="missing">Artwork pending — '+esc(page.image)+'</div>'}${b.art.map(a=>`<div aria-hidden="true" class="planned-art-frame" style="${position(a)}"></div>`).join('')}${plannedTextBlocks(page,b).map((block,i)=>`<div class="planned-text ${block.role}${b.panel?' planned-panel':''}" data-text-region="${i+1}" style="${position(block)}${book.templateRevision===2?`font-family:${referenceContracts[book.templateId]?.sans?'Book,Arial,sans-serif':'Book,Georgia,serif'};text-align:${referenceContracts[book.templateId]?.centered?'center':'left'};font-style:${book.templateId==='beanstalk-adventure'&&block.role==='meaning'?'italic':'normal'};line-height:1.4;`:''}font-size:${(block.role==='meaning'?Math.max(14,page.fontSize*.875):page.fontSize)/11.9055}cqw" contenteditable="true">${esc(block.text)}</div>`).join('')}</section>`;
+ return `<section class="spread planned-spread ${esc(book.templateId)}" data-revision="${book.templateRevision}" data-blueprint="${b.id}" data-spread="${index+1}" style="--paper:${palette.paper};--ink:${palette.ink};--accent:${palette.accent};width:${size.width}mm;height:${size.height}mm">${url?`<img class="planned-art" alt="${esc(page.scene)}" src="${esc(url)}">`:'<div class="missing">Artwork pending — '+esc(page.image)+'</div>'}${book.templateId==='iks-notes'?`<header class="notes-title"><span>Page ${index+1}</span><h2>${esc(page.title)}</h2></header>`:''}${b.art.map(a=>`<div aria-hidden="true" class="planned-art-frame" style="${position(a)}"></div>`).join('')}${plannedTextBlocks(page,b).map((block,i)=>`<div class="planned-text ${block.role}${b.panel?' planned-panel':''}" data-text-region="${i+1}" style="${position(block)}${book.templateRevision===2?`font-family:${referenceContracts[book.templateId]?.sans?'Book,Arial,sans-serif':'Book,Georgia,serif'};text-align:${referenceContracts[book.templateId]?.centered?'center':'left'};font-style:${book.templateId==='beanstalk-adventure'&&block.role==='meaning'?'italic':'normal'};line-height:1.4;`:''}font-size:${(block.role==='meaning'?Math.max(book.templateId==='iks-notes'?10:14,page.fontSize*.875):page.fontSize)/(size.width*72/25.4/100)}cqw" contenteditable="true">${book.templateId==='iks-notes'?renderNoteText(block.text):esc(block.text)}</div>`).join('')}</section>`;
 }
+function renderNoteText(text:string){return esc(text).replace(/\*\*([^*\n]+)\*\*/g,'<mark>$1</mark>').replace(/__([^_\n]+)__/g,'<u>$1</u>');}
 export function plannedSpreadCss(){return `
 .planned-spread{container-type:inline-size;position:relative;isolation:isolate;background:var(--paper);color:var(--ink);font-family:Book,Georgia,serif}
 .planned-spread .planned-art{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:0}
@@ -145,6 +147,14 @@ export function plannedSpreadCss(){return `
 .planned-spread.echo .original,.planned-spread.poetry .original{text-align:center;line-height:1.8}
 .planned-spread.manifesto .original{font-weight:700}.planned-spread.fragments .meaning{border-top:1px solid var(--accent);padding-top:2mm}
 .planned-spread.paper-play[data-revision="2"]::after{content:"";position:absolute;left:57%;top:10%;width:36%;height:80%;border:1px solid #d2bd80;pointer-events:none}
+.planned-spread.iks-notes{background:repeating-linear-gradient(to bottom,#fffef7 0,#fffef7 5.8mm,#deddd7 5.9mm,#fffef7 6mm)}
+.planned-spread.iks-notes .planned-art{mix-blend-mode:multiply}
+.iks-notes .notes-title{position:absolute;left:8%;top:3%;width:84%;z-index:2;line-height:1.2}.notes-title span{font-size:2cqw;border:1px solid #b63332;padding:1px 4px}.notes-title h2{display:inline;margin-left:3%;font-size:3.2cqw;text-decoration:underline wavy #b63332;text-underline-offset:4px}
+.planned-spread.iks-notes .original::first-line{background:#fff37a;font-weight:bold}.planned-spread.iks-notes .meaning{outline:1px solid #b63332;outline-offset:2mm;color:#244a75}
+.iks-notes[data-blueprint="reference-notes-concept"] [data-text-region="3"]{border:1px solid #b63332;border-radius:12%;padding:2%;box-sizing:border-box}
+.iks-notes[data-blueprint="reference-notes-roles"] .original{border-bottom:1px solid #aaa}
+.iks-notes[data-blueprint="reference-notes-examples"] .original{border-bottom:1px solid #aaa}
+.planned-spread.iks-notes mark{background:#fff37a;color:inherit}.planned-spread.iks-notes u{text-decoration-color:#b63332;text-underline-offset:3px}
 .planned-spread .missing{position:absolute;right:5%;bottom:3%;font-size:12px;max-width:40%}
 `;}
 export function blueprintSvg(b:Blueprint,paper='#fff9e9',accent='#38766c',height=500) {
