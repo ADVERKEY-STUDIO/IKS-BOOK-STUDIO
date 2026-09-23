@@ -183,3 +183,18 @@ test('handwritten notes use single ISO B5 pages throughout prompt, import, rende
  assert.equal(calls.length,2);assert.ok(entries['template-references/spread-2.jpg']);
  const spec=JSON.parse(new TextDecoder().decode(entries['template-references/template-specification.json']));assert.equal(spec.dimensionsMm.width,176);assert.equal(spec.blueprints.length,4);
 });
+
+test('dense notebooks map explicit sections without splitting or automatic sentence highlights',async()=>{
+ const {notebookOriginal}=await import('../lib/notebook-content.ts');
+ const {sourceBookPrompt}=await import('../lib/visual-direction.ts');
+ const b=planTemplateBook({...fixture(),templateId:'iks-notes'});const bp=templateBlueprints('iks-notes')[0];
+ const noteSections=bp.original.map((_,i)=>({heading:`Heading ${i}`,body:`A complete paragraph ${i}.\nStep 1: Observe.\nStep 2: Compare.`,sourceReference:'PDF page 1'}));
+ b.pages=[{...b.pages[0],blueprint:bp.id,noteSections,original:notebookOriginal(noteSections),fontSize:10.5}];
+ const parsed=parseTemplateBook(b);const blocks=plannedTextBlocks(parsed.pages[0],bp);
+ assert.equal(blocks[2].text,noteSections[2].body);assert.equal(blocks[2].heading,noteSections[2].heading);
+ const html=renderTemplatePage(parsed,0,{[parsed.pages[0].image]:'images/test.png'});assert.match(html,/class="note-heading"/);assert.match(html,/note-art-window/);assert.match(html,/overflow:hidden/);assert.doesNotMatch(html,/\.original::first-line/);
+ for(const change of [p=>delete p.noteSections,p=>p.noteSections.pop(),p=>p.original='Missing steps']){const bad=structuredClone(b);change(bad.pages[0]);assert.throws(()=>parseTemplateBook(bad),/notebook|Notebook/);}
+ const prompt=sourceBookPrompt({id:'test',templateId:'iks-notes',title:'Notes',language:'English'});
+ assert.match(prompt,/250–380/);assert.match(prompt,/never jump from step 2 to step 5/);assert.match(prompt,/coverage.md/);assert.match(prompt,/noteSections/);
+ assert.doesNotMatch(prompt,/180–250|Narrow caption regions|First create images\/character-reference/);
+});
