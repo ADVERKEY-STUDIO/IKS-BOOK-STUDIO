@@ -46,7 +46,9 @@ async function readLimited(request: Request, max: number): Promise<ArrayBuffer> 
 export async function libraryApi(request: Request, env: LibraryEnv, verify = firebaseConfigured(env) ? verifyFirebaseIdentity : verifyClerkIdentity): Promise<Response> {
   await librarySchema(env);
   const url = new URL(request.url), path = url.pathname;
-  if (request.method !== 'GET' && request.headers.get('origin') !== url.origin) return reply({ error: 'Open this action from Book Studio.' }, 403);
+  // Browsers normally omit Origin on same-origin GET/HEAD reads.
+  // Keep origin enforcement on mutations; reads still require account authentication.
+  if (!['GET', 'HEAD'].includes(request.method) && request.headers.get('origin') !== url.origin) return reply({ error: 'Open this action from Book Studio.' }, 403);
   if (path === '/api/account/config' && request.method === 'GET') return reply({ firebase: firebaseConfigured(env) ? { apiKey: env.FIREBASE_API_KEY, projectId: env.FIREBASE_PROJECT_ID, authDomain: `${env.FIREBASE_PROJECT_ID}.firebaseapp.com` } : null });
   if (path === '/api/account/firebase-session' && request.method === 'DELETE') return reply({ email: null }, 200, { 'set-cookie': 'iks_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0' + (url.protocol === 'https:' ? '; Secure' : '') });
   if (path === '/api/account/firebase-session' && request.method === 'POST') {
