@@ -1,4 +1,5 @@
 'use client';
+import {accountSaveQueue,recoverAccountImages,recoverDraftImages} from '../../lib/template-backup';
 import { templateReferenceEntries } from '../../lib/template-reference-package';
 import {notebookOriginal} from '../../lib/notebook-content';
 import {fitTextPositions} from '../../lib/text-placement';
@@ -17,7 +18,7 @@ import ChildrenGallery from './children-gallery';
 import TemplateLayoutSamples from './template-layout-samples';
 import {isChildrenTemplate} from '../../lib/children-templates';
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { strToU8, zipSync } from 'fflate';
 import { templateFont, templates, selectableTemplates, templateLayout, templateAppearanceCss, parseTemplateBook, importTemplateManuscript, continuationPrompt, renderTemplateBook, assetName, type TemplateId, type TemplateBook, type BookPage } from '../../lib/template-book';
 import { readTemplateArchive } from '../../lib/template-archive';
@@ -72,6 +73,42 @@ export default function TemplateStudio() {
     const writeQueue = useRef(Promise.resolve());
     const latestDraft = useRef<Draft>(undefined);
     const [saveError, setSaveError] = useState('');
+    const [accountSaveError,setAccountSaveError]=useState('');
+    const [backupRetry,setBackupRetry]=useState(0);
+    const activeEmail=useRef(email);
+    useEffect(()=>{activeEmail.current=email;},[email]);
+    const backupQueue=useRef(accountSaveQueue(async(value,account)=>uploadDraft(await recoverAccountImages(value,account),account)));
+    const applyBackup=useCallback((snapshot:Draft,saved:Draft,account:string)=>{
+        if(activeEmail.current!==account)return;
+        setDraft(current=>{
+            if(!current||current.id!==snapshot.id)return current;
+            const images={...saved.images,...current.images};
+            for(const name of Object.keys(saved.images))if(current.images[name]===snapshot.images[name])images[name]=saved.images[name];
+            return {...current,images,cloud:saved.cloud};
+        });
+        setAccountSaveError('');
+    },[]);
+    useEffect(()=>{
+        const retry=()=>setBackupRetry(value=>value+1);
+        window.addEventListener('online',retry);
+        window.addEventListener('focus',retry);
+        return ()=>{window.removeEventListener('online',retry);window.removeEventListener('focus',retry);};
+    },[]);
+    useEffect(()=>{
+        if(!draft||!email||(draft.cloud&&draft.cloud.email!==email)||(draft.cloud?.email===email&&draft.cloud.savedUpdated===draft.updated))return;
+        const snapshot=draft,account=email;
+        const timer=setTimeout(()=>{
+            void saveWithFallback(snapshot,value=>storage('write',value),value=>backupQueue.current(value,account))
+                .then(result=>{applyBackup(snapshot,result.value,account);if(result.localError)setSaveError(browserSaveError(result.localError));})
+                .catch(error=>{if(activeEmail.current===account)setAccountSaveError(error instanceof Error?error.message:'Account backup failed. Retry saving.');});
+        },1500);
+        return ()=>clearTimeout(timer);
+    },[draft,email,backupRetry,applyBackup]);
+    useEffect(()=>{
+        if(!draft||!email||(draft.cloud&&draft.cloud.email!==email)||(draft.cloud?.email===email&&draft.cloud.savedUpdated===draft.updated))return;
+        const warn=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue='';};
+        window.addEventListener('beforeunload',warn);return ()=>window.removeEventListener('beforeunload',warn);
+    },[draft,email]);
     useEffect(() => { storage('read').then(books => {
         setSaved(books);
         const bookId = new URLSearchParams(window.location.search).get('book');
@@ -95,19 +132,57 @@ export default function TemplateStudio() {
             } catch (error) { setNotice('Browser save needs attention'); setSaveError(browserSaveError(error)); }
         });
     }, [draft]);
+    useEffect(()=>{
+        if(!email)return;
+        let active=true;
+        const requestedId=new URLSearchParams(window.location.search).get('book');
+        const account=(cloudLibrary.email===email?cloudLibrary.books:[]).find(value=>value.id===(draft?.id||requestedId));
+        if(!account)return;
+        if(draft){
+            const snapshot=draft;
+            void recoverDraftImages(snapshot,account,email).then(recovered=>{
+                if(!active||recovered===snapshot)return;
+                setDraft(current=>current===snapshot?recovered:current);
+            }).catch(error=>{if(active)setAccountSaveError(error.message);});
+        }else if(ready&&requestedId){
+            void downloadDraft(account,email).then(restored=>{
+                if(!active)return;
+                setDraft(restored);setStep(draftStep(restored));setError('');
+            }).catch(error=>{if(active)setAccountSaveError(error.message);});
+        }
+        return ()=>{active=false;};
+    },[draft,email,cloudLibrary,ready]);
     async function refreshCloud() {
         const response = await cloudRequest('/api/library/books');
         setCloudLibrary({ email, books: (await response.json()).books });
     }
     useEffect(() => { let active = true; if (email) void cloudRequest('/api/library/books').then(r => r.json()).then(data => { if (active) setCloudLibrary({ email, books: data.books }); }).catch(e => { if (active) setError(e.message); }); return () => { active = false; }; }, [email]);
+    async function backupAllBrowserBooks(){
+        if(!email)return;
+        await writeQueue.current;
+        const books=await storage('read');
+        const failures:string[]=[];let completed=0;
+        for(const snapshot of books){
+            if(snapshot.cloud&&snapshot.cloud.email!==email)continue;
+            try{
+                const result=await saveWithFallback(snapshot,value=>storage('write',value),value=>backupQueue.current(value,email));
+                applyBackup(snapshot,result.value,email);completed++;
+                if(result.localError)failures.push(snapshot.title+': account saved, but browser copy needs attention.');
+            }catch(error){failures.push(snapshot.title+': '+(error instanceof Error?error.message:'backup failed'));}
+        }
+        setSaved(await storage('read'));
+        setNotice(`${completed} books backed up to your account`);
+        setAccountSaveError(failures.join('\n'));
+        await refreshCloud();
+    }
     async function saveNow() {
         if (!draft) return;
         await writeQueue.current;
         setNotice(email ? 'Saving to your account…' : 'Saving…');
-        const result = await saveWithFallback(draft, value => storage('write', value), email ? value => uploadDraft(value, email) : undefined);
+        const result = await saveWithFallback(draft, value => storage('write', value), email ? value => backupQueue.current(value, email) : undefined);
         setSaveError(result.localError ? browserSaveError(result.localError) : '');
         if (email) {
-            setDraft(current => current?.id === result.value.id ? { ...current, cloud: result.value.cloud } : current);
+            applyBackup(draft,result.value,email);
             setNotice('Saved to your account');
             await refreshCloud();
         } else setNotice('Saved in this browser');
@@ -336,7 +411,7 @@ export default function TemplateStudio() {
         throw Error('Font could not be packaged.'); entries['fonts/'+templateFont(book)] = new Uint8Array(await font.arrayBuffer()); const license = await fetch('/fonts/'+(templateFont(book)==='book-hand.ttf'?'OFL-PatrickHand.txt':templateFont(book)==='book-sans.ttf'?'OFL-NotoSansDevanagari.txt':'OFL-NotoSerifDevanagari.txt')); if (!license.ok)
         throw Error('Font license could not be packaged.'); entries['fonts/OFL.txt'] = new Uint8Array(await license.arrayBuffer()); if (draft.source)
         entries['source/' + draft.source.name] = new Uint8Array(await draft.source.arrayBuffer()); download('Editable-Book.zip', new Blob([new Uint8Array(zipSync(entries, { level: 0 }))], { type: 'application/zip' })); }
-    return <main className="ts"><fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}><style>{templateAppearanceCss()}</style><header className="ts-header"><Link href="/">← Book Studio</Link><strong>Books, made your way.</strong><span role="status">{busy ? 'Working…' : notice}</span></header><details className="ts-account-disclosure"><summary>Account & sign-in{email ? ` · ${email}` : ""}</summary><AccountPanel onSession={setEmail}/></details><div className="ts-actions ts-library-actions">{draft && <button className="ts-save-primary" disabled={busy} onClick={() => void run(saveNow)}>Save book{email ? ' to account' : ' now'}</button>}<button disabled={busy} onClick={() => void run(async () => { await writeQueue.current; if (draft) await storage('write', draft); setSaved(await storage('read')); setDraft(undefined); setStep(0); })}>My saved books</button></div>{email && <details className="ts-panel ts-cloud-library"><summary>Cloud library <span>{cloudBooks.length} books</span></summary><header className="ts-cloud-heading"><div><h2>Your cloud library</h2><p>Saved to <strong>{email}</strong></p><span>Open these books from any browser with this account.</span></div><button disabled={busy} onClick={() => void run(refreshCloud)}>Refresh library</button></header>{cloudBooks.length === 0 && <p>No cloud books yet. Open a browser book and choose Save book to account.</p>}<div className="ts-cloud-grid">{cloudBooks.map(item => <button className="ts-cloud-book" disabled={busy} key={item.id} onClick={() => void run(async () => { await writeQueue.current; if (draft) await storage('write', draft); const restored = await downloadDraft(item, email); const existing = saved.find(d => d.id === restored.id); if (existing && !(existing.cloud?.email === email && existing.cloud.revision === item.revision && existing.cloud.savedUpdated === existing.updated)) { const backupId = crypto.randomUUID(); await storage('write', { ...existing, id: backupId, book: existing.book ? { ...existing.book, projectId: backupId, title: existing.title + ' (local backup)' } : undefined, title: existing.title + ' (local backup)', cloud: undefined }); } await storage('write', restored); setSaved(await storage('read')); setDraft(restored); setStep(draftStep(restored)); setSelected(0); setUnmatched([]); })}><span className="ts-cloud-cover" aria-hidden="true" style={{background: templates.find(t => t.id === item.templateId)?.paper, color: templates.find(t => t.id === item.templateId)?.ink}}>{item.title}</span><span className="ts-cloud-book-info"><strong>{item.title}</strong><span>{templates.find(t => t.id === item.templateId)?.name}{item.book ? ` · ${item.book.pages.length} spreads` : ' · Draft'}</span><small>Open cloud copy <span aria-hidden="true">→</span></small></span></button>)}</div></details>}<nav aria-label="Book creation steps">{[draft?.visualDirection?.handoff ? 'Visuals & layout' : 'Choose a template', book?.contentMode === 'images' ? 'Book details' : 'Source & prompt', 'Assemble & edit'].map((label, i) => <button key={label} disabled={busy || !draft && i > 0 || i === 2 && !book || i === 1 && ['references', 'template'].includes(draft?.visualDirection?.handoff || '')} aria-current={step === i ? 'step' : undefined} onClick={() => setStep(i)}>{i + 1}. {label}</button>)}</nav>{saveError && <div className="ts-save-warning" role="status"><p>{saveError}</p><button disabled={busy} onClick={() => void run(saveNow)}>{email ? "Save to account" : "Retry save"}</button></div>}{error && <p className="ts-error" role="alert">{error}</p>}
+    return <main className="ts"><fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}><style>{templateAppearanceCss()}</style><header className="ts-header"><Link href="/">← Book Studio</Link><strong>Books, made your way.</strong><span role="status">{busy ? 'Working…' : notice}</span></header><details className="ts-account-disclosure"><summary>Account & sign-in{email ? ` · ${email}` : ""}</summary><AccountPanel onSession={setEmail}/></details><div className="ts-actions ts-library-actions">{draft && <button className="ts-save-primary" disabled={busy} onClick={() => void run(saveNow)}>Save book{email ? ' to account' : ' now'}</button>}<button disabled={busy} onClick={() => void run(async () => { await writeQueue.current; if (draft) await storage('write', draft); setSaved(await storage('read')); setDraft(undefined); setStep(0); })}>My saved books</button>{email&&<button disabled={busy} onClick={()=>void run(backupAllBrowserBooks)}>Back up all browser books</button>}</div>{email && <details className="ts-panel ts-cloud-library"><summary>Cloud library <span>{cloudBooks.length} books</span></summary><header className="ts-cloud-heading"><div><h2>Your cloud library</h2><p>Saved to <strong>{email}</strong></p><span>Open these books from any browser with this account.</span></div><button disabled={busy} onClick={() => void run(refreshCloud)}>Refresh library</button></header>{cloudBooks.length === 0 && <p>No cloud books yet. Open a browser book and choose Save book to account.</p>}<div className="ts-cloud-grid">{cloudBooks.map(item => <button className="ts-cloud-book" disabled={busy} key={item.id} onClick={() => void run(async () => { await writeQueue.current; if (draft) await storage('write', draft); const restored = await downloadDraft(item, email); const existing = saved.find(d => d.id === restored.id); if (existing && !(existing.cloud?.email === email && existing.cloud.revision === item.revision && existing.cloud.savedUpdated === existing.updated)) { const backupId = crypto.randomUUID(); await storage('write', { ...existing, id: backupId, book: existing.book ? { ...existing.book, projectId: backupId, title: existing.title + ' (local backup)' } : undefined, title: existing.title + ' (local backup)', cloud: undefined }); restored.updated=Math.max(restored.updated,existing.updated+1); if(restored.cloud)restored.cloud.savedUpdated=restored.updated; } await storage('write', restored); setSaved(await storage('read')); setDraft(restored); setStep(draftStep(restored)); setSelected(0); setUnmatched([]); })}><span className="ts-cloud-cover" aria-hidden="true" style={{background: templates.find(t => t.id === item.templateId)?.paper, color: templates.find(t => t.id === item.templateId)?.ink}}>{item.title}</span><span className="ts-cloud-book-info"><strong>{item.title}</strong><span>{templates.find(t => t.id === item.templateId)?.name}{item.book ? ` · ${item.book.pages.length} spreads` : ' · Draft'}</span><small>Open cloud copy <span aria-hidden="true">→</span></small></span></button>)}</div></details>}<nav aria-label="Book creation steps">{[draft?.visualDirection?.handoff ? 'Visuals & layout' : 'Choose a template', book?.contentMode === 'images' ? 'Book details' : 'Source & prompt', 'Assemble & edit'].map((label, i) => <button key={label} disabled={busy || !draft && i > 0 || i === 2 && !book || i === 1 && ['references', 'template'].includes(draft?.visualDirection?.handoff || '')} aria-current={step === i ? 'step' : undefined} onClick={() => setStep(i)}>{i + 1}. {label}</button>)}</nav>{saveError && <div className="ts-save-warning" role="status"><p>{saveError}</p><button disabled={busy} onClick={() => void run(saveNow)}>{email ? "Save to account" : "Retry save"}</button></div>}{error && <p className="ts-error" role="alert">{error}</p>}{accountSaveError&&<div className="ts-save-warning" role="alert"><p>Account backup needs attention: {accountSaveError}</p><button onClick={()=>setBackupRetry(value=>value+1)}>Retry account backup</button></div>}{draft&&<p className="ts-help" role="status">{email?(draft.cloud&&draft.cloud.email!==email?'This book belongs to another account. Sign in to that account to resume its automatic backup.':draft.cloud?.email===email&&draft.cloud.savedUpdated===draft.updated?'Account backup is up to date, including imported images.':'Account backup pending. Keep this tab open until it is up to date.'):'Browser copy only. Sign in for automatic account backup, or download an editable ZIP. Browser data can be cleared or evicted.'}</p>}
  {step === 0 && draft?.visualDirection?.handoff === 'references' && <>{handoffPanel('references')}<button onClick={() => setDraft(undefined)}>Back to saved books and templates</button></>}
  {step === 0 && draft?.visualDirection?.handoff !== 'references' && <><div className="ts-intro"><p>YOUR SOURCE. YOUR BOOK.</p><h1>Start with a book you can see.</h1><p>Choose a visual direction. Bring your PDF or DOCX. Get one detailed prompt and build the book at your own pace.</p></div>{!draft?.book && !draft?.visualDirection?.handoff && <button disabled={!ready || busy} onClick={startReferences}>Start with visual references</button>}{draft?.visualDirection?.handoff === 'template' && <p className="ts-panel">Your art direction is saved. Choose a book below for its layout and text placement. Your references will control the new illustrations. <button onClick={() => patch({ visualDirection: { ...draft.visualDirection!, handoff: 'references' } })}>Edit visual references</button></p>}{!draft?.book && !draft?.visualDirection?.handoff && <details className="ts-panel ts-image-start" open={chosenImages.length > 0 || undefined}>
  <summary>Have finished illustrations? Use them directly</summary>
