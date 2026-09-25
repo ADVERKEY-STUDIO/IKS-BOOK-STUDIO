@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 const root=process.env.IKS_REPO_ROOT||process.cwd(),require=createRequire(resolve(root,'package.json'));
 const {chromium}=require(process.env.IKS_PLAYWRIGHT_MODULE||'playwright');
-const {outputFiles}=await require('esbuild').build({stdin:{contents:"export {autoPlaceStoryBook} from './lib/story-text-placement.ts';export {renderTemplatePage,parseTemplateBook} from './lib/template-book.ts';export {inspectRenderedBook} from './lib/template-layouts.ts';",resolveDir:root},bundle:true,write:false,format:'iife',globalName:'story'});
+const {outputFiles}=await require('esbuild').build({stdin:{contents:"export {autoPlaceStoryBook} from './lib/story-text-placement.ts';export {renderTemplatePage,parseTemplateBook} from './lib/template-book.ts';export {inspectRenderedBook} from './lib/template-layouts.ts';export {renderTemplateBook} from './lib/template-book.ts';export {defaultBookCompletion} from './lib/book-completion.ts';",resolveDir:root},bundle:true,write:false,format:'iife',globalName:'story'});
 const browser=await chromium.launch({headless:true});after(()=>browser.close());
 const original='नासै रोग हरै सब पीरा । जपत निरंतर हनुमत बीरा ॥\nसंकट तें हनुमान छुड़ावै । मन क्रम वचन ध्यान जो लावै ॥\n\nसब पर राम तपस्वी राजा । तिन के काज सकल तुम साजा ॥\nऔर मनोरथ जो कोई लावै । सोइ अमित जीवन फल पावै ॥';
 const fixture=()=>({format:'iks-template-book-v1',projectId:'reading-test',templateId:'beanstalk-adventure',templateRevision:2,title:'Reading order',language:'Hindi',characterGuide:'Hanuman',pages:[{id:'spread-01',title:'Passage',original,meaning:'Remembering Hanuman gives people steadiness in hard times. He serves Rama’s work and inspires sincere hopes to become good actions.',sourceReference:'Page 2',scene:'A family in a forest',blueprint:'reference-beanstalk-diagonal',layoutReason:'Two scenes with clear sky',image:'spread-01.png',layout:'story-scene',fontSize:16,imageScale:100}]});
@@ -59,5 +59,24 @@ test('print inspection catches collisions even when both boxes individually fit 
  const page=await setup();try{
   const result=await page.evaluate(()=>{document.body.innerHTML='<section class="spread beanstalk-adventure" data-spread="8" style="position:relative;width:1200px;height:600px"><div class="planned-text original" style="position:absolute;left:20px;top:20px;width:300px;height:100px">Source</div><div class="planned-text meaning" style="position:absolute;left:20px;top:30px;width:300px;height:100px">Meaning</div></section>';return story.inspectRenderedBook(document);});
   assert.ok(result.some(note=>/Spread 8:.*overlap/.test(note)));
+ }finally{await page.close();}
+});
+
+test('complete book previews and prints front, credits, interior and back at their own sizes',async()=>{
+ const page=await setup();try{
+  const html=await page.evaluate(book=>{
+   book.completion=story.defaultBookCompletion();Object.assign(book.completion,{subtitle:'An illustrated reading adventure',blurb:'Explore courage and kindness together through verses and pictures.',credits:'Illustration and edition credits supplied by the publisher.',isbn:'978-1-23456-789-0',mrp:'₹250'});
+   const canvas=document.createElement('canvas');canvas.width=800;canvas.height=800;const ctx=canvas.getContext('2d');ctx.fillStyle='#fff8ed';ctx.fillRect(0,0,800,800);const square=canvas.toDataURL();
+   canvas.width=1200;canvas.height=600;ctx.fillStyle='#fff8ed';ctx.fillRect(0,0,1200,600);const landscape=canvas.toDataURL();
+   return story.renderTemplateBook(book,{'front-cover.png':square,'back-cover.png':square,'spread-01.png':landscape},'/fonts/book-sanskrit.ttf');
+  },fixture());
+  await page.setContent(html);await page.addScriptTag({content:outputFiles[0].text});
+  const rendered=await page.evaluate(async()=>{await document.fonts.ready;await Promise.all([...document.images].map(im=>im.decode()));return {order:[...document.querySelectorAll('.spread')].map(el=>el.getAttribute('aria-label')||'Interior'),issues:story.inspectRenderedBook(document).filter(s=>/Front cover|Back cover|Title and credits/.test(s)),isbn:document.querySelector('.isbn p').textContent,mrp:document.querySelector('.price p').textContent,barcode:document.querySelector('.barcode-space').textContent};});
+  assert.deepEqual(rendered.order,['Front cover','Title and credits','Interior','Back cover']);assert.deepEqual(rendered.issues,[]);assert.equal(rendered.isbn,'978-1-23456-789-0');assert.equal(rendered.mrp,'₹250');assert.equal(rendered.barcode,'');
+  const pdf=await require('pdf-lib').PDFDocument.load(await page.pdf({preferCSSPageSize:true,printBackground:true}));
+  assert.equal(pdf.getPageCount(),4);
+  pdf.getPages().forEach((p,i)=>{assert.ok(Math.abs(p.getWidth()*25.4/72-(i===2?420:210))<1);assert.ok(Math.abs(p.getHeight()*25.4/72-210)<1);});
+  const failures=await page.evaluate(()=>{document.querySelector('.completion-art').removeAttribute('src');document.querySelector('.front-copy h1').textContent='Long title '.repeat(200);return story.inspectRenderedBook(document);});
+  assert.ok(failures.some(s=>/Front cover: text overflow/.test(s)));assert.ok(failures.some(s=>/Front cover: artwork did not load/.test(s)));
  }finally{await page.close();}
 });
