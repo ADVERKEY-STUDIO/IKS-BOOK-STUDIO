@@ -185,6 +185,12 @@ export function blueprintSvg(b:Blueprint,paper='#fff9e9',accent='#38766c',height
 /** Run after document.fonts.ready and image.decode; shared by preview and download. */
 export function inspectRenderedBook(doc:Document):string[]{
  const notes:string[]=[];
+ doc.querySelectorAll<HTMLElement>('.completion-page').forEach(page=>{
+  const label=page.getAttribute('aria-label')||'Cover';
+  if(page.querySelector('.missing'))notes.push(`${label}: artwork did not load or is still missing.`);
+  page.querySelectorAll<HTMLImageElement>('.completion-art').forEach(im=>{if(!im.naturalWidth)notes.push(`${label}: artwork did not load.`);});
+  page.querySelectorAll<HTMLElement>('.completion-copy,.completion-author,.completion-imprint').forEach(el=>{if(el.clientHeight&&(el.scrollHeight>el.clientHeight+2||el.scrollWidth>el.clientWidth+2))notes.push(`${label}: text overflow; shorten the cover copy or credits.`);});
+ });
  doc.querySelectorAll<HTMLElement>('.spread:not(.cover)').forEach((spread,i)=>{
   const pageNumber=Number(spread.dataset.spread)||i+1;
   if(spread.querySelector('.missing'))notes.push(`Spread ${pageNumber}: artwork did not load or is still missing.`);
