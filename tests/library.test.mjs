@@ -52,7 +52,10 @@ test('client save and open round-trip manuscript, source file, artwork, and revi
  const env=environment(); let session=(await signIn(env,'book@example.com')).cookie;
  const originalFetch=globalThis.fetch;
  globalThis.fetch=async(path,options={})=>{
-  const headers=new Headers(options.headers); headers.set('origin','https://studio.test'); headers.set('cookie',session);
+  // Same-origin browser GET/HEAD requests normally omit Origin.
+  const headers=new Headers(options.headers);
+  if (!['GET', 'HEAD'].includes(options.method || 'GET')) headers.set('origin','https://studio.test');
+  headers.set('cookie',session);
   return libraryApi(new Request(new URL(path,'https://studio.test'),{...options,headers}),env);
  };
  try {
@@ -137,4 +140,30 @@ test('queued requests cannot save into a newly signed-in account',async()=>{
  request.headers.set('x-library-account','old@example.com');
  const response=await libraryApi(request,env);assert.equal(response.status,409);
  assert.deepEqual((await(await libraryApi(req('/api/library/books','GET',undefined,session.cookie),env)).json()).books,[]);
+});
+
+
+test('browser HEAD artwork checks work without Origin while retaining account isolation and write protection', async () => {
+ const env = environment();
+ const {cookie} = await signIn(env, 'head-reader@example.com');
+ const bytes = new Uint8Array([9, 8, 7]);
+ const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))).map(v => v.toString(16).padStart(2, '0')).join('');
+ const url = 'https://studio.test/api/library/asset?hash=' + hash;
+ const head = session => libraryApi(new Request(url, {method:'HEAD', headers: session ? {cookie:session} : {}}), env);
+ assert.equal((await head(cookie)).status, 404);
+ assert.equal((await libraryApi(new Request(url, {method:'PUT', headers:{origin:'https://studio.test',cookie}, body:bytes}), env)).status, 200);
+ const found = await head(cookie);
+ assert.equal(found.status, 200);
+ assert.equal(await found.text(), '');
+ assert.equal(found.headers.get('cache-control'), 'private, no-store');
+ const stranger = await signIn(env, 'head-stranger@example.com');
+ assert.equal((await head(stranger.cookie)).status, 404);
+ assert.equal((await head()).status, 401);
+ for (const method of ['PUT', 'POST', 'DELETE']) {
+  for (const origin of [null, 'https://other.test']) {
+   const headers = new Headers({cookie});
+   if (origin) headers.set('origin', origin);
+   assert.equal((await libraryApi(new Request(url, {method, headers}), env)).status, 403);
+  }
+ }
 });
