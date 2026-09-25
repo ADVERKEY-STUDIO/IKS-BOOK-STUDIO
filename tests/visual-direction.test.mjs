@@ -35,7 +35,7 @@ test('account round trip preserves references and direction without adding refer
   if(options.method==='PUT'){assets.set(path,options.body);return new Response(null);}
   return new Response(assets.get(path));
  };
- try{const draft=fixture();await uploadDraft(draft,'test@example.com');
+ try{const draft={...fixture(),templateId:'iks-notes',visualDirection:{...fixture().visualDirection,notebookMode:'summary',notebookPageCount:20}};await uploadDraft(draft,'test@example.com');
   assert.deepEqual(metadata.images,{});assert.equal(Object.keys(metadata.references).length,1);
   const restored=await downloadDraft({...metadata,revision:1},'test@example.com');
   assert.deepEqual(restored.visualDirection,draft.visualDirection);
@@ -58,4 +58,28 @@ test('notebook mode changes depth consistently in copied and downloaded prompts'
  }
  assert.throws(()=>parseVisualDirection({...fixture().visualDirection,notebookMode:'tiny'}),/notebook mode/);
  assert.match(sourceBookPrompt({...fixture(),templateId:'iks-notes'}),/SELECTED CONTENT MODE: FULL BOOK/);
+});
+
+test('notebook page budget is identical in copied and ZIP prompts for both modes',async()=>{
+ for(const notebookMode of ['full','summary']){
+  const draft={...fixture(),templateId:'iks-notes',visualDirection:{...fixture().visualDirection,notebookMode,notebookPageCount:20}};
+  const prompt=sourceBookPrompt(draft);
+  assert.match(prompt,/Exactly 20 content pages in pages\[\], excluding the cover/);
+  assert.match(prompt,/pages.length === 20/);
+  assert.match(prompt,/70–85%/);assert.match(prompt,/250–380 words/);
+  assert.match(prompt,/never silently omit material or invent facts/);
+  assert.equal(new TextDecoder().decode((await sourceRequestEntries(draft))['START-HERE.txt']),prompt);
+  assert.equal(parseVisualDirection(draft.visualDirection).notebookPageCount,20);
+ }
+});
+test('automatic page count stays backward compatible and invalid targets are rejected',()=>{
+ assert.match(sourceBookPrompt({...fixture(),templateId:'iks-notes'}),/PAGE COUNT: Automatic/);
+ assert.equal(parseVisualDirection(fixture().visualDirection).notebookPageCount,undefined);
+ for(const value of [0,-1,81,1.5,'20',null,NaN,Infinity]){
+  const direction={...fixture().visualDirection,notebookPageCount:value};
+  assert.throws(()=>parseVisualDirection(direction),/whole number from 1 to 80/);
+  assert.throws(()=>sourceBookPrompt({...fixture(),templateId:'iks-notes',visualDirection:direction}),/whole number from 1 to 80/);
+ }
+ for(const value of [1,80])assert.equal(parseVisualDirection({...fixture().visualDirection,notebookPageCount:value}).notebookPageCount,value);
+ assert.doesNotMatch(sourceBookPrompt({...fixture(),visualDirection:{...fixture().visualDirection,notebookPageCount:20}}),/Exactly 20 content pages/);
 });
