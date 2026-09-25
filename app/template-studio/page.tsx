@@ -2,6 +2,7 @@
 import {accountSaveQueue,recoverAccountImages,recoverDraftImages} from '../../lib/template-backup';
 import { templateReferenceEntries } from '../../lib/template-reference-package';
 import {notebookOriginal} from '../../lib/notebook-content';
+import {autoPlaceStoryBook} from '../../lib/story-text-placement';
 import {fitTextPositions} from '../../lib/text-placement';
 import TextPlacementEditor from './text-placement-editor';
 import LayoutReview, { BookSpreadPreview } from './layout-review';
@@ -233,7 +234,7 @@ export default function TemplateStudio() {
             if(i!==selected)return v;
             const changedBlueprint=Boolean(p.blueprint&&p.blueprint!==v.blueprint);
             const next={...v,...p,...(changedBlueprint&&draft?.images[v.image]?{artworkBlueprint:v.artworkBlueprint||v.blueprint}:{})};
-            if(changedBlueprint||next.textPositions===undefined)delete next.textPositions;
+            if(changedBlueprint||next.textPositions===undefined){delete next.textPositions;delete next.readingOrder;}
             return next;
         }) } }); }
     function startReferences() {
@@ -315,6 +316,7 @@ export default function TemplateStudio() {
                 extra.push(new File([blob], name, { type: blob.type }));
         }
         await validateTemplateArtwork(next,images);
+        const placement=await autoPlaceStoryBook(next,images);next=placement.book;
         if(next.templateRevision)next={...next,pages:next.pages.map(p=>incoming[p.image]?{...p,artworkBlueprint:p.blueprint}:p)};
         if (asNewBook) {
             await writeQueue.current;
@@ -329,7 +331,7 @@ export default function TemplateStudio() {
         }
         setSelected(0);
         setStep(2);
-        setNotice(`Imported ${next.pages.length} spreads · ${next.pages.filter(p => images[p.image]).length} illustrations placed`);
+        setNotice(`Imported ${next.pages.length} spreads · ${next.pages.filter(p => images[p.image]).length} illustrations placed${placement.unplaced.length?` · Review text on spreads ${placement.unplaced.join(', ')}: no clear area fits the complete passage.`:''}`);
     }
     async function createRedesign(planned:TemplateBook) {
         if(!draft)return;
@@ -352,13 +354,30 @@ export default function TemplateStudio() {
         await imageBlob(blob);
         const target=book.pages.find(p=>p.image===name);
         if(target){const bitmap=await createImageBitmap(blob);const issue=imageGeometryIssue(book,target,bitmap.width,bitmap.height);bitmap.close();if(issue)throw Error(issue);}
-        const images={...draft.images,[name]:blob};validateBookArtwork(images);patch({images,book:{...book,pages:book.pages.map(p=>p.image===name&&book.templateRevision?{...p,artworkBlueprint:p.blueprint}:p)}});
+        const images={...draft.images,[name]:blob};validateBookArtwork(images);
+        const next={...book,pages:book.pages.map(p=>p.image===name&&book.templateRevision?{...p,artworkBlueprint:p.blueprint}:p)};
+        const placed=await autoPlaceStoryBook(next,{[name]:blob},true);
+        patch({images,book:placed.book});
+        if(placed.unplaced.length)setNotice('Illustration saved. The complete passage needs more clear space; review its text placement.');
     }
     async function openPreview() { if (!book || !draft)
         return; const urls: Record<string, string> = {}; for (const [name, blob] of Object.entries(draft.images))
         urls[name] = await new Promise<string>((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result)); r.onerror = () => reject(r.error); r.readAsDataURL(blob); }); const font = await fetch('/fonts/'+templateFont(book)); if (!font.ok)
         throw Error('Book font could not load.'); const fontBlob = await font.blob(); const data = await new Promise<string>((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result)); r.onerror = () => reject(r.error); r.readAsDataURL(fontBlob); }); setPreview(renderTemplateBook(book, urls, data)); }
+    async function autoPlaceText() {
+        if(!book||!draft)return;
+        const result=await autoPlaceStoryBook(book,draft.images,true);
+        patch({book:result.book});
+        setNotice(result.unplaced.length?`Text placed. Spreads ${result.unplaced.join(', ')} need review: no clear area fits the complete passage at this font size.`:'Text placed and saved. Each passage reads together, followed by its meaning.');
+        if(preview){
+            const urls:Record<string,string>={};
+            const spreads=previewFrame.current?.contentDocument?.querySelectorAll('.planned-spread');
+            spreads?.forEach((spread,i)=>{const im=spread.querySelector<HTMLImageElement>('.planned-art');if(im)urls[book.pages[i].image]=im.src;});
+            setPreview(renderTemplateBook(result.book,urls,'/fonts/'+templateFont(result.book)));
+        }
+    }
     async function fitOverflowingText() {
+        if(book?.templateId==='beanstalk-adventure'){await autoPlaceText();return;}
         const doc=previewFrame.current?.contentDocument;
         if(!doc||!book||!book.templateRevision)return;
         await doc.fonts.ready;
@@ -474,7 +493,7 @@ export default function TemplateStudio() {
  {layoutIssues(book).length>0&&<details className="ts-layout-notes"><summary>Template layout notes ({layoutIssues(book).length})</summary>{layoutIssues(book).map((note,i)=><p key={i}>{note}</p>)}</details>}
  {showLayoutPlan&&<LayoutReview key={book.projectId} book={book} busy={busy} onClose={()=>setShowLayoutPlan(false)} onCreate={planned=>run(()=>createRedesign(planned))}/>}
  {showContactSheet&&<section aria-label="Whole-book layout review"><h2>Whole-book review</h2><p>Compare scene count, text placement, illustration style and neighbouring spreads. Structural checks cannot judge whether painted characters match the reference.</p><div className="ts-layout-contact">{book.pages.map((p,i)=><button key={p.id} onClick={()=>setSelected(i)}><BookSpreadPreview book={book} index={i} images={draft.images}/><span>{i+1}. {p.title} · {p.blueprint||p.composition||p.layout}</span></button>)}</div></section>}
- <div className="ts-editor"><aside>{book.pages.map((p, i) => <button key={p.id} aria-current={i === selected ? 'page' : undefined} onClick={() => setSelected(i)}><PreviewImage blob={draft.images[p.image]} alt={p.title}/><span>{i + 1}. {p.title || 'Untitled spread'}</span></button>)}</aside>{page && <section className="ts-panel"><TextPlacementEditor key={page.id+page.blueprint} book={book} index={selected} images={draft.images} onChange={textPositions=>editPage({textPositions})} onLoad={doc=>setLiveWarnings(inspectRenderedBook(doc).filter(note=>/overflow|sparse/.test(note)))}/>{liveWarnings.length>0&&<div className="ts-layout-notes" role="status">{liveWarnings.map((note,i)=><p key={i}>{note}</p>)}</div>}<div className="ts-page-image" tabIndex={0} aria-label="Paste image for selected page" onPaste={e => {
+ <div className="ts-editor"><aside>{book.pages.map((p, i) => <button key={p.id} aria-current={i === selected ? 'page' : undefined} onClick={() => setSelected(i)}><PreviewImage blob={draft.images[p.image]} alt={p.title}/><span>{i + 1}. {p.title || 'Untitled spread'}</span></button>)}</aside>{page && <section className="ts-panel"><TextPlacementEditor onAutoPlace={book.templateId==='beanstalk-adventure'?()=>void run(autoPlaceText):undefined} busy={busy} key={page.id+page.blueprint} book={book} index={selected} images={draft.images} onChange={textPositions=>editPage({textPositions})} onLoad={doc=>setLiveWarnings(inspectRenderedBook(doc).filter(note=>/overflow|sparse|reading order/.test(note)))}/>{liveWarnings.length>0&&<div className="ts-layout-notes" role="status">{liveWarnings.map((note,i)=><p key={i}>{note}</p>)}</div>}<div className="ts-page-image" tabIndex={0} aria-label="Paste image for selected page" onPaste={e => {
  const file = Array.from(e.clipboardData.items).find(item => item.type.startsWith('image/'))?.getAsFile();
  if (file) { e.preventDefault(); void run(async () => { await replaceArtwork(file,page.image); }); }
  }}><label className="ts-upload">Replace this page’s illustration<input disabled={busy} type="file" accept=".png,.jpg,.jpeg,.webp" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void run(async () => { await replaceArtwork(file,page.image); }); }}/></label><p className="ts-help">Or click this area and paste an image from your clipboard. This replaces only the selected page.</p></div><div className="ts-fields"><label>Spread title<input value={page.title} onChange={e => editPage({ title: e.target.value })}/></label>{book.templateRevision ? <label>Spread arrangement<select value={page.blueprint} onChange={e=>editPage({blueprint:e.target.value,layoutReason:'Manually selected in editor. Replacement artwork must match this arrangement.'})}>{!templateBlueprints(book.templateId,book.templateRevision||1).some(b=>b.id===page.blueprint)&&<option value={page.blueprint}>{blueprintFor(book,page).name} (saved layout)</option>}{templateBlueprints(book.templateId,book.templateRevision||1).filter(b=>!page.noteSections||b.original.length===page.noteSections.length).map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select><span>Changing the arrangement requires matching replacement artwork.</span></label> : <label>Composition<select value={page.layout} onChange={e => editPage({ layout: e.target.value as BookPage['layout'] })}><option value="story-scene">Integrated story landscape</option><option value="art-right">Artwork right</option><option value="art-left">Artwork left</option><option value="vignette">Quiet vignette</option><option value="panorama">Panorama & reading band</option><option value="immersive">Painting with text inset</option><option value="poetry">Poetry & small artwork</option><option value="study">Art strip & commentary columns</option></select></label>}{!book.templateRevision && page.layout === 'story-scene' && <label>Spread blueprint<select value={page.composition || 'landscape-opening'} onChange={e => editPage({composition: e.target.value as StoryComposition})}>{Object.entries(storyCompositions).map(([id, c]) => <option key={id} value={id}>{c.name}</option>)}</select><span className="story-layout-note">Changing the blueprint requires matching replacement artwork. Text remains editable in the unpainted areas.</span></label>}{page.noteSections?<div>{page.noteSections.map((section,i)=><fieldset key={i}><legend>Text section {i+1}</legend><label>Heading<input value={section.heading} onChange={e=>{const noteSections=page.noteSections!.map((s,j)=>i===j?{...s,heading:e.target.value}:s);editPage({noteSections,original:notebookOriginal(noteSections)});}}/></label><label>Section text<textarea value={section.body} onChange={e=>{const noteSections=page.noteSections!.map((s,j)=>i===j?{...s,body:e.target.value}:s);editPage({noteSections,original:notebookOriginal(noteSections)});}}/></label></fieldset>)}</div>:<label>Original text<textarea value={page.original} onChange={e => editPage({ original: e.target.value })}/></label>}<label>Meaning / explanation<textarea value={page.meaning} onChange={e => editPage({ meaning: e.target.value })}/></label><label>Text size: {page.fontSize} pt<input type="range" min={book.templateId==='iks-notes'?10:14} max="32" value={page.fontSize} onChange={e => editPage({ fontSize: Number(e.target.value) })}/></label>{!book.templateRevision && <label>Artwork scale: {page.imageScale}%<input type="range" min="40" max="100" value={page.imageScale} onChange={e => editPage({ imageScale: Number(e.target.value) })}/></label>}<label>Scene prompt<textarea value={page.scene} onChange={e => editPage({ scene: e.target.value })}/></label><label>Source reference<input value={page.sourceReference} onChange={e => editPage({ sourceReference: e.target.value })}/></label></div><p className="ts-help">Edits save automatically. Check original wording against your source. Read the book to check fit before exporting. This is a working proof, not an approved print release.</p></section>}</div></>}
