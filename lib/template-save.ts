@@ -1,14 +1,14 @@
-/** Account saving remains available even when this browser cannot store the book. */
+/** Attempt both copies independently: neither a full browser nor an offline account loses the other copy. */
 export async function saveWithFallback<T>(value: T, local: (value: T) => Promise<unknown>, cloud?: (value: T) => Promise<T>) {
-  let localError: unknown;
-  if (!cloud) {
-    await local(value);
-    return { value, localError: undefined };
+  if (!cloud) { await local(value); return { value, localError: undefined }; }
+  const [browser, account] = await Promise.allSettled([local(value), cloud(value)]);
+  if (account.status === 'rejected') {
+    if(browser.status === 'rejected') throw new Error(`Neither copy could be saved. Account: ${account.reason instanceof Error?account.reason.message:'save failed'}. ${browserSaveError(browser.reason)}`);
+    throw account.reason;
   }
-  // Save to the account first: a slow or full browser must not delay the upload.
-  const uploaded = await cloud(value);
-  try { await local(uploaded); localError = undefined; } catch (error) { localError = error; }
-  return { value: uploaded, localError };
+  let localError: unknown;
+  try { await local(account.value); } catch(error) { localError=error; }
+  return { value: account.value, localError };
 }
 export function browserSaveError(error: unknown) {
   return error instanceof Error && error.name === 'QuotaExceededError'

@@ -59,6 +59,11 @@ test('client save and open round-trip manuscript, source file, artwork, and revi
   const draft={id:'cross-browser-book',templateId:'panorama',title:'Courage',language:'Awadhi',updated:123,source:new File(['source text'],'original.pdf',{type:'application/pdf'}),images:{'spread-01.png':new Blob(['original artwork'],{type:'image/png'})},book:{format:'iks-template-book-v1',projectId:'cross-browser-book',templateId:'panorama',title:'Courage',language:'Awadhi',characterGuide:'Consistent characters',pages:[{id:'spread-01',title:'Invocation',original:'श्री गुरु चरन',meaning:'A prayer',sourceReference:'PDF page 1',scene:'A quiet river',image:'spread-01.png',layout:'panorama',fontSize:22,imageScale:100}]}};
   const saved=await uploadDraft(draft,'book@example.com');
   assert.equal(saved.cloud.revision,1);
+  await assert.rejects(uploadDraft({...saved,images:{}},'book@example.com'),/missing.*saved artwork/i);
+  await assert.rejects(uploadDraft({...saved,book:undefined},'book@example.com'),/missing.*saved manuscript/i);
+  const intact=await(await globalThis.fetch('/api/library/books')).json();
+  assert.ok(intact.books[0].images['spread-01.png']);
+
   session=(await signIn(env,'book@example.com')).cookie;
   const catalogue=await(await globalThis.fetch('/api/library/books')).json();
   const restored=await downloadDraft(catalogue.books[0],'book@example.com');
@@ -124,4 +129,12 @@ test('large source uploads are chunked and restored byte-for-byte; missing chunk
   const bad={...books[0],source:{...books[0].source,chunks:[{hash:'a'.repeat(64),type:'application/pdf'}]}};
   assert.equal((await libraryApi(req('/api/library/books','PUT',bad,session),env)).status,400);
  }finally{globalThis.fetch=originalFetch;}
+});
+
+test('queued requests cannot save into a newly signed-in account',async()=>{
+ const env=environment(),session=await signIn(env,'new@example.com');
+ const request=req('/api/library/books','PUT',{id:'book',title:'Old account work',language:'English',templateId:'panorama',revision:0,images:{}},session.cookie);
+ request.headers.set('x-library-account','old@example.com');
+ const response=await libraryApi(request,env);assert.equal(response.status,409);
+ assert.deepEqual((await(await libraryApi(req('/api/library/books','GET',undefined,session.cookie),env)).json()).books,[]);
 });

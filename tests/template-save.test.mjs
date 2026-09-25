@@ -10,3 +10,10 @@ test('local-only failure remains visible and account failure is not reported as 
  await assert.rejects(saveWithFallback({},async()=>{throw Error('local');}),/local/);
  await assert.rejects(saveWithFallback({},async()=>{},async()=>{throw Error('cloud');}),/cloud/);
 });
+test('network or account failure still writes the only local recovery copy',async()=>{
+ let local;
+ const draft={id:'imported',images:{'page.png':new Blob(['artwork'])}};
+ await assert.rejects(saveWithFallback(draft,async value=>{local=value},async()=>{throw Error('offline')}),/offline/);
+ assert.equal(local,draft);
+ assert.equal(await local.images['page.png'].text(),'artwork');
+});

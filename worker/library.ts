@@ -60,6 +60,8 @@ export async function libraryApi(request: Request, env: LibraryEnv, verify = fir
   const email = await libraryUser(request, env, verify);
   if (path === '/api/account/session' && request.method === 'GET') return reply({ email, configured: firebaseConfigured(env) || clerkConfigured(env) });
   if (!email) return reply({ error: 'Sign in to save and open books across browsers.' }, 401);
+  const expectedAccount=request.headers.get('x-library-account');
+  if(expectedAccount&&expectedAccount!==email)return reply({error:'The signed-in account changed. Reopen the book in the correct account before saving.'},409);
   if (path === '/api/account/link' && request.method === 'POST') {
     const body = JSON.parse(new TextDecoder().decode(await readLimited(request, 4096)));
     const owner = typeof body.browserOwner === 'string' && /^[a-zA-Z0-9-]{24,100}$/.test(body.browserOwner) ? body.browserOwner : 'account-' + await digest(email);
@@ -111,6 +113,15 @@ export async function libraryApi(request: Request, env: LibraryEnv, verify = fir
       if (!/^[\w-]{1,100}$/.test(data.id) || !templates.some(t => t.id === data.templateId) || typeof data.title !== 'string' || data.title.length > 500 || typeof data.language !== 'string' || data.language.length > 500 || !Number.isSafeInteger(data.revision) || data.revision < 0) return reply({ error: 'Invalid book metadata.' }, 400);
       if (data.book) data.book = parseTemplateBook(data.book, data.id);
       if (!data.images || typeof data.images !== 'object' || Array.isArray(data.images) || Object.keys(data.images).length > 250) return reply({ error: 'Invalid artwork manifest.' }, 400);
+      // A damaged/local-only image map must never erase still-used account artwork.
+      const previous = await env.DB.prepare('SELECT data,revision FROM library_books WHERE owner=? AND id=?').bind(owner,data.id).first<{data:string;revision:number}>();
+      if(previous && previous.revision === data.revision){
+        const saved=JSON.parse(previous.data);
+        if(saved.book&&!data.book)return reply({error:'This copy is missing the saved manuscript. Open the account copy before saving. Your account book has not been changed.'},409);
+        const used=new Set<string>(data.book?.pages.map((page:{image:string})=>page.image) || Object.keys(saved.images || {}));
+        const lost=Object.keys(saved.images || {}).filter(name=>used.has(name)&&!Object.hasOwn(data.images,name));
+        if(lost.length)return reply({error:'This copy is missing previously saved artwork. Open the account copy to recover the images before saving. Your account book has not been changed.'},409);
+      }
       let total = 0;
       for (const [name, value] of Object.entries(data.images)) {
         const asset = value as { hash: string; type: string };
