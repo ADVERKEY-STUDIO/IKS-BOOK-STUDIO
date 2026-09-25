@@ -252,6 +252,7 @@ export function renderTemplatePage(book:TemplateBook,index:number,urls:Record<st
  const size=templateSize(book.templateId,book.templateRevision||1);
  return renderTemplateBook({...book,pages:[book.pages[index]]},urls,font)
   .replace('<span>Page 1</span>',`<span>Page ${index+1}</span>`)
+  .replace('data-spread="1"',`data-spread="${index+1}"`)
   .replace(/<section class="spread cover[\s\S]*?<\/section>/,'')
   .replace('</style>',`body{background:transparent}.toolbar{display:none}.spread{width:100%!important;height:auto!important;aspect-ratio:${size.width}/${size.height};margin:0;zoom:1!important}.spread:not(.planned-spread){font-size:1.8vw}.spread:not(.planned-spread) .copy{padding:5%}.spread:not(.planned-spread) .original{font-size:1.8vw!important}.spread:not(.planned-spread) .meaning{font-size:1.3vw}.spread:not(.planned-spread) .copy h2{font-size:1.5vw}.folio{display:none}</style>`)
   .replace(/contenteditable="true"/g,'');

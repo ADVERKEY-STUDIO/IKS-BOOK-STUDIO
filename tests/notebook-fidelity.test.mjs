@@ -21,3 +21,8 @@ test('generation distinguishes finished diagrams from layout guides',()=>{
  assert.match(prompt,/Never rasterise SVG layout guides/);
  assert.match(prompt,/REFERENCE STUDY/);
 });
+test('single-page previews retain the actual page number for density review',async()=>{
+ const {renderTemplatePage}=await import('../lib/template-book.ts');
+ const twoPages={...book,pages:[book.pages[0],{...book.pages[0],id:'p2'}]};
+ assert.match(renderTemplatePage(twoPages,1),/data-spread="2"/);
+});

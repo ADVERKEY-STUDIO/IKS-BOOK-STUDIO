@@ -124,7 +124,7 @@ export function layoutIssues(book:TemplateBook):string[] {
   if(book.templateId==='iks-notes'&&p.noteSections){
    for(const [sectionIndex,section] of p.noteSections.entries()){
     const region=b.original[sectionIndex];
-    if(region&&region.w>=25&&section.body.trim().split(/\s+/).length<region.w*region.h/40)
+    if(region&&region.w>=25&&section.body.trim().split(/\s+/).length<region.w*region.h/28)
      notes.push(`Spread ${i+1}, section ${sectionIndex+1}: sparse notebook section; compare with the reference and combine related source material or choose a better-fitting arrangement. Do not pad or invent facts.`);
    }
   }
@@ -184,13 +184,22 @@ export function blueprintSvg(b:Blueprint,paper='#fff9e9',accent='#38766c',height
 export function inspectRenderedBook(doc:Document):string[]{
  const notes:string[]=[];
  doc.querySelectorAll<HTMLElement>('.spread:not(.cover)').forEach((spread,i)=>{
-  if(spread.querySelector('.missing'))notes.push(`Spread ${i+1}: artwork did not load or is still missing.`);
+  const pageNumber=Number(spread.dataset.spread)||i+1;
+  if(spread.querySelector('.missing'))notes.push(`Spread ${pageNumber}: artwork did not load or is still missing.`);
   spread.querySelectorAll<HTMLElement>('.planned-text,.story-text,.copy').forEach(el=>{
-   if(el.clientHeight&& (el.scrollHeight>el.clientHeight+2||el.scrollWidth>el.clientWidth+2))notes.push(`Spread ${i+1}: text overflow; split content or choose a larger reading region.`);
+   if(el.clientHeight&& (el.scrollHeight>el.clientHeight+2||el.scrollWidth>el.clientWidth+2))notes.push(`Spread ${pageNumber}: text overflow; split content or choose a larger reading region.`);
+   if(spread.classList.contains('iks-notes')&&el.classList.contains('original')&&el.clientHeight){
+    const range=doc.createRange();range.selectNodeContents(el);
+    const rects=Array.from(range.getClientRects()).filter(r=>r.height>0);
+    const box=el.getBoundingClientRect();
+    const bottom=Math.max(box.top,...rects.map(r=>r.bottom));
+    if(rects.length&&(bottom-box.top)/box.height<.55)
+     notes.push(`Spread ${pageNumber}: sparse section ${el.dataset.textRegion||''}; much of its text area is empty. Combine related source topics or regenerate fuller notes; keep deliberate breathing room.`);
+   }
   });
   spread.querySelectorAll<HTMLImageElement>('.planned-art,.art img').forEach(im=>{
-   if(!im.naturalWidth)notes.push(`Spread ${i+1}: artwork did not load.`);
-   else if(im.clientWidth&&im.naturalWidth/im.clientWidth*96<300)notes.push(`Spread ${i+1}: artwork is below 300 dpi at placed size.`);
+   if(!im.naturalWidth)notes.push(`Spread ${pageNumber}: artwork did not load.`);
+   else if(im.clientWidth&&im.naturalWidth/im.clientWidth*96<300)notes.push(`Spread ${pageNumber}: artwork is below 300 dpi at placed size.`);
   });
  });
  return [...new Set(notes)];
