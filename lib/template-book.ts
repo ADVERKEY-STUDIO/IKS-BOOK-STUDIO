@@ -125,6 +125,7 @@ export type BookPage = {
     sourceReference: string;
     scene: string;
     image: string;
+    artworkFit?: 'contain';
     layout: Layout;
     composition?: StoryComposition;
     blueprint?: string;
@@ -150,6 +151,27 @@ export const assetName = (s: string) => /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,90}\.(png|j
 const obj = (v: unknown): Record<string, unknown> => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {};
 const str = (v: unknown, label: string, max = 12000): string => { if (typeof v !== 'string' || v.length > max)
     throw Error(`${label} must be text under ${max} characters.`); return v; };
+/** Recover the observed slot-based notebook variant without guessing filenames or rewriting notes. */
+function normalizeNotebookSlots(page: Record<string, unknown>, index: number): Record<string, unknown> {
+    if (page.image !== undefined || page.artSlots === undefined) return page;
+    const fail = () => Error(`Spread ${index + 1}: artSlots must list every blueprint slot once, use crop "contain", and share one safe images/<filename>. Return the standard image field for full-page artwork.`);
+    if (typeof page.blueprint !== 'string' || !page.blueprint.startsWith('reference-notes-dense-')) throw fail();
+    const blueprint = blueprintFor({templateId:'iks-notes',templateRevision:TEMPLATE_REVISION},{blueprint:page.blueprint});
+    if (!Array.isArray(page.artSlots) || page.artSlots.length !== blueprint.art.length) throw fail();
+    const slots = page.artSlots.map(obj);
+    const numbers = new Set(slots.map(s => s.slot));
+    if (numbers.size !== blueprint.art.length || slots.some(s => typeof s.slot !== 'number' || !Number.isInteger(s.slot) || s.slot < 1 || s.slot > blueprint.art.length || s.crop !== 'contain')) throw fail();
+    const names = slots.map(s => typeof s.asset === 'string' && s.asset.startsWith('images/') ? s.asset.slice(7) : '');
+    if (names.some(name => !assetName(name)) || new Set(names).size !== 1) throw fail();
+    const scene = slots.slice().sort((a,b)=>Number(a.slot)-Number(b.slot)).map(s => `Slot ${s.slot}: ${typeof s.scene === 'string' ? s.scene : typeof s.prompt === 'string' ? s.prompt : ''}`).join('\n\n');
+    return {...page, image:names[0], artworkFit:'contain', layout:page.layout ?? 'study',
+        layoutReason:page.layoutReason ?? 'Imported explicit art slots using the selected notebook blueprint.',
+        scene:page.scene ?? scene, fontSize:page.fontSize ?? 10.5,
+        noteSections:Array.isArray(page.noteSections) ? page.noteSections.map(value => {
+            const section=obj(value);
+            return {...section,sourceReference:section.sourceReference ?? page.sourceReference};
+        }) : page.noteSections};
+}
 export function parseTemplateBook(input: unknown, projectId?: string): TemplateBook {
     const b = obj(input);
     if (b.format !== 'iks-template-book-v1')
@@ -163,12 +185,18 @@ export function parseTemplateBook(input: unknown, projectId?: string): TemplateB
         throw Error('Include between 1 and 80 spreads.');
     const seen = new Set<string>(), images = new Set<string>();
     const pages = b.pages.map((v, i) => {
-        const p = obj(v);
+        const raw = obj(v);
+        const p = b.templateId === 'iks-notes' && b.templateRevision === TEMPLATE_REVISION ? normalizeNotebookSlots(raw, i) : raw;
         const id = str(p.id, 'Spread ID', 90);
         if (!/^[a-z0-9-]+$/.test(id) || seen.has(id))
             throw Error('Spread IDs must be unique lowercase names.');
         seen.add(id);
-        const image = str(p.image, 'Image filename', 100);
+        if (typeof p.image !== 'string' || !p.image.trim())
+            throw Error(`Spread ${i + 1}: missing or invalid image filename. Set image to a filename such as "page-01.png", even when its artwork is unfinished.`);
+        if (p.image.length > 100) throw Error(`Spread ${i + 1}: image filename is too long. Use a short name such as "page-01.png" and rename the matching file in images/.`);
+        const image = p.image;
+        if (p.artworkFit !== undefined && (p.artworkFit !== 'contain' || b.templateId !== 'iks-notes' || typeof p.blueprint !== 'string' || !p.blueprint.startsWith('reference-notes-dense-')))
+            throw Error(`Spread ${i + 1}: unsupported artworkFit.`);
         if (!assetName(image) || images.has(image))
             throw Error('Each spread needs a unique PNG, JPEG or WebP filename without folders.');
         images.add(image);
@@ -189,7 +217,7 @@ export function parseTemplateBook(input: unknown, projectId?: string): TemplateB
         if(noteSections&&original!==notebookOriginal(noteSections))throw Error('Notebook original text must exactly match its structured sections; no content may be silently omitted.');
         if (!original.trim() && b.contentMode !== 'images')
             throw Error(`Spread ${i + 1} has no original text.`);
-        return { id, ...(noteSections?{noteSections}:{}), ...(textPositions?{textPositions}:{}), ...(p.artworkBlueprint !== undefined ? { artworkBlueprint: str(p.artworkBlueprint, 'Artwork blueprint', 80) } : {}), ...(p.blueprint !== undefined ? { blueprint: str(p.blueprint, 'Blueprint', 80) } : {}), ...(p.layoutReason !== undefined ? { layoutReason: str(p.layoutReason, 'Layout reason', 1000) } : {}), title: str(p.title, 'Spread title', 300), original, meaning: str(p.meaning ?? '', 'Meaning'), sourceReference: str(p.sourceReference, 'Source reference', 1000), scene: str(p.scene, 'Scene brief'), image, layout: p.layout as Layout, ...(validComposition ? { composition: p.composition as StoryComposition } : {}), fontSize: Math.min(32, Math.max(b.templateId==='iks-notes'?10:14, Number(p.fontSize) || 22)), imageScale: Math.min(100, Math.max(40, Number(p.imageScale) || 100)) };
+        return { id, ...(p.artworkFit === 'contain' ? {artworkFit:'contain' as const} : {}), ...(noteSections?{noteSections}:{}), ...(textPositions?{textPositions}:{}), ...(p.artworkBlueprint !== undefined ? { artworkBlueprint: str(p.artworkBlueprint, 'Artwork blueprint', 80) } : {}), ...(p.blueprint !== undefined ? { blueprint: str(p.blueprint, 'Blueprint', 80) } : {}), ...(p.layoutReason !== undefined ? { layoutReason: str(p.layoutReason, 'Layout reason', 1000) } : {}), title: str(p.title, 'Spread title', 300), original, meaning: str(p.meaning ?? '', 'Meaning'), sourceReference: str(p.sourceReference, 'Source reference', 1000), scene: str(p.scene, 'Scene brief'), image, layout: p.layout as Layout, ...(validComposition ? { composition: p.composition as StoryComposition } : {}), fontSize: Math.min(32, Math.max(b.templateId==='iks-notes'?10:14, Number(p.fontSize) || 22)), imageScale: Math.min(100, Math.max(40, Number(p.imageScale) || 100)) };
     });
     const title = str(b.title, 'Book title', 300);
     if (!title.trim())
