@@ -61,3 +61,17 @@
 .ts-workspace .ts-fields fieldset{min-width:0;border:0;padding:0;margin:0}
 @media(max-width:900px){.ts-workspace{padding:16px}.ts-workspace .ts-editor{grid-template-columns:1fr}.ts-workspace .ts-editor aside{position:static;max-height:175px;padding:0;display:flex;gap:8px}.ts-editor aside h2{display:none}.ts-workspace .ts-editor aside button{min-width:120px;max-width:120px;margin:0}.ts-workspace .ts-editor aside img{height:85px}.ts-workspace .ts-bookbar{display:flex}.ts-tool-menu .ts-menu-content{right:auto;left:0}}
 @media(max-width:550px){.ts-workspace{padding:12px}.ts-workspace .ts-page-canvas{padding:12px}.ts-page-heading{align-items:flex-start;flex-direction:column;gap:6px}.ts-tool-section>summary span{display:block;margin:4px 0 0 16px}.ts-workspace .ts-header [role=status]{max-width:65%}.ts-workspace .ts-bookbar h1{font-size:24px}.ts-workspace .ts-bookbar .ts-actions{align-items:stretch}.ts-workspace .ts-bookbar .ts-actions>button{max-width:100%;text-align:left}}
+
+/* Named tool buttons open one focused panel instead of stacked arrow disclosures. */
+.ts-tool{display:inline-block;vertical-align:top;margin:0 8px 12px 0}
+.ts-workspace .ts-tool-trigger{background:#fff;border:1px solid #bdc9c0;font-weight:600;padding:11px 18px}
+.ts-workspace .ts-tool.is-open>.ts-tool-trigger{background:#243e35;color:#fff;border-color:#243e35}
+.ts-tool-body{position:fixed;right:0;top:0;bottom:0;width:min(420px,100vw);overflow:auto;background:#fff;z-index:100;padding:22px;border-left:1px solid #cbd5cd;box-shadow:-12px 0 40px #243e3518}
+.ts-tool-body>header{display:flex;align-items:center;justify-content:space-between;gap:12px;position:sticky;top:-22px;background:#fff;padding:16px 0;z-index:1;border-bottom:1px solid #e2e7df;margin-bottom:20px}
+.ts-tool-body>header h2{font:600 19px Arial,sans-serif;margin:0}
+.ts-tool-body .ts-fields{grid-template-columns:1fr}.ts-tool-body .ts-panel{border:0;padding:0;margin:20px 0}.ts-tool-body h3{font-size:15px;margin:18px 0 12px}
+.ts-tool-body p{font-size:13px;line-height:1.6}.ts-tool-body .ts-actions{align-items:stretch}.ts-tool-body .ts-importbar{display:block}.ts-tool-body button{max-width:100%}.ts-tool-body .ts-upload{margin:16px 0}
+.ts-page-canvas>.ts-tool{border:0;padding:0;margin:18px 8px 0 0}
+.ts-tool-body .ts-page-image{margin:0}.ts-tool-body fieldset{min-width:0}
+@media(min-width:1100px){.ts-workspace:has(.ts-tool.is-open){padding-right:450px}.ts-workspace:has(.ts-tool.is-open) .ts-editor{grid-template-columns:120px minmax(0,1fr)}}
+@media(max-width:600px){.ts-tool-body{width:100%;top:15dvh;border-top:1px solid #cbd5cd;border-radius:16px 16px 0 0}.ts-tool-body>header{top:-22px}.ts-page-canvas>.ts-tool{margin-right:5px}.ts-workspace .ts-tool-trigger{padding:10px 12px}}
