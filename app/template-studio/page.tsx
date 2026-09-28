@@ -2,6 +2,7 @@
 import {accountSaveQueue,recoverAccountImages,recoverDraftImages} from '../../lib/template-backup';
 import {bookArtworkFiles} from '../../lib/book-completion';
 import CompletionEditor from './completion-editor';
+import TypographyEditor from './typography-editor';
 import { templateReferenceEntries } from '../../lib/template-reference-package';
 import {notebookOriginal} from '../../lib/notebook-content';
 import {autoPlaceStoryBook} from '../../lib/story-text-placement';
@@ -503,6 +504,7 @@ export default function TemplateStudio() {
      download('Image-Development-Request.zip', new Blob([new Uint8Array(zipSync(entries, { level: 0 }))], { type: 'application/zip' }));
  })}>Download image development request</button></details>}
  {draft.templateId==='iks-notes'&&draft.visualDirection?.notebookPageCount!==undefined&&book.pages.length!==draft.visualDirection.notebookPageCount&&<p className="ts-layout-notes" role="status">Requested {draft.visualDirection.notebookPageCount} content pages; imported {book.pages.length}. Regenerate using the current request to meet the page budget. The cover is counted separately.</p>}
+ <TypographyEditor book={book} busy={busy} onChange={typography=>patch({book:{...book,typography}})}/>
  <CompletionEditor book={book} images={draft.images} onChange={completion=>patch({book:{...book,completion}})} onReplace={(file,name)=>void run(()=>replaceArtwork(file,name))}/>
  {book.contentMode!=='images'&&book.pages.some(p=>!p.original.trim())&&<p className="ts-layout-notes" role="status">This draft has empty original text on spreads {book.pages.flatMap((p,i)=>p.original.trim()?[]:[i+1]).join(', ')}. Your edits can be saved and restored. Add the source passages before publishing.</p>}
  {layoutIssues(book).length>0&&<details className="ts-layout-notes"><summary>Template layout notes ({layoutIssues(book).length})</summary>{layoutIssues(book).map((note,i)=><p key={i}>{note}</p>)}</details>}
