@@ -19,10 +19,12 @@ test('selected images retain order and identity, with blank editable text and no
     assert.equal(await images['spread-01.png'].text(), 'first');
   }
 });
-test('image-only empty text permission does not weaken source book validation', () => {
+test('unfinished source drafts remain restorable without allowing malformed text', () => {
   const { book } = createImageFirstBook('new', 'panorama', files());
   delete book.contentMode;
-  assert.throws(() => parseTemplateBook(book), /no original text/);
+  assert.equal(parseTemplateBook(book).pages[0].original, '');
+  book.pages[0].original = null;
+  assert.throws(() => parseTemplateBook(book), /Original text/);
 });
 test('selection bounds and file formats are enforced', () => {
   assert.throws(() => createImageFirstBook('new', 'panorama', []), /1 and 80/);
