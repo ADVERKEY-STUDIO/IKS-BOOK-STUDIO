@@ -3,7 +3,7 @@ import type {TemplateBook} from '../../lib/template-book';
 import type {BookTypography} from '../../lib/book-typography';
 export default function TypographyEditor({book,busy,onChange}:{book:TemplateBook;busy:boolean;onChange:(typography:BookTypography|undefined)=>void}){
  const current:BookTypography=book.typography??{font:'template',alignment:'template'};
- return <details className="ts-panel"><summary>Book typography</summary>
+ return <section className="ts-panel"><h3>Book typography</h3>
   <p>Choose the font for the whole book and the spacing and alignment of its passages. Changes save automatically and carry into previews and exports.</p>
   <fieldset disabled={busy} className="ts-fields"><legend>Text appearance</legend>
    <label>Book font<select value={current.font} onChange={e=>onChange({...current,font:e.target.value as BookTypography['font']})}>
@@ -18,5 +18,5 @@ export default function TypographyEditor({book,busy,onChange}:{book:TemplateBook
    <button type="button" style={{alignSelf:'start'}} onClick={()=>onChange(undefined)}>Reset typography to template</button>
   </fieldset>
   <p className="ts-help">Use the Text size control below for individual spreads. Changing typography can affect text fit; review the pages and use Auto-place text where available.</p>
- </details>;
+ </section>;
 }
