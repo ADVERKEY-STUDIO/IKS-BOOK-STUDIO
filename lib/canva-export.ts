@@ -47,12 +47,12 @@ export function captureCanvaPage(section:HTMLElement,book:TemplateBook,index:num
   const style=cs(el),b=box(el),padding={left:parseFloat(style.paddingLeft)||0,top:parseFloat(style.paddingTop)||0,right:parseFloat(style.paddingRight)||0,bottom:parseFloat(style.paddingBottom)||0};
   const role=el.classList.contains('meaning')?'meaning':'original',page=book.pages[index];
   const background=el.classList.contains('text-background')?page?.textBackgrounds?.[role]:undefined;
-  if(background&&background.shape!=='none')elements.push({kind:'shape',shape:shapeNames[background.shape],...b,color:background.color.slice(1),lineColor:'88775F'});
+  if(background&&background.shape!=='none')elements.push({kind:'shape',shape:shapeNames[background.shape],...b,x:b.x+b.w*(background.offsetX??0)/100,y:b.y+b.h*(background.offsetY??0)/100,w:b.w*(background.width??100)/100,h:b.h*(background.height??100)/100,color:background.color.slice(1),lineColor:'88775F'});
   b.x+=padding.left*sx;b.y+=padding.top*sy;b.w-=(padding.left+padding.right)*sx;b.h-=(padding.top+padding.bottom)*sy;
   const align=['left','center','right','justify'].includes(style.textAlign)?style.textAlign as 'left'|'center'|'right'|'justify':'left';
   const fontFace=style.fontFamily.includes('Book')?fontName(book):style.fontFamily.split(',')[0].replace(/["']/g,'');
   const label=cs(el,'::before'),labelText=label.content.replace(/^["']|["']$/g,'');
-  if(el.classList.contains('reading-label')&&labelText&&labelText!=='none'){
+  if(el.classList.contains('reading-label')&&label.display!=='none'&&labelText&&labelText!=='none'){
    const labelHeight=(parseFloat(label.lineHeight)||parseFloat(label.fontSize)*1.4)*sy;
    elements.push({kind:'text',...b,h:labelHeight,fontFace,align,lineSpacingMultiple:1,runs:[{text:labelText,fontSize:parseFloat(label.fontSize)*sx*72,bold:false,italic:false,underline:false,color:color(label.color)}],name:'Reading label'});
    const offset=labelHeight+(parseFloat(label.marginBottom)||0)*sy;b.y+=offset;b.h-=offset;

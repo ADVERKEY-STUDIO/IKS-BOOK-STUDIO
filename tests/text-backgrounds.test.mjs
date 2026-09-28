@@ -24,3 +24,20 @@ test('removal and old books preserve transparent text; untrusted shapes and colo
  assert.doesNotMatch(renderTemplatePage(book,0),/class="planned-text [^"]*text-background /);
  for(const value of [null,[],{caption:{shape:'cloud',color:'#ffffff'}},{original:{shape:'remote',color:'#ffffff'}},{meaning:{shape:'cloud',color:'red;url(https://bad)'}},{original:{shape:'cloud',color:123}}])assert.throws(()=>parseTextBackgrounds(value));
 });
+test('background adjustments persist and invalid geometry is rejected',()=>{
+ const book=fixture();book.pages[0].textBackgrounds={original:{shape:'cloud',color:'#ffffff',offsetX:-10,offsetY:-8,width:120,height:130,padding:2}};
+ const restored=parseTemplateBook(JSON.parse(JSON.stringify(book)));
+ assert.deepEqual(restored.pages[0].textBackgrounds,book.pages[0].textBackgrounds);
+ const html=renderTemplatePage(restored,0);assert.ok(html.includes('--bg-x:-10%'));assert.ok(html.includes('--bg-width:120%'));assert.ok(html.includes('--bg-padding:2em'));
+ for(const adjustment of [{width:0},{height:201},{offsetX:Infinity},{padding:-1}])assert.throws(()=>parseTextBackgrounds({original:{shape:'cloud',color:'#ffffff',...adjustment}}));
+});
+test('reading labels can be hidden independently without removing passages',()=>{
+ for(const key of ['showReadFirst','showMeaning']){
+  const book=fixture();book.typography={font:'template',alignment:'template',[key]:false};
+  const restored=parseTemplateBook(JSON.parse(JSON.stringify(book)));assert.equal(restored.typography[key],false);
+  for(const html of [renderTemplatePage(restored,0),renderTemplateBook(restored)]){
+   assert.ok(html.includes('जय हनुमान'));assert.ok(html.includes('A meaning'));
+   assert.ok(html.includes(`.planned-spread .${key==='showReadFirst'?'original':'meaning'}.reading-label::before{display:none;content:none}`));
+  }
+ }
+});

@@ -15,6 +15,8 @@ export default function TypographyEditor({book,busy,onChange}:{book:TemplateBook
    <label>Passage alignment<select value={current.alignment} onChange={e=>onChange({...current,alignment:e.target.value as BookTypography['alignment']})}>
     <option value="template">Template default</option><option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option>
    </select></label>
+   <label>Read first label<select value={current.showReadFirst===false?'hide':'show'} onChange={e=>onChange({...current,showReadFirst:e.target.value==='show'})}><option value="show">Show in book</option><option value="hide">Hide in book</option></select></label>
+   <label>Meaning label<select value={current.showMeaning===false?'hide':'show'} onChange={e=>onChange({...current,showMeaning:e.target.value==='show'})}><option value="show">Show in book</option><option value="hide">Hide in book</option></select></label>
    <button type="button" style={{alignSelf:'start'}} onClick={()=>onChange(undefined)}>Reset typography to template</button>
   </fieldset>
   <p className="ts-help">Use the Text size control below for individual spreads. Changing typography can affect text fit; review the pages and use Auto-place text where available.</p>
