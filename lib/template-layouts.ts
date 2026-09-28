@@ -156,6 +156,7 @@ export function plannedSpreadCss(){return `
 .planned-spread{container-type:inline-size;position:relative;isolation:isolate;background:var(--paper);color:var(--ink);font-family:Book,Georgia,serif}
 .planned-spread .planned-art{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:0}
 .planned-spread .planned-text{position:absolute;z-index:1;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5;margin:0;padding:0;border:0;background:transparent;color:var(--ink);font-family:Book,Georgia,serif;font-weight:400;text-align:left}
+.planned-spread .continuous-reading::before{display:block;font-size:.72em;font-style:normal;letter-spacing:.03em;margin-bottom:.4em;white-space:normal}.planned-spread .original.continuous-reading::before{content:"1 · पाठ / Read first"}.planned-spread .meaning.continuous-reading::before{content:"2 · Meaning"}
 .planned-spread .meaning{font-style:italic}.planned-spread .planned-panel{background:var(--paper);outline:2mm solid var(--paper)}
 .planned-spread .planned-art-frame{position:absolute;pointer-events:none;z-index:1}
 .planned-spread.paper-play[data-revision="1"] .planned-text{outline:1px solid var(--accent);outline-offset:3mm}.planned-spread.paper-play .meaning{outline:0}
