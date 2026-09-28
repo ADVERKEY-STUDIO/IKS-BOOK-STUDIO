@@ -175,13 +175,14 @@ test('account backup restores unfinished original text without losing artwork',a
  assert.equal((await libraryApi(new Request('https://studio.test/api/library/asset?hash='+hash,{method:'PUT',headers:{origin:'https://studio.test',cookie},body:bytes}),env)).status,200);
  const data={id:'unfinished',templateId:'painted',title:'Working draft',language:'Hindi',revision:0,images:{'page.png':{hash,type:'image/png'}},book:{format:'iks-template-book-v1',projectId:'unfinished',templateId:'painted',title:'Working draft',language:'Hindi',characterGuide:'',pages:[{id:'page',title:'Passage',original:'जय हनुमान',meaning:'Keep this explanation',sourceReference:'Page 1',scene:'Forest',image:'page.png',layout:'art-right',fontSize:22,imageScale:100}]}};
  assert.equal((await libraryApi(req('/api/library/books','PUT',data,cookie),env)).status,200);
- data.revision=1;data.book.pages[0].original='';data.book.typography={font:'sans',alignment:'left',lineHeight:1.6};
+ data.revision=1;data.book.pages[0].original='';data.book.typography={font:'sans',alignment:'left',lineHeight:1.6};data.book.pages[0].textBackgrounds={original:{shape:'cloud',color:'#fff8e8'}};
  const saved=await libraryApi(req('/api/library/books','PUT',data,cookie),env);
  assert.equal(saved.status,200,await saved.text());
  const second=await signIn(env,'unfinished@example.test');
  const restored=await (await libraryApi(req('/api/library/books','GET',undefined,second.cookie),env)).json();
  assert.equal(restored.books[0].book.pages[0].original,'');
  assert.deepEqual(restored.books[0].book.typography,data.book.typography);
+ assert.deepEqual(restored.books[0].book.pages[0].textBackgrounds,data.book.pages[0].textBackgrounds);
  assert.equal(restored.books[0].book.pages[0].meaning,'Keep this explanation');
  assert.equal(restored.books[0].images['page.png'].hash,hash);
  const asset=await libraryApi(req('/api/library/asset?hash='+hash,'GET',undefined,second.cookie),env);
