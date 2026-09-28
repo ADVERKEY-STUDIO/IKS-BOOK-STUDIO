@@ -26,3 +26,13 @@ test('legacy books keep defaults and reset removes all user typography overrides
 test('typography import rejects invalid styles and CSS injection',()=>{
  for(const value of [null,[],{}, {font:'remote-url',alignment:'left'}, {font:'serif',alignment:'left;color:red'}, {font:'sans',alignment:'left',lineHeight:'1.5'}, {font:'sans',alignment:'left',lineHeight:Infinity}, {font:'sans',alignment:'left',lineHeight:0}, {font:'sans',alignment:'left',lineHeight:10}])assert.throws(()=>parseBookTypography(value));
 });
+
+test('justified alignment survives restore and reaches preview and full-book exports',()=>{
+ const input={...fixture(),typography:{font:'template',alignment:'justify'}};
+ const restored=parseTemplateBook(JSON.parse(JSON.stringify(input)));
+ assert.equal(restored.typography.alignment,'justify');
+ for(const html of [renderTemplateBook(restored),renderTemplatePage(restored,0)]){
+  assert.ok(html.includes('text-align:justify!important'));
+  assert.ok(html.includes('जय हनुमान'));assert.ok(html.includes('A meaning'));
+ }
+});

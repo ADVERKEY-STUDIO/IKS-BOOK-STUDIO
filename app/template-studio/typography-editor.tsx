@@ -13,7 +13,7 @@ export default function TypographyEditor({book,busy,onChange}:{book:TemplateBook
     <option value="template">Template default</option>{[1.2,1.4,1.6,1.8,2].map(n=><option key={n} value={n}>{n} ×</option>)}
    </select></label>
    <label>Passage alignment<select value={current.alignment} onChange={e=>onChange({...current,alignment:e.target.value as BookTypography['alignment']})}>
-    <option value="template">Template default</option><option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option>
+    <option value="template">Template default</option><option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option><option value="justify">Justify</option>
    </select></label>
    <label>Read first label<select value={current.showReadFirst===false?'hide':'show'} onChange={e=>onChange({...current,showReadFirst:e.target.value==='show'})}><option value="show">Show in book</option><option value="hide">Hide in book</option></select></label>
    <label>Meaning label<select value={current.showMeaning===false?'hide':'show'} onChange={e=>onChange({...current,showMeaning:e.target.value==='show'})}><option value="show">Show in book</option><option value="hide">Hide in book</option></select></label>
