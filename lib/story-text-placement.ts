@@ -33,7 +33,7 @@ export async function placeStoryText(spread:HTMLElement,page:BookPage,boxes:Regi
  const quiet=clearPaper(spread,image),original=spread.querySelector<HTMLElement>('.planned-text.original'),meaning=spread.querySelector<HTMLElement>('.planned-text.meaning');
  if(!original||!meaning)return null;
  const sourceProbe=original.cloneNode(false) as HTMLElement,meaningProbe=meaning.cloneNode(false) as HTMLElement;
- for(const probe of [sourceProbe,meaningProbe]){probe.classList.add('continuous-reading');probe.removeAttribute('data-text-region');probe.removeAttribute('contenteditable');probe.style.cssText+=';display:block;visibility:hidden;left:0;top:0;height:auto;';spread.append(probe);}
+ for(const probe of [sourceProbe,meaningProbe]){probe.classList.add('continuous-reading','reading-label');probe.removeAttribute('data-text-region');probe.removeAttribute('contenteditable');probe.style.cssText+=';display:block;visibility:hidden;left:0;top:0;height:auto;';spread.append(probe);}
  sourceProbe.textContent=page.original;meaningProbe.textContent=page.meaning;
  const measure=(el:HTMLElement,width:number)=>{el.style.width=width+'%';return (el.scrollHeight+4)/spread.clientHeight*100;};
  type Candidate={source:Region;meaning:Region;score:number};
