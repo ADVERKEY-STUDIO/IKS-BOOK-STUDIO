@@ -116,7 +116,7 @@ export function planTemplateBook(book:TemplateBook):TemplateBook {
  return {...book,templateRevision:TEMPLATE_REVISION,pages};
 }
 export function layoutIssues(book:TemplateBook):string[] {
- const notes:string[]=[];
+ const notes:string[]=book.contentMode==='images'?[]:book.pages.flatMap((p,i)=>p.original.trim()?[]:[`Spread ${i+1}: original text is empty. Add the source passage before publishing; this unfinished draft can still be saved and restored.`]);
  if(!book.templateRevision){notes.push('Legacy book: layout specification is not pinned. Review a new layout plan before regenerating artwork.');return notes;}
  for(const [i,p] of book.pages.entries()){
   const b=blueprintFor(book,p);

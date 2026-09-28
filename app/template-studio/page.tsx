@@ -233,6 +233,10 @@ export default function TemplateStudio() {
             setSelected(0); setUnmatched([]); setChosenImages([]); setStep(2); setError(''); window.scrollTo({ top: 0 });
             return;
         }
+        if (draft) {
+            patch({templateId});
+            setStep(1); setError(''); window.scrollTo({top:0}); return;
+        }
         setDraft({ id: crypto.randomUUID(), templateId, title: 'My illustrated book', language: 'Original language with English meanings', images: {}, updated: Date.now() });
         setStep(1); setError(''); window.scrollTo({top:0});
     }
@@ -431,7 +435,8 @@ export default function TemplateStudio() {
         } finally { style.remove(); exportFont.release(); }
     }
     async function exportZip() { if (!book || !draft)
-        return; const entries: Record<string, Uint8Array> = { 'book.json': strToU8(JSON.stringify(book, null, 2)), 'manuscript.md': strToU8(`# ${book.title}\n\n` + book.pages.map(p => `## ${p.title}\n\n${p.original}\n\n${p.meaning}\n\nSource: ${p.sourceReference}`).join('\n\n')), 'README.txt': strToU8('WORKING EDITABLE BOOK\nOpen preview.html in a browser to read or Print > Save as PDF. Text is editable for printing; save permanent changes in Book Studio. Reimport book.json and images in the matching workspace. Original text and explanations are separate. Layout/font/scale settings are in book.json. Paintings are raster assets, not editable vectors. Review original text, overflow and effective image resolution before publication. Template sample art is not included.\nMissing images: ' + bookArtworkFiles(book).filter(name=>!draft.images[name]).join(', ')) }; const urls: Record<string, string> = {}; for (const [name, blob] of Object.entries(draft.images)) {
+        return; parseTemplateBook(book); // Never produce a package that restore will reject.
+        const entries: Record<string, Uint8Array> = { 'book.json': strToU8(JSON.stringify(book, null, 2)), 'manuscript.md': strToU8(`# ${book.title}\n\n` + book.pages.map(p => `## ${p.title}\n\n${p.original}\n\n${p.meaning}\n\nSource: ${p.sourceReference}`).join('\n\n')), 'README.txt': strToU8('WORKING EDITABLE BOOK\nOpen preview.html in a browser to read or Print > Save as PDF. Text is editable for printing; save permanent changes in Book Studio. Reimport book.json and images in the matching workspace. Original text and explanations are separate. Layout/font/scale settings are in book.json. Paintings are raster assets, not editable vectors. Review original text, overflow and effective image resolution before publication. Template sample art is not included.\nMissing images: ' + bookArtworkFiles(book).filter(name=>!draft.images[name]).join(', ')) }; const urls: Record<string, string> = {}; for (const [name, blob] of Object.entries(draft.images)) {
         entries['images/' + name] = new Uint8Array(await blob.arrayBuffer());
         urls[name] = 'images/' + name;
     } entries['preview.html'] = strToU8(renderTemplateBook(book, urls)); const font = await fetch('/fonts/'+templateFont(book)); if (!font.ok)
@@ -499,6 +504,7 @@ export default function TemplateStudio() {
  })}>Download image development request</button></details>}
  {draft.templateId==='iks-notes'&&draft.visualDirection?.notebookPageCount!==undefined&&book.pages.length!==draft.visualDirection.notebookPageCount&&<p className="ts-layout-notes" role="status">Requested {draft.visualDirection.notebookPageCount} content pages; imported {book.pages.length}. Regenerate using the current request to meet the page budget. The cover is counted separately.</p>}
  <CompletionEditor book={book} images={draft.images} onChange={completion=>patch({book:{...book,completion}})} onReplace={(file,name)=>void run(()=>replaceArtwork(file,name))}/>
+ {book.contentMode!=='images'&&book.pages.some(p=>!p.original.trim())&&<p className="ts-layout-notes" role="status">This draft has empty original text on spreads {book.pages.flatMap((p,i)=>p.original.trim()?[]:[i+1]).join(', ')}. Your edits can be saved and restored. Add the source passages before publishing.</p>}
  {layoutIssues(book).length>0&&<details className="ts-layout-notes"><summary>Template layout notes ({layoutIssues(book).length})</summary>{layoutIssues(book).map((note,i)=><p key={i}>{note}</p>)}</details>}
  {showLayoutPlan&&<LayoutReview key={book.projectId} book={book} busy={busy} onClose={()=>setShowLayoutPlan(false)} onCreate={planned=>run(()=>createRedesign(planned))}/>}
  {showContactSheet&&<section aria-label="Whole-book layout review"><h2>Whole-book review</h2><p>Compare scene count, text placement, illustration style and neighbouring spreads. Structural checks cannot judge whether painted characters match the reference.</p><div className="ts-layout-contact">{book.pages.map((p,i)=><button key={p.id} onClick={()=>setSelected(i)}><BookSpreadPreview book={book} index={i} images={draft.images}/><span>{i+1}. {p.title} · {p.blueprint||p.composition||p.layout}</span></button>)}</div></section>}

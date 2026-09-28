@@ -167,3 +167,22 @@ test('browser HEAD artwork checks work without Origin while retaining account is
   }
  }
 });
+
+test('account backup restores unfinished original text without losing artwork',async()=>{
+ const env=environment();const {cookie}=await signIn(env,'unfinished@example.test');
+ const bytes=new Uint8Array([7,8,9]);
+ const hash=Buffer.from(await crypto.subtle.digest('SHA-256',bytes)).toString('hex');
+ assert.equal((await libraryApi(new Request('https://studio.test/api/library/asset?hash='+hash,{method:'PUT',headers:{origin:'https://studio.test',cookie},body:bytes}),env)).status,200);
+ const data={id:'unfinished',templateId:'painted',title:'Working draft',language:'Hindi',revision:0,images:{'page.png':{hash,type:'image/png'}},book:{format:'iks-template-book-v1',projectId:'unfinished',templateId:'painted',title:'Working draft',language:'Hindi',characterGuide:'',pages:[{id:'page',title:'Passage',original:'जय हनुमान',meaning:'Keep this explanation',sourceReference:'Page 1',scene:'Forest',image:'page.png',layout:'art-right',fontSize:22,imageScale:100}]}};
+ assert.equal((await libraryApi(req('/api/library/books','PUT',data,cookie),env)).status,200);
+ data.revision=1;data.book.pages[0].original='';
+ const saved=await libraryApi(req('/api/library/books','PUT',data,cookie),env);
+ assert.equal(saved.status,200,await saved.text());
+ const second=await signIn(env,'unfinished@example.test');
+ const restored=await (await libraryApi(req('/api/library/books','GET',undefined,second.cookie),env)).json();
+ assert.equal(restored.books[0].book.pages[0].original,'');
+ assert.equal(restored.books[0].book.pages[0].meaning,'Keep this explanation');
+ assert.equal(restored.books[0].images['page.png'].hash,hash);
+ const asset=await libraryApi(req('/api/library/asset?hash='+hash,'GET',undefined,second.cookie),env);
+ assert.equal(asset.status,200);assert.deepEqual(new Uint8Array(await asset.arrayBuffer()),bytes);
+});

@@ -220,8 +220,8 @@ export function parseTemplateBook(input: unknown, projectId?: string): TemplateB
         if(typeof p.blueprint==='string'&&p.blueprint.startsWith('reference-notes-dense-')&&!noteSections)throw Error('This notebook layout requires noteSections. Use the updated notebook prompt.');
         const original = str(p.original, 'Original text');
         if(noteSections&&original!==notebookOriginal(noteSections))throw Error('Notebook original text must exactly match its structured sections; no content may be silently omitted.');
-        if (!original.trim() && b.contentMode !== 'images')
-            throw Error(`Spread ${i + 1} has no original text.`);
+        // Editable books are working drafts: an unfinished passage must survive
+        // account backup and ZIP restore. Report missing text in layout review.
         return { id, ...(p.readingOrder==='continuous'?{readingOrder:'continuous' as const}:{}), ...(p.artworkFit === 'contain' ? {artworkFit:'contain' as const} : {}), ...(noteSections?{noteSections}:{}), ...(textPositions?{textPositions}:{}), ...(p.artworkBlueprint !== undefined ? { artworkBlueprint: str(p.artworkBlueprint, 'Artwork blueprint', 80) } : {}), ...(p.blueprint !== undefined ? { blueprint: str(p.blueprint, 'Blueprint', 80) } : {}), ...(p.layoutReason !== undefined ? { layoutReason: str(p.layoutReason, 'Layout reason', 1000) } : {}), title: str(p.title, 'Spread title', 300), original, meaning: str(p.meaning ?? '', 'Meaning'), sourceReference: str(p.sourceReference, 'Source reference', 1000), scene: str(p.scene, 'Scene brief'), image, layout: p.layout as Layout, ...(validComposition ? { composition: p.composition as StoryComposition } : {}), fontSize: Math.min(32, Math.max(b.templateId==='iks-notes'?10:14, Number(p.fontSize) || 22)), imageScale: Math.min(100, Math.max(40, Number(p.imageScale) || 100)) };
     });
     const title = str(b.title, 'Book title', 300);
