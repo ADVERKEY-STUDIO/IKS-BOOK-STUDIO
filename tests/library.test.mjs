@@ -188,3 +188,21 @@ test('account backup restores unfinished original text without losing artwork',a
  const asset=await libraryApi(req('/api/library/asset?hash='+hash,'GET',undefined,second.cookie),env);
  assert.equal(asset.status,200);assert.deepEqual(new Uint8Array(await asset.arrayBuffer()),bytes);
 });
+
+test('series saves accept four masters and four options alongside three user references',async()=>{
+ const env=environment(),{cookie}=await signIn(env,'series@example.com');
+ const bytes=new Uint8Array([5,6,7]);
+ const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(v=>v.toString(16).padStart(2,'0')).join('');
+ await libraryApi(new Request('https://studio.test/api/library/asset?hash='+hash,{method:'PUT',headers:{origin:'https://studio.test',cookie},body:bytes}),env);
+ const asset={hash,type:'image/png'},references={};
+ for(let i=1;i<=4;i++){references['reference-series-'+i+'.png']=asset;references['reference-character-option-'+i+'.png']=asset;}
+ for(let i=1;i<=3;i++)references['reference-user-'+i+'.png']=asset;
+ const draft={id:'four-series',templateId:'beanstalk-adventure',title:'Series book',language:'Hindi',images:{},references,revision:0,visualDirection:{audience:'9–14',characters:'Lakshmi',notes:'',seriesArt:{version:1,option:2,approved:true}}};
+ const response=await libraryApi(req('/api/library/books','PUT',draft,cookie),env);
+ assert.equal(response.status,200,await response.text());
+ const restored=await (await libraryApi(req('/api/library/books','GET',undefined,cookie),env)).json();
+ assert.equal(Object.keys(restored.books[0].references).length,11);
+ assert.deepEqual(restored.books[0].visualDirection.seriesArt,draft.visualDirection.seriesArt);
+ const invalid={...draft,id:'too-many',references:{...references,'reference-user-4.png':asset}};
+ assert.equal((await libraryApi(req('/api/library/books','PUT',invalid,cookie),env)).status,400);
+});

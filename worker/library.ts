@@ -1,3 +1,4 @@
+import { MAX_STYLE_REFERENCES, isSeriesReference } from '../lib/series-art.ts';
 import { parseVisualDirection } from '../lib/visual-direction.ts';
 import { verifyClerkIdentity, clerkConfigured, type ClerkEnvironment } from './clerk-identity.ts';
 import { verifyFirebaseIdentity, firebaseConfigured, type FirebaseEnvironment } from './firebase-identity.ts';
@@ -149,7 +150,7 @@ export async function libraryApi(request: Request, env: LibraryEnv, verify = fir
       }
       const visualDirection = parseVisualDirection(data.visualDirection);
       const references = data.references ?? {};
-      if (!references || typeof references !== 'object' || Array.isArray(references) || Object.keys(references).length > 3) return reply({ error: 'Choose up to three style references.' }, 400);
+      if (!references || typeof references !== 'object' || Array.isArray(references) || (Object.keys(references).length > MAX_STYLE_REFERENCES || Object.keys(references).filter(name=>!isSeriesReference(name)).length > 3)) return reply({ error: 'Choose up to three user references plus the four series masters and four character options.' }, 400);
       for (const [name, value] of Object.entries(references)) {
         const asset = value as { hash: string; type: string };
         if (!/^reference-[\w-]+\.(png|jpe?g|webp)$/i.test(name) || !asset || !/^[a-f0-9]{64}$/.test(asset.hash) || !['image/png', 'image/jpeg', 'image/webp'].includes(asset.type)) return reply({ error: 'Invalid style reference.' }, 400);

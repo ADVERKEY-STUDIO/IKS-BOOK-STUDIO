@@ -41,3 +41,28 @@ test('reading labels can be hidden independently without removing passages',()=>
   }
  }
 });
+
+test('bulk background appearance supports every shape and None without moving or mutating text',async()=>{
+ const {applyTextBackgroundsToPages}=await import('../lib/text-backgrounds.ts');
+ const book=fixture();
+ book.pages.push({...book.pages[0],id:'p2',image:'p2.png',textBackgrounds:{original:{shape:'rounded',color:'#abcdef',offsetX:12,width:140,padding:2},meaning:{shape:'speech',color:'#123456',height:120}}});
+ for(const shape of textBackgroundShapes){
+  const original=structuredClone(book.pages);
+  const source={original:{shape,color:'#ffffff',offsetX:-30,width:180},meaning:{shape,color:'#fff8e8'}};
+  const pages=applyTextBackgroundsToPages(book.pages,source);
+  assert.deepEqual(book.pages,original);
+  assert.equal(pages[1].textBackgrounds.original.offsetX,12);assert.equal(pages[1].textBackgrounds.original.width,140);
+  assert.equal(pages[0].textBackgrounds.original.offsetX,undefined);
+  for(const page of pages){assert.equal(page.textBackgrounds.original.shape,shape);assert.equal(page.textBackgrounds.meaning.shape,shape);assert.equal(page.original,book.pages[0].original);}
+  const restored=parseTemplateBook({...book,pages});
+  for(let i=0;i<pages.length;i++){
+   const html=renderTemplatePage(restored,i);
+   if(shape!=='none')assert.ok(html.includes('text-background-'+shape));
+   else assert.doesNotMatch(html,/class="planned-text [^"]*text-background /);
+  }
+  assert.deepEqual(pages[1].textPositions,original[1].textPositions);
+ }
+ const oneRole=applyTextBackgroundsToPages(book.pages,undefined,['original']);
+ assert.equal(oneRole[1].textBackgrounds.original.shape,'none');
+ assert.deepEqual(oneRole[1].textBackgrounds.meaning,book.pages[1].textBackgrounds.meaning);
+});
