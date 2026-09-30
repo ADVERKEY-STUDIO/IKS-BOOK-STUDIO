@@ -33,3 +33,18 @@ export function textBackgroundCss(){return `
 .planned-spread .planned-text.text-background::after{content:"";position:absolute;left:var(--bg-x,0%);top:var(--bg-y,0%);width:var(--bg-width,100%);height:var(--bg-height,100%);z-index:-1;background-image:var(--text-background);background-size:100% 100%;background-repeat:no-repeat;pointer-events:none}
 .planned-spread .planned-text.text-background-speech{padding-bottom:calc(var(--bg-padding,1.3em) + .5em)!important}
 `;}
+
+/** Copy appearance only; each spread retains its own background geometry and text layout. */
+export function applyTextBackgroundsToPages<T extends { textBackgrounds?: TextBackgrounds }>(
+ pages: T[], source: TextBackgrounds | undefined, roles: readonly ('original' | 'meaning')[] = ['original', 'meaning'],
+): T[] {
+ parseTextBackgrounds(source);
+ return pages.map(page => {
+  const textBackgrounds = { ...page.textBackgrounds };
+  for (const role of roles) {
+   const selected = source?.[role];
+   textBackgrounds[role] = { ...textBackgrounds[role], shape: selected?.shape ?? 'none', color: selected?.color ?? '#fff8e8' };
+  }
+  return { ...page, textBackgrounds };
+ });
+}
