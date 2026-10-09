@@ -135,9 +135,11 @@ export async function libraryApi(request: Request, env: LibraryEnv, verify = fir
         total += head.size;
       }
       if (total > BOOK_ARTWORK_BYTES) return reply({ error: `Book artwork exceeds ${BOOK_ARTWORK_BYTES/MiB} MB.` }, 413);
-      if (data.source) {
-        if(typeof data.source.name!=='string'||data.source.name.length>250||!['application/pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document',''].includes(data.source.type))return reply({error:'Invalid source file.'},400);
-        const parts=data.source.chunks===undefined?[data.source]:data.source.chunks;
+      for (const document of [data.source, data.contentReference]) {
+        if (document === undefined) continue;
+        if (!document || typeof document !== 'object' || Array.isArray(document)) return reply({error:'Invalid source file.'},400);
+        if(typeof document.name!=='string'||document.name.length>250||!['application/pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document',''].includes(document.type))return reply({error:'Invalid source file.'},400);
+        const parts=document.chunks===undefined?[document]:document.chunks;
         if(!Array.isArray(parts)||!parts.length||parts.length>Math.ceil(SOURCE_BYTES/SOURCE_CHUNK_BYTES))return reply({error:'Invalid source chunks.'},400);
         let sourceSize=0;
         for(const part of parts){
@@ -158,7 +160,7 @@ export async function libraryApi(request: Request, env: LibraryEnv, verify = fir
         if (!head || head.size > 25 * 1024 * 1024) return reply({ error: 'Style reference upload missing or too large.' }, 400);
       }
       const revision = data.revision + 1;
-      const clean = { id: data.id, title: data.title, language: data.language, templateId: data.templateId, book: data.book, visualDirection, references, images: data.images, source: data.source, updated: Date.now() };
+      const clean = { id: data.id, title: data.title, language: data.language, templateId: data.templateId, book: data.book, visualDirection, references, images: data.images, source: data.source, contentReference: data.contentReference, updated: Date.now() };
       const result = data.revision === 0
         ? await env.DB.prepare('INSERT OR IGNORE INTO library_books(owner,id,revision,data) VALUES (?,?,?,?)').bind(owner, data.id, revision, JSON.stringify(clean)).run()
         : await env.DB.prepare('UPDATE library_books SET revision=?,data=? WHERE owner=? AND id=? AND revision=?').bind(revision, JSON.stringify(clean), owner, data.id, data.revision).run();

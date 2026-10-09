@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
+import {chalisaTemplateDirection} from '../lib/visual-direction.ts';
 import {parseTemplateBook} from '../lib/template-book.ts';
 import {layoutIssues} from '../lib/template-layouts.ts';
 import {zipSync,strToU8} from 'fflate';
@@ -25,8 +26,8 @@ const handler=source.slice(source.indexOf('    function chooseTemplate('),source
 const compiled=ts.transpileModule(handler,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
 function choose(draft,id){
  let next=draft,error='';
- const fn=new Function('draft','chosenImages','patch','setDraft','setStep','setError','window',compiled+';return chooseTemplate;');
- fn(draft,[],p=>{next={...next,...p};},v=>{next=v;},()=>{},v=>{error=v;},{scrollTo(){}})(id);
+ const fn=new Function('draft','chosenImages','patch','setDraft','setStep','setError','window','chalisaTemplateDirection',compiled+';return chooseTemplate;');
+ fn(draft,[],p=>{next={...next,...p};},v=>{next=v;},()=>{},v=>{error=v;},{scrollTo(){}},chalisaTemplateDirection)(id);
  return {next,error};
 }
 test('changing an unassembled template preserves identity, source, references and reader settings',()=>{
@@ -37,6 +38,9 @@ test('changing an unassembled template preserves identity, source, references an
 });
 test('template selection still starts new books and protects assembled ones',()=>{
  assert.equal(choose(undefined,'painted').next.templateId,'painted');
+ const chalisa=choose(undefined,'beanstalk-adventure').next;
+ assert.equal(chalisa.visualDirection.passageMode,'chalisa');
+ assert.equal(chalisa.visualDirection.audience,'Ages 9–14');
  const draft={id:'assembled',book:fixture()};
  const result=choose(draft,'poetry');assert.equal(result.next,draft);assert.match(result.error,/Start another book/);
 });
