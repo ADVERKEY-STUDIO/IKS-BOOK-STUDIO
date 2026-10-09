@@ -60,3 +60,17 @@ test('missing covers share the ten-image budget with interiors', () => {
   assert.equal(rows[1], 'Batch 2: images/back-cover.png');
   assert.match(prompt, /Covers use their separate square dimensions/);
 });
+
+
+test('Chalisa four-image continuation keeps the complete queue and source meanings',()=>{
+ const chalisa={...book,pages:pages.map(p=>({...p,meaning:'Hindi and English meaning and moral for '+p.id}))};
+ const prompt=continuationPrompt(chalisa,pages.slice(0,4).map(p=>p.image),undefined,4);
+ const rows=prompt.split('\n').filter(line=>/^Batch \d+:/.test(line));
+ assert.equal(rows.length,6);
+ assert.ok(rows.every(row=>row.split(': ')[1].split(', ').length<=4));
+ assert.deepEqual(rows.flatMap(row=>row.split(': ')[1].split(', ')),pages.slice(4).map(p=>`images/${p.image}`));
+ assert.match(prompt,/UP TO 4 PER REQUEST/);
+ assert.doesNotMatch(prompt,/UP TO 10 PER REQUEST/);
+ assert.match(prompt,/Meaning and moral context: Hindi and English meaning and moral for p5/);
+ assert.match(prompt,/STOP until that next request/);
+});

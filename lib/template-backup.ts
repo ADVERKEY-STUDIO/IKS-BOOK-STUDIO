@@ -33,7 +33,7 @@ export async function recoverDraftImages(draft:Draft,account:CloudBook,email:str
  if(!missing.length)return draft;
  // downloadDraft performs content hash verification before anything is persisted.
  const images=Object.fromEntries(missing.map(name=>[name,account.images[name]]));
- const recovered=await downloadDraft({...account,images,source:undefined,references:{}},email);
+ const recovered=await downloadDraft({...account,images,source:undefined,contentReference:undefined,references:{}},email);
  return {...draft,images:{...draft.images,...recovered.images}};
 }
 

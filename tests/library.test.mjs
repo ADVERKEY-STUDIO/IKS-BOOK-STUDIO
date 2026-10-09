@@ -59,7 +59,7 @@ test('client save and open round-trip manuscript, source file, artwork, and revi
   return libraryApi(new Request(new URL(path,'https://studio.test'),{...options,headers}),env);
  };
  try {
-  const draft={id:'cross-browser-book',templateId:'panorama',title:'Courage',language:'Awadhi',updated:123,source:new File(['source text'],'original.pdf',{type:'application/pdf'}),images:{'spread-01.png':new Blob(['original artwork'],{type:'image/png'})},book:{format:'iks-template-book-v1',projectId:'cross-browser-book',templateId:'panorama',title:'Courage',language:'Awadhi',characterGuide:'Consistent characters',pages:[{id:'spread-01',title:'Invocation',original:'श्री गुरु चरन',meaning:'A prayer',sourceReference:'PDF page 1',scene:'A quiet river',image:'spread-01.png',layout:'panorama',fontSize:22,imageScale:100}]}};
+  const draft={id:'cross-browser-book',templateId:'panorama',title:'Courage',language:'Awadhi',updated:123,source:new File(['source text'],'original.pdf',{type:'application/pdf'}),contentReference:new File(['Prepared book content'],'reference.pdf',{type:'application/pdf'}),images:{'spread-01.png':new Blob(['original artwork'],{type:'image/png'})},book:{format:'iks-template-book-v1',projectId:'cross-browser-book',templateId:'panorama',title:'Courage',language:'Awadhi',characterGuide:'Consistent characters',pages:[{id:'spread-01',title:'Invocation',original:'श्री गुरु चरन',meaning:'A prayer',sourceReference:'PDF page 1',scene:'A quiet river',image:'spread-01.png',layout:'panorama',fontSize:22,imageScale:100}]}};
   const saved=await uploadDraft(draft,'book@example.com');
   assert.equal(saved.cloud.revision,1);
   await assert.rejects(uploadDraft({...saved,images:{}},'book@example.com'),/missing.*saved artwork/i);
@@ -74,8 +74,17 @@ test('client save and open round-trip manuscript, source file, artwork, and revi
   assert.equal(await restored.images['spread-01.png'].text(),'original artwork');
   assert.equal(restored.source.name,'original.pdf');
   assert.equal(await restored.source.text(),'source text');
+  assert.equal(restored.contentReference.name,'reference.pdf');
+  assert.equal(await restored.contentReference.text(),'Prepared book content');
   const revised=await uploadDraft({...restored,title:'New title'},'book@example.com');
   assert.equal(revised.cloud.revision,2);
+  await assert.rejects(uploadDraft({...revised,contentReference:{name:'bad.exe',size:3}},'book@example.com'),/PDF or DOCX/);
+  const current=(await(await globalThis.fetch('/api/library/books')).json()).books[0];
+  const invalid=await globalThis.fetch('/api/library/books',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({...current,contentReference:{hash:'f'.repeat(64),name:'missing.pdf',type:'application/pdf'}})});
+  assert.equal(invalid.status,400);
+  await uploadDraft({...revised,contentReference:undefined},'book@example.com');
+  const removed=(await(await globalThis.fetch('/api/library/books')).json()).books[0];
+  assert.equal(removed.contentReference,undefined);
   await assert.rejects(uploadDraft(saved,'book@example.com'),/changed in another browser/);
  } finally { globalThis.fetch=originalFetch; }
 });
