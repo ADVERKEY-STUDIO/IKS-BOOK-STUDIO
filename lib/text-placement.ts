@@ -20,8 +20,13 @@ export function fitTextPositions(spread:HTMLElement,boxes:Region[]):Region[]{
   const el=spread.querySelector<HTMLElement>(`[data-text-region="${i+1}"]`);
   if(!el||!spread.clientHeight||!spread.clientWidth)return box;
   if(el.scrollHeight<=el.clientHeight+2&&el.scrollWidth<=el.clientWidth+2)return box;
-  const w=Math.min(100,Math.max(box.w,(el.scrollWidth+2)/spread.clientWidth*100));
-  const h=Math.min(100,Math.max(box.h,(el.scrollHeight+3)/spread.clientHeight*100));
-  return {x:Math.min(box.x,100-w),y:Math.min(box.y,100-h),w,h};
+  const facing=spread.dataset.blueprint==='chalisa-facing-pages';
+  const maxRight=facing?(i===0?48:98):100;
+  const maxBottom=facing?93:100;
+  const x=facing?Math.min(maxRight-1,Math.max(i===0?2:52,box.x)):box.x;
+  const y=facing?Math.min(maxBottom-1,box.y):box.y;
+  const w=Math.min(facing?maxRight-x:100,Math.max(box.w,(el.scrollWidth+2)/spread.clientWidth*100));
+  const h=Math.min(facing?maxBottom-y:100,Math.max(box.h,(el.scrollHeight+3)/spread.clientHeight*100));
+  return {x:Math.min(x,100-w),y:Math.min(y,100-h),w,h};
  });
 }
