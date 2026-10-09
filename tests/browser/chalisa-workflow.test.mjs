@@ -44,12 +44,10 @@ test('Chalisa content reference, saved request, bilingual import and missing-ima
   await upload({...book,pages:book.pages.map(p=>({...p,chalisaPages:p.chalisaPages.map(leaf=>({...leaf,meaning:'Only one English meaning'}))}))});
   await page.getByRole('alert').filter({hasText:'required labels'}).waitFor();
   const image=Buffer.from(await page.evaluate(()=>{const c=document.createElement('canvas');c.width=1200;c.height=600;const ctx=c.getContext('2d');ctx.fillStyle='#fbf6e8';ctx.fillRect(0,0,1200,600);
-   // Broad diagnostic scenes make accidental clipping or strip layouts visible.
-   for(const [x,y,color] of [[0,0,'#8bb8a6'],[600,336,'#e9b56f']]){
-    ctx.fillStyle=color;ctx.fillRect(x,y,600,264);
-    ctx.fillStyle='#355b52';ctx.beginPath();ctx.moveTo(x,y+264);ctx.lineTo(x+150,y+100);ctx.lineTo(x+380,y+264);ctx.fill();
-    ctx.fillStyle='#f5d670';ctx.beginPath();ctx.arc(x+430,y+80,45,0,Math.PI*2);ctx.fill();
-   }return c.toDataURL().split(',')[1];}),'base64');
+   // A continuous scene crosses the fold; reading regions retain painted sky.
+   const sky=ctx.createLinearGradient(0,0,0,600);sky.addColorStop(0,'#fff5d9');sky.addColorStop(1,'#f8de9b');ctx.fillStyle=sky;ctx.fillRect(0,0,1200,600);
+   ctx.fillStyle='#8bb8a6';ctx.beginPath();ctx.moveTo(0,470);ctx.quadraticCurveTo(450,360,650,470);ctx.quadraticCurveTo(900,380,1200,445);ctx.lineTo(1200,600);ctx.lineTo(0,600);ctx.fill();
+   ctx.fillStyle='#355b52';ctx.fillRect(0,0,45,600);ctx.fillRect(1160,0,40,600);return c.toDataURL().split(',')[1];}),'base64');
   await page.getByLabel('Import ChatGPT’s ZIP or book.json').setInputFiles({name:'checkpoint.zip',mimeType:'application/zip',buffer:Buffer.from(zipSync({'book.json':strToU8(JSON.stringify(book)),'images/spread-1.png':image,'images/character-reference.png':image,'passage-map.txt':strToU8('Saved passage map'),'progress.txt':strToU8('Pending spread-2.png')}))});
   await page.getByRole('button',{name:'Read book',exact:true}).waitFor();
   await page.getByRole('button',{name:'Text & layout',exact:true}).click();
@@ -67,7 +65,7 @@ test('Chalisa content reference, saved request, bilingual import and missing-ima
   const art=await preview.locator('.planned-art').evaluate(im=>({w:im.clientWidth,h:im.clientHeight,pw:im.parentElement.clientWidth,ph:im.parentElement.clientHeight}));
   assert.equal(art.w,art.pw);assert.equal(art.h,art.ph);
   const scenes=await preview.locator('.planned-art-frame').evaluateAll(nodes=>nodes.map(n=>({w:n.offsetWidth/n.parentElement.clientWidth,h:n.offsetHeight/n.parentElement.clientHeight})));
-  assert.equal(scenes.length,2);assert.ok(scenes.every(s=>s.w>=.49&&s.h>=.4));
+  assert.equal(scenes.length,1);assert.equal(scenes[0].w,1);assert.equal(scenes[0].h,1);
   await preview.locator('.planned-spread').screenshot({path:'/tmp/chalisa-facing-pages-preview.png'});
   await page.getByRole('button',{name:'Artwork & imports',exact:true}).click();
   const downloading=page.waitForEvent('download');
@@ -96,13 +94,14 @@ test('Chalisa content reference, saved request, bilingual import and missing-ima
   await preview.locator('[data-blueprint="chalisa-facing-pages"]').waitFor();
   assert.equal(await page.getByText(/reading order needs review/).count(),0);
   await page.getByRole('button',{name:'Review layouts & rebuild artwork',exact:true}).click();
+  await page.getByRole('region',{name:'Review spread layout plan'}).locator('select').first().selectOption('chalisa-full-spread-flow');
   const rebuilding=page.waitForEvent('download');
   await page.getByRole('button',{name:'Create redesign copy & download request',exact:true}).click();
   const rebuild=unzipSync(new Uint8Array(await readFile(await (await rebuilding).path())));
   const rebuilt=JSON.parse(new TextDecoder().decode(rebuild['book.json']));
   assert.notEqual(rebuilt.projectId,legacy.projectId);
   assert.deepEqual(rebuilt.pages[0].chalisaPages,legacy.pages[0].chalisaPages);
-  assert.equal(rebuilt.pages[0].blueprint,'chalisa-illustrated-facing-pages');
+  assert.equal(rebuilt.pages[0].blueprint,'chalisa-full-spread-flow');
   assert.equal(rebuilt.pages[0].textPositions,undefined);
   assert.deepEqual(rebuild['images/character-reference.png'],new Uint8Array(image));
   assert.equal(rebuild['images/spread-1.png'],undefined);
@@ -110,6 +109,29 @@ test('Chalisa content reference, saved request, bilingual import and missing-ima
   assert.match(rebuildPrompt,/Reuse the attached images\/character-reference.png unchanged/);
   assert.match(rebuildPrompt,/UP TO 4 PER REQUEST/);
   assert.equal(rebuilt.characterGuide,legacy.characterGuide);
+  assert.match(rebuildPrompt,/ONE continuous illustrated environment/);
+  assert.match(rebuildPrompt,/SELECTED SPREAD BLUEPRINT: chalisa-full-spread-flow/);
   assert.deepEqual(errors,[]);
  } finally {await browser.close();}
+});
+
+test('all continuous Chalisa reading arrangements fit actual bilingual text at 14 pt', {skip:!appUrl,timeout:60000}, async()=>{
+ const {parseTemplateBook,renderTemplateBook}=await import('../../lib/template-book.ts');
+ const {chalisaFullSpreadBlueprints}=await import('../../lib/template-layouts.ts');
+ const {chromium}=require(process.env.IKS_PLAYWRIGHT_MODULE||'playwright');
+ const browser=await chromium.launch({headless:true});
+ try{
+  const page=await browser.newPage({viewport:{width:1600,height:1000}});
+  let proofHtml='';
+  await page.route(`${appUrl}/chalisa-reading-proof`,route=>route.fulfill({contentType:'text/html',body:proofHtml}));
+  for(const layout of chalisaFullSpreadBlueprints){
+   const raw=facingBook();raw.pages[0].blueprint=layout.id;
+   proofHtml=renderTemplateBook(parseTemplateBook(raw),{},'/fonts/book-sanskrit.ttf');
+   await page.goto(`${appUrl}/chalisa-reading-proof`);
+   await page.evaluate(()=>document.fonts.ready);
+   const regions=await page.locator('.planned-text').evaluateAll(nodes=>nodes.filter(n=>n.textContent.trim()).map(n=>({w:n.clientWidth,sw:n.scrollWidth,h:n.clientHeight,sh:n.scrollHeight})));
+   assert.equal(regions.length,2);
+   assert.ok(regions.every(r=>r.sw<=r.w+2&&r.sh<=r.h+2),`${layout.id}: both complete text blocks fit`);
+  }
+ }finally{await browser.close();}
 });

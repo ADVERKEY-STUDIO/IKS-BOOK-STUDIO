@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {facingBook} from './fixtures/chalisa-facing-pages.mjs';
 import {parseTemplateBook, renderTemplateBook, continuationPrompt} from '../lib/template-book.ts';
-import {plannedTextBlocks,blueprintFor,planTemplateBook} from '../lib/template-layouts.ts';
+import {plannedTextBlocks,blueprintFor,planTemplateBook,chalisaFullSpreadBlueprints,blueprintPrompt,blueprintSvg} from '../lib/template-layouts.ts';
 import {validateChalisaBook,sourceRequestEntries} from '../lib/visual-direction.ts';
 import {chalisaSpreadText} from '../lib/chalisa-pages.ts';
 
@@ -26,7 +26,7 @@ test('left and right explanations stay with their own chaupai through rendering 
  const restored=parseTemplateBook({...book,pages:[{...spread,chalisaPages:edited,...chalisaSpreadText(edited)}]});
  assert.equal(restored.pages[0].chalisaPages[0].meaning,spread.chalisaPages[0].meaning);
  assert.match(restored.pages[0].chalisaPages[1].meaning,/all three worlds/);
- assert.equal(planTemplateBook(book).pages[0].blueprint,'chalisa-illustrated-facing-pages');
+ assert.equal(planTemplateBook(book).pages[0].blueprint,'chalisa-full-spread');
  const html=renderTemplateBook(book,{'spread-1.png':'test.png'});
  assert.equal((html.match(/class="planned-art"/g)||[]).length,1);
  assert.doesNotMatch(html,/class="planned-text original reading-label/);
@@ -45,6 +45,8 @@ test('invalid grouping and conflicting aggregate fields are rejected; supplied r
 test('request packages the dedicated facing-page guide and continuation keeps side-specific context',async()=>{
  const entries=await sourceRequestEntries({id:'facing',title:'Durga',templateId:'beanstalk-adventure',language:'Hindi',source:new File(['pdf'],'source.pdf'),visualDirection:{passageMode:'chalisa',audience:'9–14',characters:'Durga',notes:''}});
  assert.ok(entries['template-references/chalisa-facing-pages-layout.svg']);
+ assert.equal(JSON.parse(new TextDecoder().decode(entries['template-references/chalisa-full-spread-options.json'])).length,3);
+ for(const b of chalisaFullSpreadBlueprints)assert.ok(entries[`template-references/${b.id}-layout.svg`]);
  assert.equal(JSON.parse(new TextDecoder().decode(entries['template-references/chalisa-facing-pages.json'])).original.length,2);
  const prompt=new TextDecoder().decode(entries['START-HERE.txt']);
  assert.match(prompt,/41 entries = 21 spread artworks, not 41/);
@@ -52,29 +54,40 @@ test('request packages the dedicated facing-page guide and continuation keeps si
  const continuation=continuationPrompt(parseTemplateBook(facingBook(3)),[],undefined,4);
  assert.match(continuation,/LEFT PHYSICAL PAGE/);assert.match(continuation,/RIGHT PHYSICAL PAGE/);
  assert.match(continuation,/return ONE full-spread artwork/);
+ assert.match(prompt,/ACTUAL selected template images and approved character sheet/);
+ assert.doesNotMatch(prompt,/SELECTED SPREAD BLUEPRINT: reference-beanstalk-diagonal|roughly 44%|smaller or repositioned scenes/);
+ assert.doesNotMatch(continuation,/smaller or repositioned scenes/);
 });
 
-test('new art fills broad areas on BOTH pages; legacy imports keep their painted geometry until explicit rebuild',()=>{
- const book=parseTemplateBook(facingBook());
- const b=blueprintFor(book,book.pages[0]);
- assert.equal(b.art.length,2);
- for(const [i,art] of b.art.entries()){
-  assert.equal(art.x,i*50);assert.equal(art.w,50);assert.ok(art.h>=40);
-  for(const text of b.original)assert.ok(art.x+art.w<=text.x||text.x+text.w<=art.x||art.y+art.h<=text.y||text.y+text.h<=art.y);
+test('full-spread guides permit painted backgrounds behind words; all reading arrangements round-trip',()=>{
+ for(const b of chalisaFullSpreadBlueprints){
+  assert.deepEqual(b.art,[{x:0,y:0,w:100,h:100}]);
+  assert.ok(b.original[0].x+b.original[0].w<50);assert.ok(b.original[1].x>50);
+  const raw=facingBook();raw.pages[0].blueprint=b.id;
+  const book=parseTemplateBook(raw);
+  assert.equal(planTemplateBook(book).pages[0].blueprint,b.id);
+  const prompt=continuationPrompt(book,[],undefined,4);
+  assert.match(prompt,/continuous edge-to-edge illustrated environment/);
+  assert.match(prompt,/NOT the painted background/);
+  assert.doesNotMatch(blueprintPrompt(b.id),/roughly 44%|LEFT SCENE:|further 3% canvas clearance/);
+  const guide=blueprintSvg(b);
+  assert.match(guide,/ONE connected illustration/);
+  assert.doesNotMatch(guide,/Scene 1|Scene 2|>Meaning</);
  }
- const raw=facingBook();raw.pages[0].blueprint='chalisa-facing-pages';
- raw.pages[0].textPositions=[{x:14,y:7,w:33,h:80},{x:64,y:7,w:33,h:80},{x:48,y:94,w:2,h:2}];
- raw.pages[0].artworkBlueprint='chalisa-facing-pages';
- const old=parseTemplateBook(raw);
- assert.equal(blueprintFor(old,old.pages[0]).art[0].w,13);
- const planned=planTemplateBook(old);
- assert.equal(planned.pages[0].blueprint,'chalisa-illustrated-facing-pages');
- assert.equal(planned.pages[0].textPositions,undefined);
- assert.equal(planned.pages[0].artworkBlueprint,undefined);
- assert.deepEqual(planned.pages[0].chalisaPages,old.pages[0].chalisaPages);
- assert.equal(old.pages[0].textPositions[0].w,33);
- const prompt=continuationPrompt(planned,[],undefined,4);
- assert.match(prompt,/large, clearly readable figures/);
- assert.match(prompt,/No extra clearance/);
- assert.doesNotMatch(prompt,/further 3% canvas clearance/);
+});
+test('old strip and diagonal books retain coordinates until explicit full-spread rebuild',()=>{
+ for(const id of ['chalisa-facing-pages','chalisa-illustrated-facing-pages']){
+  const raw=facingBook();raw.pages[0].blueprint=id;
+  raw.pages[0].artworkBlueprint=id;
+  raw.pages[0].textPositions=[{x:14,y:7,w:33,h:80},{x:64,y:7,w:33,h:80},{x:48,y:94,w:2,h:2}];
+  const old=parseTemplateBook(raw);
+  assert.equal(blueprintFor(old,old.pages[0]).art[0].w,id==='chalisa-facing-pages'?13:50);
+  assert.deepEqual(parseTemplateBook(JSON.parse(JSON.stringify(old))),old);
+  const planned=planTemplateBook(old);
+  assert.equal(planned.pages[0].blueprint,'chalisa-full-spread');
+  assert.equal(planned.pages[0].textPositions,undefined);
+  assert.equal(planned.pages[0].artworkBlueprint,undefined);
+  assert.deepEqual(planned.pages[0].chalisaPages,old.pages[0].chalisaPages);
+  assert.equal(old.pages[0].textPositions[0].w,33);
+ }
 });

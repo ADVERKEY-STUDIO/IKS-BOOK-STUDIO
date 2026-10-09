@@ -15,7 +15,7 @@ import {autoPlaceStoryBook} from '../../lib/story-text-placement';
 import {fitTextPositions} from '../../lib/text-placement';
 import TextPlacementEditor from './text-placement-editor';
 import LayoutReview, { BookSpreadPreview } from './layout-review';
-import { templatePrintSize, plannedTextBlocks, blueprintFor, templateBlueprints, layoutIssues, imageGeometryIssue, inspectRenderedBook, blueprintPrompt } from '../../lib/template-layouts';
+import { templatePrintSize, plannedTextBlocks, blueprintFor, templateBlueprints, layoutIssues, imageGeometryIssue, inspectRenderedBook, blueprintPrompt, blueprintSvg } from '../../lib/template-layouts';
 import { storyCompositions, type StoryComposition } from '../../lib/story-compositions';
 import { notebookArtworkRequest } from '../../lib/notebook-prompt';
 import { prepareExportFont } from '../../lib/template-export-fonts';
@@ -371,9 +371,12 @@ export default function TemplateStudio() {
         const redesigned={...planned,projectId:id,characterGuide:chalisa?planned.characterGuide:'Recreate these source-specific identities in the selected template medium. Discard old positional and rendering instructions: '+planned.characterGuide};
         const references=await templateReferenceEntries(planned.templateId);
         const entries:Record<string,Uint8Array>={...references,'book.json':strToU8(JSON.stringify(redesigned,null,2)),
-            'START-HERE.txt':strToU8('REBUILD ARTWORK. The supplied book.json is the complete frozen manuscript and layout plan. Preserve it exactly. Existing spread artwork is intentionally excluded. '+(chalisa?'Restore large scenes on BOTH physical pages using the new selected blueprint. Preserve the established illustration style and character identities. '+(character?'Reuse the attached images/character-reference.png unchanged; do not recreate it or ask for four new options. ':'Use the previously chosen character sheet in this same conversation; if unavailable, request it before drawing. '):'Rebuild the character sheet in the selected template style; ignore previous notes about always placing figures on the right. ')+'For EACH spread use only its selected blueprint. Return images only.\n'+continuationPrompt(redesigned,character?['character-reference.png']:[],undefined,chalisa?4:10))};
+            'START-HERE.txt':strToU8('REBUILD ARTWORK. The supplied book.json is the complete frozen manuscript and layout plan. Preserve it exactly. Existing spread artwork is intentionally excluded. '+(chalisa?'Paint ONE continuous illustrated environment across the ENTIRE spread using the selected reading arrangement. Replace detached diagonal patches and blank quadrants with connected scenery and quiet painted backgrounds behind the words. Preserve the established illustration style and character identities. '+(character?'Reuse the attached images/character-reference.png unchanged; do not recreate it or ask for four new options. ':'Use the previously chosen character sheet in this same conversation; if unavailable, request it before drawing. '):'Rebuild the character sheet in the selected template style; ignore previous notes about always placing figures on the right. ')+'For EACH spread use only its selected blueprint. Return images only.\n'+continuationPrompt(redesigned,character?['character-reference.png']:[],undefined,chalisa?4:10))};
         if(character)entries['images/character-reference.png']=new Uint8Array(await character.arrayBuffer());
-        for(const p of redesigned.pages)entries[`spread-prompts/${p.id}.txt`]=strToU8(blueprintPrompt(p.blueprint!)+'\nSource: '+p.original+'\nScene: '+p.scene);
+        for(const p of redesigned.pages){
+            entries[`spread-prompts/${p.id}.txt`]=strToU8(blueprintPrompt(p.blueprint!)+'\nSource: '+p.original+'\nScene: '+p.scene);
+            if(p.chalisaPages)entries[`spread-prompts/${p.id}-layout.svg`]=strToU8(blueprintSvg(blueprintFor(redesigned,p)));
+        }
         await writeQueue.current;
         await storage('write',draft);
         const copy:Draft={...draft,id,book:redesigned,images:character?{'character-reference.png':character}:{},cloud:undefined,updated:Date.now()};

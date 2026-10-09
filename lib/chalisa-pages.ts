@@ -1,7 +1,11 @@
 /** A spread shares one artwork; each physical page owns its complete text and scene. */
 export const LEGACY_CHALISA_BLUEPRINT = 'chalisa-facing-pages';
-export const CHALISA_BLUEPRINT = 'chalisa-illustrated-facing-pages';
-export const isChalisaBlueprint = (id: unknown) => id === CHALISA_BLUEPRINT || id === LEGACY_CHALISA_BLUEPRINT;
+export const DIAGONAL_CHALISA_BLUEPRINT = 'chalisa-illustrated-facing-pages';
+export const CHALISA_BLUEPRINT = 'chalisa-full-spread';
+export const CHALISA_FULL_SPREAD_IDS = [CHALISA_BLUEPRINT, 'chalisa-full-spread-canopy', 'chalisa-full-spread-flow'] as const;
+export const isFullSpreadChalisa = (id: unknown) => CHALISA_FULL_SPREAD_IDS.some(value => value === id);
+export const isChalisaBlueprint = (id: unknown) => isFullSpreadChalisa(id) || id === DIAGONAL_CHALISA_BLUEPRINT || id === LEGACY_CHALISA_BLUEPRINT;
+export const hasCompactChalisaText = (id: unknown) => isFullSpreadChalisa(id) || id === DIAGONAL_CHALISA_BLUEPRINT;
 export type ChalisaPage = { original: string; meaning: string; sourceReference: string; scene: string };
 export function parseChalisaPages(value: unknown): ChalisaPage[] | undefined {
  if (value === undefined) return;

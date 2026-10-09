@@ -4,5 +4,5 @@ export const leaves = [
 ];
 export function facingBook(count=2) {
  const physicalPages=Array.from({length:count},(_,i)=>({...leaves[i%2],sourceReference:`Chaupai ${i+1} · PDF page 1`}));
- return {format:'iks-template-book-v1',templateRevision:2,projectId:'facing-test',templateId:'beanstalk-adventure',title:'Durga Chalisa',language:'Hindi and English',characterGuide:'Consistent Durga character sheet',pages:Array.from({length:Math.ceil(count/2)},(_,i)=>({id:`spread-${i+1}`,title:`Chaupais ${i*2+1}–${Math.min(count,i*2+2)}`,chalisaPages:physicalPages.slice(i*2,i*2+2),image:`spread-${i+1}.png`,blueprint:'chalisa-illustrated-facing-pages',layoutReason:'One chaupai and matching scene per physical page.',layout:'story-scene',fontSize:14,imageScale:100}))};
+ return {format:'iks-template-book-v1',templateRevision:2,projectId:'facing-test',templateId:'beanstalk-adventure',title:'Durga Chalisa',language:'Hindi and English',characterGuide:'Consistent Durga character sheet',pages:Array.from({length:Math.ceil(count/2)},(_,i)=>({id:`spread-${i+1}`,title:`Chaupais ${i*2+1}–${Math.min(count,i*2+2)}`,chalisaPages:physicalPages.slice(i*2,i*2+2),image:`spread-${i+1}.png`,blueprint:'chalisa-full-spread',layoutReason:'One chaupai and matching scene per physical page.',layout:'story-scene',fontSize:14,imageScale:100}))};
 }
