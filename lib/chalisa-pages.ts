@@ -1,5 +1,7 @@
 /** A spread shares one artwork; each physical page owns its complete text and scene. */
-export const CHALISA_BLUEPRINT = 'chalisa-facing-pages';
+export const LEGACY_CHALISA_BLUEPRINT = 'chalisa-facing-pages';
+export const CHALISA_BLUEPRINT = 'chalisa-illustrated-facing-pages';
+export const isChalisaBlueprint = (id: unknown) => id === CHALISA_BLUEPRINT || id === LEGACY_CHALISA_BLUEPRINT;
 export type ChalisaPage = { original: string; meaning: string; sourceReference: string; scene: string };
 export function parseChalisaPages(value: unknown): ChalisaPage[] | undefined {
  if (value === undefined) return;

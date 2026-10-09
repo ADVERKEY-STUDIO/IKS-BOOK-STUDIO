@@ -43,8 +43,14 @@ test('Chalisa content reference, saved request, bilingual import and missing-ima
   const upload=async data=>page.getByLabel('Import ChatGPT’s ZIP or book.json').setInputFiles({name:'book.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(data))});
   await upload({...book,pages:book.pages.map(p=>({...p,chalisaPages:p.chalisaPages.map(leaf=>({...leaf,meaning:'Only one English meaning'}))}))});
   await page.getByRole('alert').filter({hasText:'required labels'}).waitFor();
-  const image=Buffer.from(await page.evaluate(()=>{const c=document.createElement('canvas');c.width=1200;c.height=600;const ctx=c.getContext('2d');ctx.fillStyle='#fbf6e8';ctx.fillRect(0,0,1200,600);return c.toDataURL().split(',')[1];}),'base64');
-  await page.getByLabel('Import ChatGPT’s ZIP or book.json').setInputFiles({name:'checkpoint.zip',mimeType:'application/zip',buffer:Buffer.from(zipSync({'book.json':strToU8(JSON.stringify(book)),'images/spread-1.png':image,'passage-map.txt':strToU8('Saved passage map'),'progress.txt':strToU8('Pending spread-2.png')}))});
+  const image=Buffer.from(await page.evaluate(()=>{const c=document.createElement('canvas');c.width=1200;c.height=600;const ctx=c.getContext('2d');ctx.fillStyle='#fbf6e8';ctx.fillRect(0,0,1200,600);
+   // Broad diagnostic scenes make accidental clipping or strip layouts visible.
+   for(const [x,y,color] of [[0,0,'#8bb8a6'],[600,336,'#e9b56f']]){
+    ctx.fillStyle=color;ctx.fillRect(x,y,600,264);
+    ctx.fillStyle='#355b52';ctx.beginPath();ctx.moveTo(x,y+264);ctx.lineTo(x+150,y+100);ctx.lineTo(x+380,y+264);ctx.fill();
+    ctx.fillStyle='#f5d670';ctx.beginPath();ctx.arc(x+430,y+80,45,0,Math.PI*2);ctx.fill();
+   }return c.toDataURL().split(',')[1];}),'base64');
+  await page.getByLabel('Import ChatGPT’s ZIP or book.json').setInputFiles({name:'checkpoint.zip',mimeType:'application/zip',buffer:Buffer.from(zipSync({'book.json':strToU8(JSON.stringify(book)),'images/spread-1.png':image,'images/character-reference.png':image,'passage-map.txt':strToU8('Saved passage map'),'progress.txt':strToU8('Pending spread-2.png')}))});
   await page.getByRole('button',{name:'Read book',exact:true}).waitFor();
   await page.getByRole('button',{name:'Text & layout',exact:true}).click();
   assert.equal(await page.getByLabel('Left chaupai',{exact:true}).inputValue(),book.pages[0].chalisaPages[0].original);
@@ -57,6 +63,11 @@ test('Chalisa content reference, saved request, bilingual import and missing-ima
   const regions=await preview.locator('.planned-text').evaluateAll(nodes=>nodes.filter(n=>n.textContent.trim()).map(n=>({text:n.textContent,x:n.offsetLeft,w:n.offsetWidth,sw:n.scrollWidth,h:n.clientHeight,sh:n.scrollHeight,parent:n.parentElement.clientWidth})));
   assert.equal(regions.length,2);assert.ok(regions[0].x+regions[0].w<regions[0].parent/2);assert.ok(regions[1].x>regions[1].parent/2);
   assert.ok(regions.every(r=>r.sw<=r.w+2&&r.sh<=r.h+2),'Both complete text blocks fit');
+  assert.equal(await page.getByText(/reading order needs review/).count(),0);
+  const art=await preview.locator('.planned-art').evaluate(im=>({w:im.clientWidth,h:im.clientHeight,pw:im.parentElement.clientWidth,ph:im.parentElement.clientHeight}));
+  assert.equal(art.w,art.pw);assert.equal(art.h,art.ph);
+  const scenes=await preview.locator('.planned-art-frame').evaluateAll(nodes=>nodes.map(n=>({w:n.offsetWidth/n.parentElement.clientWidth,h:n.offsetHeight/n.parentElement.clientHeight})));
+  assert.equal(scenes.length,2);assert.ok(scenes.every(s=>s.w>=.49&&s.h>=.4));
   await preview.locator('.planned-spread').screenshot({path:'/tmp/chalisa-facing-pages-preview.png'});
   await page.getByRole('button',{name:'Artwork & imports',exact:true}).click();
   const downloading=page.waitForEvent('download');
@@ -78,6 +89,27 @@ test('Chalisa content reference, saved request, bilingual import and missing-ima
   assert.match(restored.pages[0].chalisaPages[1].meaning,/all three worlds/);
   const manuscript=new TextDecoder().decode(exported['manuscript.md']);
   assert.ok(manuscript.indexOf('Mother Durga')<manuscript.indexOf('### Right page'));
+  // A saved strip-layout book is only migrated when its separate rebuild is requested.
+  const legacy={...restored,projectId:'legacy-strips',pages:restored.pages.map(p=>({...p,blueprint:'chalisa-facing-pages',artworkBlueprint:'chalisa-facing-pages',textPositions:[{x:14,y:7,w:33,h:80},{x:64,y:7,w:33,h:80},{x:48,y:94,w:2,h:2}]}))};
+  await page.getByRole('button',{name:'Artwork & imports',exact:true}).click();
+  await page.getByLabel('Import ZIP as a separate book',{exact:true}).setInputFiles({name:'legacy.zip',mimeType:'application/zip',buffer:Buffer.from(zipSync({'book.json':strToU8(JSON.stringify(legacy)),'images/spread-1.png':image,'images/character-reference.png':image}))});
+  await preview.locator('[data-blueprint="chalisa-facing-pages"]').waitFor();
+  assert.equal(await page.getByText(/reading order needs review/).count(),0);
+  await page.getByRole('button',{name:'Review layouts & rebuild artwork',exact:true}).click();
+  const rebuilding=page.waitForEvent('download');
+  await page.getByRole('button',{name:'Create redesign copy & download request',exact:true}).click();
+  const rebuild=unzipSync(new Uint8Array(await readFile(await (await rebuilding).path())));
+  const rebuilt=JSON.parse(new TextDecoder().decode(rebuild['book.json']));
+  assert.notEqual(rebuilt.projectId,legacy.projectId);
+  assert.deepEqual(rebuilt.pages[0].chalisaPages,legacy.pages[0].chalisaPages);
+  assert.equal(rebuilt.pages[0].blueprint,'chalisa-illustrated-facing-pages');
+  assert.equal(rebuilt.pages[0].textPositions,undefined);
+  assert.deepEqual(rebuild['images/character-reference.png'],new Uint8Array(image));
+  assert.equal(rebuild['images/spread-1.png'],undefined);
+  const rebuildPrompt=new TextDecoder().decode(rebuild['START-HERE.txt']);
+  assert.match(rebuildPrompt,/Reuse the attached images\/character-reference.png unchanged/);
+  assert.match(rebuildPrompt,/UP TO 4 PER REQUEST/);
+  assert.equal(rebuilt.characterGuide,legacy.characterGuide);
   assert.deepEqual(errors,[]);
  } finally {await browser.close();}
 });

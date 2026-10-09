@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import type { TemplateBook } from '../../lib/template-book';
 import { renderTemplatePage, templates } from '../../lib/template-book';
 import {legacyNotebookLayouts} from '../../lib/template-reference-contracts';
-import { chalisaBlueprint, blueprintSvg, templateBlueprints, templateSize, planTemplateBook, layoutIssues } from '../../lib/template-layouts';
+import { chalisaBlueprint, legacyChalisaBlueprint, blueprintSvg, templateBlueprints, templateSize, planTemplateBook, layoutIssues } from '../../lib/template-layouts';
 
 export function BookSpreadPreview({ book, index, images, onLoad }: { book:TemplateBook; index:number; images:Record<string,Blob>; onLoad?:(doc:Document)=>void }) {
  const [urls,setUrls]=useState<Record<string,string>>({});
@@ -17,7 +17,7 @@ export function BookSpreadPreview({ book, index, images, onLoad }: { book:Templa
  return <iframe className="ts-spread-frame" title={`Spread ${index+1}: ${book.pages[index].title}`} sandbox="allow-same-origin" style={{aspectRatio:`${size.width}/${size.height}`}} srcDoc={renderTemplatePage(book,index,urls)} onLoad={e=>{const doc=e.currentTarget.contentDocument;if(doc)void doc.fonts.ready.then(()=>onLoad?.(doc));}}/>;
 }
 export function LayoutDiagram({templateId,blueprint}:{templateId:string;blueprint:string}){
- const b=[chalisaBlueprint,...templateBlueprints(templateId),...(templateId==='iks-notes'?legacyNotebookLayouts:[])].find(v=>v.id===blueprint)!;
+ const b=[chalisaBlueprint,legacyChalisaBlueprint,...templateBlueprints(templateId),...(templateId==='iks-notes'?legacyNotebookLayouts:[])].find(v=>v.id===blueprint)!;
  const t=templates.find(v=>v.id===templateId)!;const size=templateSize(templateId);
  return <img className="ts-layout-diagram" alt={`${b.name}: ${b.intent}`} src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(blueprintSvg(b,t.paper,'#a4c5b8',1000*size.height/size.width))}`}/>;
 }
@@ -27,6 +27,7 @@ export default function LayoutReview({book,busy,onClose,onCreate}:{book:Template
  return <section className="ts-panel ts-layout-review" aria-label="Review spread layout plan">
   <div className="ts-actions"><h2>Plan the whole book</h2><button onClick={onClose}>Close layout plan</button></div>
   <p>Each spread has its own arrangement. Compare the sequence and choose layouts that suit the passages. Coloured areas show separate scenes; pale areas hold editable words. New illustrations must follow these positions.</p>
+  {book.pages.some(p=>p.chalisaPages)&&<p>Restore large illustrations on both pages. The left scene sits above its chaupai and the right scene below its chaupai. Existing strip artwork needs replacement; your text and chosen character reference stay the same.</p>}
   <p>Your current book stays unchanged. Creating the redesign saves a separate copy with the same text and empty artwork slots, then downloads the matching generation request.</p>
   <div className="ts-layout-grid">{planned.pages.map((p,i)=><article key={p.id}>
    <LayoutDiagram templateId={book.templateId} blueprint={p.blueprint!}/>

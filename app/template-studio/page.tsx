@@ -366,14 +366,17 @@ export default function TemplateStudio() {
     async function createRedesign(planned:TemplateBook) {
         if(!draft)return;
         const id=crypto.randomUUID();
-        const redesigned={...planned,projectId:id,characterGuide:'Recreate these source-specific identities in the selected template medium. Discard old positional and rendering instructions: '+planned.characterGuide};
+        const chalisa=planned.pages.some(p=>p.chalisaPages);
+        const character=chalisa?draft.images['character-reference.png']:undefined;
+        const redesigned={...planned,projectId:id,characterGuide:chalisa?planned.characterGuide:'Recreate these source-specific identities in the selected template medium. Discard old positional and rendering instructions: '+planned.characterGuide};
         const references=await templateReferenceEntries(planned.templateId);
         const entries:Record<string,Uint8Array>={...references,'book.json':strToU8(JSON.stringify(redesigned,null,2)),
-            'START-HERE.txt':strToU8('REBUILD ARTWORK. The supplied book.json is the complete frozen manuscript and layout plan. Preserve it exactly. Existing artwork is intentionally excluded. Rebuild the character sheet in the selected template style; ignore previous notes about always placing figures on the right. For EACH spread use only its selected blueprint. Return images only, including character-reference.png.\n'+continuationPrompt(redesigned,[]))};
+            'START-HERE.txt':strToU8('REBUILD ARTWORK. The supplied book.json is the complete frozen manuscript and layout plan. Preserve it exactly. Existing spread artwork is intentionally excluded. '+(chalisa?'Restore large scenes on BOTH physical pages using the new selected blueprint. Preserve the established illustration style and character identities. '+(character?'Reuse the attached images/character-reference.png unchanged; do not recreate it or ask for four new options. ':'Use the previously chosen character sheet in this same conversation; if unavailable, request it before drawing. '):'Rebuild the character sheet in the selected template style; ignore previous notes about always placing figures on the right. ')+'For EACH spread use only its selected blueprint. Return images only.\n'+continuationPrompt(redesigned,character?['character-reference.png']:[],undefined,chalisa?4:10))};
+        if(character)entries['images/character-reference.png']=new Uint8Array(await character.arrayBuffer());
         for(const p of redesigned.pages)entries[`spread-prompts/${p.id}.txt`]=strToU8(blueprintPrompt(p.blueprint!)+'\nSource: '+p.original+'\nScene: '+p.scene);
         await writeQueue.current;
         await storage('write',draft);
-        const copy:Draft={...draft,id,book:redesigned,images:{},cloud:undefined,updated:Date.now()};
+        const copy:Draft={...draft,id,book:redesigned,images:character?{'character-reference.png':character}:{},cloud:undefined,updated:Date.now()};
         await storage('write',copy);
         download('Template-Redesign-Request.zip',new Blob([new Uint8Array(zipSync(entries,{level:0}))],{type:'application/zip'}));
         setDraft(copy);setSelected(0);setShowLayoutPlan(false);setShowContactSheet(true);
