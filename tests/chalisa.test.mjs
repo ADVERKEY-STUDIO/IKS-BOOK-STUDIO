@@ -7,7 +7,7 @@ test('Chalisa selection survives parsing and drives copied, ZIP and sample promp
  const d=draft();
  assert.equal(parseVisualDirection(d.visualDirection).passageMode,'chalisa');
  const prompt=sourceBookPrompt(d);
- for(const text of ['EXACTLY TWO','Never combine four','opening and closing dohas','ONE passage-specific illustration','beanstalk-adventure','FINAL CHALISA CHECK']) assert.ok(prompt.includes(text),text);
+ for(const text of ['EXACTLY TWO','TWO PAGES PER SPREAD','opening and closing dohas','ONE composite full-spread artwork','beanstalk-adventure','FINAL CHALISA CHECK']) assert.ok(prompt.includes(text),text);
  assert.equal(new TextDecoder().decode((await sourceRequestEntries(d))['START-HERE.txt']),prompt);
  assert.match(samplePrompt(d),/EXACTLY TWO/);
  assert.match(samplePrompt(d),/SAMPLE ONLY/);
@@ -30,7 +30,7 @@ test('Chalisa import rejects four lines, empty lines, missing meanings and missi
  for(const field of ['meaning','scene']) assert.throws(()=>validateChalisaBook({pages:[{...page,[field]:''}]}),/meaning and matching/);
 });
 
-const bilingualMeaning = 'हिंदी अर्थ:\nमाँ दुर्गा सुख देती हैं।\nमाँ अम्बा दुख दूर करती हैं।\n\nEnglish meaning:\nMother Durga brings happiness.\nMother Amba takes away sorrow.\n\nहिंदी नैतिक शिक्षा:\nदूसरों की मदद करो।\n\nEnglish moral:\nHelp others.';
+const bilingualMeaning = 'हिंदी अर्थ:\nमाँ दुर्गा सुख देती हैं।\nमाँ अम्बा दुख दूर करती हैं।\n\nEnglish meaning:\nMother Durga brings happiness.\nMother Amba takes away sorrow.\n\nहिंदी नैतिक शिक्षा:\nदूसरों की मदद करो।\nउनका ध्यान रखो।\n\nEnglish moral:\nHelp others.\nCare for them.';
 test('new Beanstalk requests select one chaupai and ages 9–14 while retaining art direction',()=>{
  const direction = chalisaTemplateDirection('beanstalk-adventure',{audience:'',characters:'Durga',notes:'Keep the painted style',passageMode:'standard'});
  assert.equal(direction.passageMode,'chalisa'); assert.equal(direction.audience,'Ages 9–14');
@@ -69,7 +69,7 @@ test('new Chalisa imports require all four sections and two lines per meaning; r
  for(const label of ['हिंदी अर्थ:','English meaning:','हिंदी नैतिक शिक्षा:','English moral:']) assert.throws(()=>validate(page.meaning.replace(label,'')),/required labels/);
  assert.throws(()=>validate(page.meaning.replace('Mother Durga brings happiness.\nMother Amba','Mother Durga brings happiness. Mother Amba')),/two short lines/);
  assert.throws(()=>validate(page.meaning.replace('माँ दुर्गा सुख देती हैं।\n','')),/two short lines/);
- assert.throws(()=>validate(page.meaning.replace('Help others.','')),/required labels/);
+ assert.throws(()=>validate(page.meaning.replace('Help others.\nCare for them.','')),/required labels/);
  assert.throws(()=>validate(page.meaning+'\nEnglish moral:\nExtra'),/required labels/);
  assert.doesNotThrow(()=>validateChalisaBook({pages:[{...page,meaning:'Supplied English meaning and long moral unchanged.'}]},{bilingual:true,preserveReference:true}));
 });

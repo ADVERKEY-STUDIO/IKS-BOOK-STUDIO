@@ -78,7 +78,7 @@ export async function autoPlaceStoryBook(book:TemplateBook,images:Record<string,
  frame.setAttribute('sandbox','allow-same-origin');document.body.append(frame);
  try{
   for(let i=0;i<pages.length;i++){
-   const page=pages[i],blob=images[page.image];if(!blob||(!force&&page.textPositions))continue;
+   const page=pages[i],blob=images[page.image];if(page.chalisaPages||!blob||(!force&&page.textPositions))continue;
    const url=URL.createObjectURL(blob);
    try{
     await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Text preview took too long to load.')),15000);frame.onload=()=>{clearTimeout(timer);resolve();};frame.srcdoc=renderTemplatePage(book,i,{[page.image]:url});});

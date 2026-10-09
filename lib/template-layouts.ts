@@ -1,3 +1,4 @@
+import { CHALISA_BLUEPRINT, chalisaPageText } from './chalisa-pages.ts';
 import {textBackgroundStyle,textBackgroundCss} from './text-backgrounds.ts';
 import { referenceContracts, referencePalette, legacyNotebookLayouts } from './template-reference-contracts.ts';
 import { signatureBlueprints } from './template-signatures.ts';
@@ -29,6 +30,8 @@ export const blueprints: Record<string, Blueprint> = Object.fromEntries([
  bp('verse-pair','Verse between small vignettes','Two small symbolic illustrations flank a central reading area.',[r(3,20,20,52),r(77,20,20,52)],[r(28,9,44,49)],r(28,65,44,25)),
  bp('study-pair','Paired studies & commentary','Two distinct study illustrations above original text and separate commentary.',[r(5,4,40,30),r(55,4,40,30)],[r(6,40,39,53)],r(56,40,38,53)),
 ].map(b=>[b.id,b]));
+export const chalisaBlueprint = bp(CHALISA_BLUEPRINT,'Chalisa · one chaupai on each facing page','One shared full-spread artwork. Left page illustrates only its chaupai; right page illustrates only the next chaupai. Each page has its own complete reading area, with artwork along the outer side and lower edge.',[r(0,0,13,100),r(13,89,35,11),r(50,0,13,100),r(63,89,37,11)],[r(14,7,33,80),r(64,7,33,80)],r(48,94,2,2),{integrated:true});
+blueprints[CHALISA_BLUEPRINT]=chalisaBlueprint;
 // New named blueprints extend revision one; existing saved coordinates stay unchanged.
 for(const options of Object.values(signatureBlueprints))for(const b of options)blueprints[b.id]=b;
 for(const contract of Object.values(referenceContracts))for(const b of contract.layouts)blueprints[b.id]=b;
@@ -55,6 +58,7 @@ export function templateSize(id:string,revision=2) { if(id==='iks-notes')return 
 export function templatePrintSize(id:string,cover=false,revision=2) { const size=templateSize(id,revision);return {...size,width:cover&&['manifesto','wild','fragments','chromatic','echo','haze'].includes(id)?210:size.width}; }
 export function blueprintFor(book:Pick<TemplateBook,'templateId'|'templateRevision'>,page:Pick<BookPage,'blueprint'>) {
  if(![1,2].includes(book.templateRevision||0)) throw Error('This book needs a supported template specification.');
+ if(book.templateRevision===2&&book.templateId!=='iks-notes'&&page.blueprint===CHALISA_BLUEPRINT)return chalisaBlueprint;
  const found=[...templateBlueprints(book.templateId,book.templateRevision),...(book.templateId==='iks-notes'?legacyNotebookLayouts:[]),...(book.templateRevision===1?(families[book.templateId]||[]).map(id=>blueprints[id]):[])].find(b=>b.id===page.blueprint);
  if(!found)throw Error(`Choose a supported spread blueprint for ${book.templateId}.`);
  return found;
@@ -88,6 +92,7 @@ export function distributeText(text:string,count:number):string[] {
  result.push(text.slice(start));return result;
 }
 export function plannedTextBlocks(page:BookPage,b:Blueprint) {
+ if(page.chalisaPages)return [...b.original.map((area,i)=>({...area,role:'original' as const,heading:undefined as string|undefined,text:page.chalisaPages?.[i]?chalisaPageText(page.chalisaPages[i]):''})),{...b.meaning,role:'meaning' as const,heading:undefined as string|undefined,text:''}].map((block,i)=>({...block,...page.textPositions?.[i]}));
  const sections=page.original.match(/[^]*?(?:\n\s*\n|$)/g)?.filter(Boolean)||[];
  const parts=page.readingOrder==='continuous'?b.original.map((_,i)=>i===0?page.original:''):b.id.startsWith('reference-notes-')&&sections.length===b.original.length?sections:distributeText(page.original,b.original.length);
  return [...b.original.map((a,i)=>({...a,role:'original' as const,text:page.noteSections?.[i]?.body??parts[i],heading:page.noteSections?.[i]?.heading})),{...b.meaning,role:'meaning' as const,text:page.meaning}].map((block,i)=>({...block,...page.textPositions?.[i]}));
@@ -95,6 +100,7 @@ export function plannedTextBlocks(page:BookPage,b:Blueprint) {
 export function planTemplateBook(book:TemplateBook):TemplateBook {
  const options=book.templateId==='iks-notes'&&!book.pages.some(p=>p.noteSections)?legacyNotebookLayouts:templateBlueprints(book.templateId);
  const pages=book.pages.map((p,index)=>{
+  if(p.chalisaPages)return {...p,blueprint:CHALISA_BLUEPRINT,layoutReason:chalisaBlueprint.intent};
   const words=`${p.title} ${p.scene} ${p.meaning}`.toLowerCase();
   const ranked=options.filter(b=>!p.noteSections||b.original.length===p.noteSections.length).map((b,order)=>{
    let score=-order*.01;
@@ -150,7 +156,7 @@ function renderPlannedArtwork(book:TemplateBook,b:Blueprint,url:string|undefined
 export function renderPlannedSpread(book:TemplateBook,page:BookPage,url:string|undefined,palette:{paper:string;ink:string;accent:string},index:number) {
  if(book.templateRevision===2)palette=referencePalette(book.templateId,palette);
  const b=blueprintFor(book,page),size=templateSize(book.templateId,book.templateRevision||1);
- return `<section class="spread planned-spread ${esc(book.templateId)}" data-revision="${book.templateRevision}" data-blueprint="${b.id}" data-spread="${index+1}" style="--paper:${palette.paper};--ink:${palette.ink};--accent:${palette.accent};width:${size.width}mm;height:${size.height}mm">${renderPlannedArtwork(book,b,url,page.scene,page.image,page.artworkFit)}${book.templateId==='iks-notes'?`<div class="note-rules" aria-hidden="true">${Array.from({length:41},(_,line)=>`<i style="top:${(line+1)*2.4}%"></i>`).join('')}</div><header class="notes-title"><span>Page ${index+1}</span><h2>${esc(page.title)}</h2></header>`:''}${b.art.map(a=>`<div aria-hidden="true" class="planned-art-frame" style="${position(a)}"></div>`).join('')}${plannedTextBlocks(page,b).map((block,i)=>`<div class="planned-text ${block.role}${page.textBackgrounds?.[block.role]&&page.textBackgrounds[block.role]!.shape!=='none'?' text-background text-background-'+page.textBackgrounds[block.role]!.shape:''}${(book.templateId==='beanstalk-adventure'||page.readingOrder==='continuous')&&(block.role==='meaning'||i===0)?' reading-label':''}${page.readingOrder==='continuous'?' continuous-reading':''}${b.panel?' planned-panel':''}" data-text-region="${i+1}" style="${textBackgroundStyle(page.textBackgrounds?.[block.role])}${!block.text?'display:none;':''}${position(block)}${book.templateRevision===2?`font-family:${referenceContracts[book.templateId]?.sans?'Book,Arial,sans-serif':'Book,Georgia,serif'};text-align:${referenceContracts[book.templateId]?.centered?'center':'left'};font-style:${book.templateId==='beanstalk-adventure'&&block.role==='meaning'?'italic':'normal'};line-height:1.4;`:''}font-size:${(block.role==='meaning'?Math.max(book.templateId==='iks-notes'?10:14,page.fontSize*.875):page.fontSize)/(size.width*72/25.4/100)}cqw" contenteditable="true">${book.templateId==='iks-notes'?`${'heading' in block&&block.heading?`<strong class="note-heading"><span>${esc(block.heading)}</span></strong>`:''}${renderNoteText(block.text)}`:esc(block.text)}</div>`).join('')}</section>`;
+ return `<section class="spread planned-spread ${esc(book.templateId)}" data-revision="${book.templateRevision}" data-blueprint="${b.id}" data-spread="${index+1}" style="--paper:${palette.paper};--ink:${palette.ink};--accent:${palette.accent};width:${size.width}mm;height:${size.height}mm">${renderPlannedArtwork(book,b,url,page.scene,page.image,page.artworkFit)}${book.templateId==='iks-notes'?`<div class="note-rules" aria-hidden="true">${Array.from({length:41},(_,line)=>`<i style="top:${(line+1)*2.4}%"></i>`).join('')}</div><header class="notes-title"><span>Page ${index+1}</span><h2>${esc(page.title)}</h2></header>`:''}${b.art.map(a=>`<div aria-hidden="true" class="planned-art-frame" style="${position(a)}"></div>`).join('')}${plannedTextBlocks(page,b).map((block,i)=>`<div class="planned-text ${block.role}${page.textBackgrounds?.[block.role]&&page.textBackgrounds[block.role]!.shape!=='none'?' text-background text-background-'+page.textBackgrounds[block.role]!.shape:''}${!page.chalisaPages&&(book.templateId==='beanstalk-adventure'||page.readingOrder==='continuous')&&(block.role==='meaning'||i===0)?' reading-label':''}${page.readingOrder==='continuous'?' continuous-reading':''}${b.panel?' planned-panel':''}" data-text-region="${i+1}" style="${textBackgroundStyle(page.textBackgrounds?.[block.role])}${!block.text?'display:none;':''}${position(block)}${book.templateRevision===2?`font-family:${referenceContracts[book.templateId]?.sans?'Book,Arial,sans-serif':'Book,Georgia,serif'};text-align:${referenceContracts[book.templateId]?.centered?'center':'left'};font-style:${book.templateId==='beanstalk-adventure'&&block.role==='meaning'?'italic':'normal'};line-height:1.4;`:''}font-size:${(block.role==='meaning'?Math.max(book.templateId==='iks-notes'?10:14,page.fontSize*.875):page.fontSize)/(size.width*72/25.4/100)}cqw" contenteditable="true">${book.templateId==='iks-notes'?`${'heading' in block&&block.heading?`<strong class="note-heading"><span>${esc(block.heading)}</span></strong>`:''}${renderNoteText(block.text)}`:esc(block.text)}</div>`).join('')}</section>`;
 }
 function renderNoteText(text:string){return esc(text).replace(/\*\*([^*\n]+)\*\*/g,(_,phrase:string)=>phrase.split(/(\s+)/).map(word=>/^\s+$/.test(word)?word:`<mark>${word}</mark>`).join('')).replace(/__([^_\n]+)__/g,'<u>$1</u>');}
 export function plannedSpreadCss(){return `${textBackgroundCss()}
