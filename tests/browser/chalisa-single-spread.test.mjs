@@ -1,4 +1,4 @@
-import { facingBook } from '../fixtures/chalisa-facing-pages.mjs';
+import { singleBook } from '../fixtures/chalisa-single-spread.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
@@ -6,7 +6,7 @@ import {readFile} from 'node:fs/promises';
 import {unzipSync, zipSync, strToU8} from 'fflate';
 const require=createRequire(import.meta.url), appUrl=process.env.IKS_APP_URL;
 
-test('Chalisa content reference, saved request, bilingual import and missing-image recovery', {skip:!appUrl,timeout:120000}, async()=>{
+test('Approved single-chaupai workflow: samples, import, preview, edit, recovery and export', {skip:!appUrl,timeout:120000}, async()=>{
  const {chromium}=require(process.env.IKS_PLAYWRIGHT_MODULE||'playwright');
  const browser=await chromium.launch({headless:true});
  try {
@@ -39,7 +39,7 @@ test('Chalisa content reference, saved request, bilingual import and missing-ima
   assert.match(prompt,/NO CONTENT REFERENCE/);
   assert.match(prompt,/batches of at most FOUR/);
   const id=prompt.match(/"projectId": "([^"]+)"/)[1];
-  const book={...facingBook(3),projectId:id,title:'Durga Chalisa test'};
+  const book={...singleBook(3),projectId:id,title:'Durga Chalisa test'};
   const upload=async data=>page.getByLabel('Import ChatGPT’s ZIP or book.json').setInputFiles({name:'book.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(data))});
   await upload({...book,pages:book.pages.map(p=>({...p,chalisaPages:p.chalisaPages.map(leaf=>({...leaf,meaning:'Only one English meaning'}))}))});
   await page.getByRole('alert').filter({hasText:'required labels'}).waitFor();
@@ -51,22 +51,21 @@ test('Chalisa content reference, saved request, bilingual import and missing-ima
   await page.getByLabel('Import ChatGPT’s ZIP or book.json').setInputFiles({name:'checkpoint.zip',mimeType:'application/zip',buffer:Buffer.from(zipSync({'book.json':strToU8(JSON.stringify(book)),'images/spread-1.png':image,'images/character-reference.png':image,'passage-map.txt':strToU8('Saved passage map'),'progress.txt':strToU8('Pending spread-2.png')}))});
   await page.getByRole('button',{name:'Read book',exact:true}).waitFor();
   await page.getByRole('button',{name:'Text & layout',exact:true}).click();
-  assert.equal(await page.getByLabel('Left chaupai',{exact:true}).inputValue(),book.pages[0].chalisaPages[0].original);
-  assert.equal(await page.getByLabel('Right chaupai',{exact:true}).inputValue(),book.pages[0].chalisaPages[1].original);
-  await page.getByLabel('Right meanings and morals',{exact:true}).fill(book.pages[0].chalisaPages[1].meaning.replace('three worlds','all three worlds'));
-  assert.equal(await page.getByLabel('Left meanings and morals',{exact:true}).inputValue(),book.pages[0].chalisaPages[0].meaning);
+  assert.equal(await page.getByLabel('Spread chaupai',{exact:true}).inputValue(),book.pages[0].chalisaPages[0].original);
+  assert.equal(await page.getByLabel('Right chaupai',{exact:true}).count(),0);
+  await page.getByLabel('Spread meanings and morals',{exact:true}).fill(book.pages[0].chalisaPages[0].meaning.replace('Mother Durga','Mother Durga lovingly'));
   const preview=page.frameLocator('iframe.ts-spread-frame');
   await preview.locator('.planned-text').first().waitFor();
   await preview.locator('body').evaluate(()=>document.fonts.ready);
   const regions=await preview.locator('.planned-text').evaluateAll(nodes=>nodes.filter(n=>n.textContent.trim()).map(n=>({text:n.textContent,x:n.offsetLeft,w:n.offsetWidth,sw:n.scrollWidth,h:n.clientHeight,sh:n.scrollHeight,parent:n.parentElement.clientWidth})));
-  assert.equal(regions.length,2);assert.ok(regions[0].x+regions[0].w<regions[0].parent/2);assert.ok(regions[1].x>regions[1].parent/2);
-  assert.ok(regions.every(r=>r.sw<=r.w+2&&r.sh<=r.h+2),'Both complete text blocks fit');
+  assert.equal(regions.length,1);assert.ok(regions[0].x>regions[0].parent/2);
+  assert.ok(regions.every(r=>r.sw<=r.w+2&&r.sh<=r.h+2),'The complete chaupai and all four sections fit');
   assert.equal(await page.getByText(/reading order needs review/).count(),0);
   const art=await preview.locator('.planned-art').evaluate(im=>({w:im.clientWidth,h:im.clientHeight,pw:im.parentElement.clientWidth,ph:im.parentElement.clientHeight}));
   assert.equal(art.w,art.pw);assert.equal(art.h,art.ph);
   const scenes=await preview.locator('.planned-art-frame').evaluateAll(nodes=>nodes.map(n=>({w:n.offsetWidth/n.parentElement.clientWidth,h:n.offsetHeight/n.parentElement.clientHeight})));
   assert.equal(scenes.length,1);assert.equal(scenes[0].w,1);assert.equal(scenes[0].h,1);
-  await preview.locator('.planned-spread').screenshot({path:'/tmp/chalisa-facing-pages-preview.png'});
+  await preview.locator('.planned-spread').screenshot({path:'/tmp/chalisa-single-spread-preview.png'});
   await page.getByRole('button',{name:'Artwork & imports',exact:true}).click();
   const downloading=page.waitForEvent('download');
   await page.getByRole('button',{name:'Download images prompt',exact:true}).click();
@@ -75,63 +74,42 @@ test('Chalisa content reference, saved request, bilingual import and missing-ima
   assert.match(continuation,/Meaning and moral context:/);assert.match(continuation,/UP TO 4 PER REQUEST/);
   await page.getByRole('button',{name:'Review layouts & rebuild artwork',exact:true}).click();
   await page.getByRole('region',{name:'Review spread layout plan'}).waitFor();
-  assert.equal(await page.locator('.ts-layout-diagram').count(),2);
+  assert.equal(await page.locator('.ts-layout-diagram').count(),3);
   await page.getByRole('button',{name:'Close layout plan',exact:true}).click();
   await page.getByRole('button',{name:'Export book',exact:true}).click();
   const exportDownload=page.waitForEvent('download');
   await page.getByRole('button',{name:'Download editable ZIP',exact:true}).click();
   const exported=unzipSync(new Uint8Array(await readFile(await (await exportDownload).path())));
   const restored=JSON.parse(new TextDecoder().decode(exported['book.json']));
-  assert.equal(restored.pages[0].chalisaPages.length,2);
+  assert.equal(restored.pages[0].chalisaPages.length,1);
   assert.equal(restored.pages[1].chalisaPages.length,1);
-  assert.match(restored.pages[0].chalisaPages[1].meaning,/all three worlds/);
+  assert.match(restored.pages[0].chalisaPages[0].meaning,/Mother Durga lovingly/);
   const manuscript=new TextDecoder().decode(exported['manuscript.md']);
-  assert.ok(manuscript.indexOf('Mother Durga')<manuscript.indexOf('### Right page'));
-  // A saved strip-layout book is only migrated when its separate rebuild is requested.
-  const legacy={...restored,projectId:'legacy-strips',pages:restored.pages.map(p=>({...p,blueprint:'chalisa-facing-pages',artworkBlueprint:'chalisa-facing-pages',textPositions:[{x:14,y:7,w:33,h:80},{x:64,y:7,w:33,h:80},{x:48,y:94,w:2,h:2}]}))};
-  await page.getByRole('button',{name:'Artwork & imports',exact:true}).click();
-  await page.getByLabel('Import ZIP as a separate book',{exact:true}).setInputFiles({name:'legacy.zip',mimeType:'application/zip',buffer:Buffer.from(zipSync({'book.json':strToU8(JSON.stringify(legacy)),'images/spread-1.png':image,'images/character-reference.png':image}))});
-  await preview.locator('[data-blueprint="chalisa-facing-pages"]').waitFor();
-  assert.equal(await page.getByText(/reading order needs review/).count(),0);
-  await page.getByRole('button',{name:'Review layouts & rebuild artwork',exact:true}).click();
-  await page.getByRole('region',{name:'Review spread layout plan'}).locator('select').first().selectOption('chalisa-full-spread-flow');
-  const rebuilding=page.waitForEvent('download');
-  await page.getByRole('button',{name:'Create redesign copy & download request',exact:true}).click();
-  const rebuild=unzipSync(new Uint8Array(await readFile(await (await rebuilding).path())));
-  const rebuilt=JSON.parse(new TextDecoder().decode(rebuild['book.json']));
-  assert.notEqual(rebuilt.projectId,legacy.projectId);
-  assert.deepEqual(rebuilt.pages[0].chalisaPages,legacy.pages[0].chalisaPages);
-  assert.equal(rebuilt.pages[0].blueprint,'chalisa-full-spread-flow');
-  assert.equal(rebuilt.pages[0].textPositions,undefined);
-  assert.deepEqual(rebuild['images/character-reference.png'],new Uint8Array(image));
-  assert.equal(rebuild['images/spread-1.png'],undefined);
-  const rebuildPrompt=new TextDecoder().decode(rebuild['START-HERE.txt']);
-  assert.match(rebuildPrompt,/Reuse the attached images\/character-reference.png unchanged/);
-  assert.match(rebuildPrompt,/UP TO 4 PER REQUEST/);
-  assert.equal(rebuilt.characterGuide,legacy.characterGuide);
-  assert.match(rebuildPrompt,/ONE continuous illustrated environment/);
-  assert.match(rebuildPrompt,/SELECTED SPREAD BLUEPRINT: chalisa-full-spread-flow/);
+  assert.match(manuscript,/### Two-page spread/);
+  assert.doesNotMatch(manuscript,/### Right page|### Left page/);
+  assert.ok(entries['template-references/approved-cloud-right.png']);
+  assert.ok(entries['template-references/approved-cloud-left.png']);
   assert.deepEqual(errors,[]);
- } finally {await browser.close();}
+ } finally { await browser.close(); }
 });
 
-test('all continuous Chalisa reading arrangements fit actual bilingual text at 14 pt', {skip:!appUrl,timeout:60000}, async()=>{
+test('all single-chaupai cloud reading arrangements fit actual bilingual text at 14 pt', {skip:!appUrl,timeout:60000}, async()=>{
  const {parseTemplateBook,renderTemplateBook}=await import('../../lib/template-book.ts');
- const {chalisaFullSpreadBlueprints}=await import('../../lib/template-layouts.ts');
+ const {chalisaSingleBlueprints}=await import('../../lib/template-layouts.ts');
  const {chromium}=require(process.env.IKS_PLAYWRIGHT_MODULE||'playwright');
  const browser=await chromium.launch({headless:true});
  try{
   const page=await browser.newPage({viewport:{width:1600,height:1000}});
   let proofHtml='';
-  await page.route(`${appUrl}/chalisa-reading-proof`,route=>route.fulfill({contentType:'text/html',body:proofHtml}));
-  for(const layout of chalisaFullSpreadBlueprints){
-   const raw=facingBook();raw.pages[0].blueprint=layout.id;
+  await page.route(`${appUrl}/chalisa-single-reading-proof`,route=>route.fulfill({contentType:'text/html',body:proofHtml}));
+  for(const layout of chalisaSingleBlueprints){
+   const raw=singleBook(1);raw.pages[0].blueprint=layout.id;
    proofHtml=renderTemplateBook(parseTemplateBook(raw),{},'/fonts/book-sanskrit.ttf');
-   await page.goto(`${appUrl}/chalisa-reading-proof`);
+   await page.goto(`${appUrl}/chalisa-single-reading-proof`);
    await page.evaluate(()=>document.fonts.ready);
    const regions=await page.locator('.planned-text').evaluateAll(nodes=>nodes.filter(n=>n.textContent.trim()).map(n=>({w:n.clientWidth,sw:n.scrollWidth,h:n.clientHeight,sh:n.scrollHeight})));
-   assert.equal(regions.length,2);
-   assert.ok(regions.every(r=>r.sw<=r.w+2&&r.sh<=r.h+2),`${layout.id}: both complete text blocks fit`);
+   assert.equal(regions.length,1);
+   assert.ok(regions.every(r=>r.sw<=r.w+2&&r.sh<=r.h+2),`${layout.id}: the verse and four sections fit`);
   }
  }finally{await browser.close();}
 });

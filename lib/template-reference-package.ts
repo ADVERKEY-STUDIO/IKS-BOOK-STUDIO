@@ -1,21 +1,31 @@
 import { referenceContracts, referenceCoverage, referencePalette } from './template-reference-contracts.ts';
 import { referenceAssets } from './template-reference-assets.ts';
-import { TEMPLATE_REVISION, templateBlueprints, templateSize, blueprintSvg, blueprintPrompt } from './template-layouts.ts';
+import { TEMPLATE_REVISION, chalisaSingleBlueprints, templateBlueprints, templateSize, blueprintSvg, blueprintPrompt } from './template-layouts.ts';
 import { templates, templateDesignPrompt } from './template-book.ts';
 import { childrenTemplates } from './children-templates.ts';
 import { strToU8 } from 'fflate';
 import type { TemplateId } from './template-book.ts';
 /** Bundle selected visual references rather than asking the image model to infer them from prose. */
-export async function templateReferenceEntries(id: TemplateId, fetchReference: typeof fetch = fetch) {
+export async function templateReferenceEntries(id: TemplateId, fetchReference: typeof fetch = fetch, singleChalisa = false) {
+  singleChalisa = singleChalisa && id !== 'iks-notes';
   const entries: Record<string, Uint8Array> = {};
   const template = childrenTemplates.find(t => t.id === id);
   const design = templates.find(t => t.id === id)!;
   const palette=referencePalette(id,design);
   const size = templateSize(id);
-  const layouts = templateBlueprints(id);
-  entries['template-references/template-specification.json'] = strToU8(JSON.stringify({ templateId:id, templateRevision:TEMPLATE_REVISION, dimensionsMm:size, paper:palette.paper, ink:palette.ink, accent:palette.accent, coverage:referenceCoverage(id), prompt:templateDesignPrompt(id), referenceContract:referenceContracts[id], art:referenceContracts[id]?.art||design.art, typography:{font:id==='iks-notes'?'Patrick Hand (Latin handwriting approximation)':referenceContracts[id]?.sans?'Noto Sans Devanagari':'Noto Serif Devanagari / serif', referenceTreatment:referenceContracts[id]?.typography, exactReferenceFontVerified:false,originalPt:id==='iks-notes'?10.5:16,meaningPt:id==='iks-notes'?10:14,lineHeight:1.4}, blueprints:layouts },null,2));
-  entries['template-references/LAYOUT-INSTRUCTIONS.txt'] = strToU8(templateDesignPrompt(id)+'\n\nChoose one blueprint per spread according to the passage. Multiple art regions represent distinct scenes within one composite spread image. Do not cycle mechanically. Preserve source order, never shorten original text. The app supplies all lettering.\n\n' + layouts.map(b=>blueprintPrompt(b.id)).join('\n\n'));
+  const layouts = singleChalisa ? chalisaSingleBlueprints : templateBlueprints(id);
+  entries['template-references/template-specification.json'] = strToU8(JSON.stringify({ templateId:id, templateRevision:TEMPLATE_REVISION, dimensionsMm:size, paper:palette.paper, ink:palette.ink, accent:palette.accent, coverage:referenceCoverage(id), prompt:templateDesignPrompt(id,undefined,undefined,singleChalisa,singleChalisa), referenceContract:singleChalisa?undefined:referenceContracts[id], art:referenceContracts[id]?.art||design.art, typography:{font:id==='iks-notes'?'Patrick Hand (Latin handwriting approximation)':referenceContracts[id]?.sans?'Noto Sans Devanagari':'Noto Serif Devanagari / serif', referenceTreatment:referenceContracts[id]?.typography, exactReferenceFontVerified:false,originalPt:id==='iks-notes'?10.5:16,meaningPt:id==='iks-notes'?10:14,lineHeight:1.4}, blueprints:layouts },null,2));
+  entries['template-references/LAYOUT-INSTRUCTIONS.txt'] = strToU8(templateDesignPrompt(id,undefined,undefined,singleChalisa,singleChalisa)+'\n\nChoose one blueprint per spread according to the passage. Multiple art regions represent distinct scenes within one composite spread image. Do not cycle mechanically. Preserve source order, never shorten original text. The app supplies all lettering.\n\n' + layouts.map(b=>blueprintPrompt(b.id)).join('\n\n'));
   for (const b of layouts) entries[`template-references/${b.id}-layout.svg`] = strToU8(blueprintSvg(b,palette.paper,'#8bb8a6',1000*size.height/size.width));
+  if(singleChalisa) {
+    for(const name of ['cloud-right.png','cloud-left.png']) {
+      const response=await fetchReference(`/templates/references/chalisa-approved/${name}`);
+      if(!response.ok)throw Error('Could not package the approved Chalisa references. Retry downloading the request.');
+      entries[`template-references/approved-${name}`]=new Uint8Array(await response.arrayBuffer());
+    }
+    entries['template-references/READ-ME.txt']=strToU8('Approved Chalisa book samples: one chaupai per two-page spread, continuous matte gouache/cut-paper illustration and a pale scalloped cloud behind all text. Use these as actual visual references for every image call. Their words and deity belong to the example book: do not copy their text, cast or scenes into another source. The new source determines every subject, divine form, attribute and action. Keep new lettering editable in book.json. Choose a single-chaupai layout; the painted cloud must cover its complete reading area.');
+    return entries;
+  }
   if(id==='iks-notes'){
     for(let index=0;index<2;index++){
       const response=await fetchReference(`/templates/references/iks-notes/reference-${index+1}.jpg`);

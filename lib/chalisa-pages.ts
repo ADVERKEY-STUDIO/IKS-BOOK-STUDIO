@@ -1,7 +1,14 @@
-/** A spread shares one artwork; each physical page owns its complete text and scene. */
+/** New books use one chaupai per spread; saved facing-page books remain supported. */
 export const LEGACY_CHALISA_BLUEPRINT = 'chalisa-facing-pages';
-export const CHALISA_BLUEPRINT = 'chalisa-illustrated-facing-pages';
-export const isChalisaBlueprint = (id: unknown) => id === CHALISA_BLUEPRINT || id === LEGACY_CHALISA_BLUEPRINT;
+export const DIAGONAL_CHALISA_BLUEPRINT = 'chalisa-illustrated-facing-pages';
+export const CHALISA_BLUEPRINT = 'chalisa-full-spread';
+export const CHALISA_FULL_SPREAD_IDS = [CHALISA_BLUEPRINT, 'chalisa-full-spread-canopy', 'chalisa-full-spread-flow'] as const;
+export const CHALISA_SINGLE_BLUEPRINT = 'chalisa-single-cloud-right';
+export const CHALISA_SINGLE_IDS = [CHALISA_SINGLE_BLUEPRINT, 'chalisa-single-cloud-left', 'chalisa-single-cloud-lower'] as const;
+export const isSingleChalisa = (id: unknown) => CHALISA_SINGLE_IDS.some(value => value === id);
+export const isFullSpreadChalisa = (id: unknown) => isSingleChalisa(id) || CHALISA_FULL_SPREAD_IDS.some(value => value === id);
+export const isChalisaBlueprint = (id: unknown) => isFullSpreadChalisa(id) || id === DIAGONAL_CHALISA_BLUEPRINT || id === LEGACY_CHALISA_BLUEPRINT;
+export const hasCompactChalisaText = (id: unknown) => isFullSpreadChalisa(id) || id === DIAGONAL_CHALISA_BLUEPRINT;
 export type ChalisaPage = { original: string; meaning: string; sourceReference: string; scene: string };
 export function parseChalisaPages(value: unknown): ChalisaPage[] | undefined {
  if (value === undefined) return;
@@ -17,12 +24,12 @@ export function parseChalisaPages(value: unknown): ChalisaPage[] | undefined {
  });
 }
 /** Compatibility fields remain exact aggregates, never a shared explanation. */
-export function chalisaSpreadText(pages: ChalisaPage[]) {
+export function chalisaSpreadText(pages: ChalisaPage[], wholeSpread = false) {
  return {
   original: pages.map(p => p.original).join('\n\n'),
   meaning: pages.map(p => p.meaning).join('\n\n'),
   sourceReference: pages.map(p => p.sourceReference).join(' / '),
-  scene: pages.map((p,i) => `${i === 0 ? 'LEFT' : 'RIGHT'} PAGE — ${p.sourceReference}: ${p.scene}`).join('\n\n'),
+  scene: pages.map((p,i) => `${wholeSpread ? 'WHOLE TWO-PAGE SPREAD' : i === 0 ? 'LEFT PAGE' : 'RIGHT PAGE'} — ${p.sourceReference}: ${p.scene}`).join('\n\n'),
  };
 }
 export function chalisaPageText(page: ChalisaPage) {

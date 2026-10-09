@@ -1,4 +1,4 @@
-import { CHALISA_BLUEPRINT } from './chalisa-pages.ts';
+import { hasCompactChalisaText } from './chalisa-pages.ts';
 import type { Region } from './template-layouts.ts';
 /** Percent coordinates remain portable across preview, print and differently sized screens. */
 export function parseTextPositions(value:unknown,count:number):Region[]|undefined {
@@ -23,7 +23,7 @@ export function fitTextPositions(spread:HTMLElement,boxes:Region[]):Region[]{
   if(el.scrollHeight<=el.clientHeight+2&&el.scrollWidth<=el.clientWidth+2)return box;
   // The illustrated composition has fixed reading reservations; overflowing text must
   // stay visible to review rather than expanding across the matching artwork.
-  if(spread.dataset.blueprint===CHALISA_BLUEPRINT)return box;
+  if(hasCompactChalisaText(spread.dataset.blueprint))return box;
   const facing=spread.dataset.blueprint==='chalisa-facing-pages';
   const maxRight=facing?(i===0?48:98):100;
   const maxBottom=facing?93:100;
