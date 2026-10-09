@@ -26,7 +26,7 @@ test('left and right explanations stay with their own chaupai through rendering 
  const restored=parseTemplateBook({...book,pages:[{...spread,chalisaPages:edited,...chalisaSpreadText(edited)}]});
  assert.equal(restored.pages[0].chalisaPages[0].meaning,spread.chalisaPages[0].meaning);
  assert.match(restored.pages[0].chalisaPages[1].meaning,/all three worlds/);
- assert.equal(planTemplateBook(book).pages[0].blueprint,'chalisa-facing-pages');
+ assert.equal(planTemplateBook(book).pages[0].blueprint,'chalisa-illustrated-facing-pages');
  const html=renderTemplateBook(book,{'spread-1.png':'test.png'});
  assert.equal((html.match(/class="planned-art"/g)||[]).length,1);
  assert.doesNotMatch(html,/class="planned-text original reading-label/);
@@ -52,4 +52,29 @@ test('request packages the dedicated facing-page guide and continuation keeps si
  const continuation=continuationPrompt(parseTemplateBook(facingBook(3)),[],undefined,4);
  assert.match(continuation,/LEFT PHYSICAL PAGE/);assert.match(continuation,/RIGHT PHYSICAL PAGE/);
  assert.match(continuation,/return ONE full-spread artwork/);
+});
+
+test('new art fills broad areas on BOTH pages; legacy imports keep their painted geometry until explicit rebuild',()=>{
+ const book=parseTemplateBook(facingBook());
+ const b=blueprintFor(book,book.pages[0]);
+ assert.equal(b.art.length,2);
+ for(const [i,art] of b.art.entries()){
+  assert.equal(art.x,i*50);assert.equal(art.w,50);assert.ok(art.h>=40);
+  for(const text of b.original)assert.ok(art.x+art.w<=text.x||text.x+text.w<=art.x||art.y+art.h<=text.y||text.y+text.h<=art.y);
+ }
+ const raw=facingBook();raw.pages[0].blueprint='chalisa-facing-pages';
+ raw.pages[0].textPositions=[{x:14,y:7,w:33,h:80},{x:64,y:7,w:33,h:80},{x:48,y:94,w:2,h:2}];
+ raw.pages[0].artworkBlueprint='chalisa-facing-pages';
+ const old=parseTemplateBook(raw);
+ assert.equal(blueprintFor(old,old.pages[0]).art[0].w,13);
+ const planned=planTemplateBook(old);
+ assert.equal(planned.pages[0].blueprint,'chalisa-illustrated-facing-pages');
+ assert.equal(planned.pages[0].textPositions,undefined);
+ assert.equal(planned.pages[0].artworkBlueprint,undefined);
+ assert.deepEqual(planned.pages[0].chalisaPages,old.pages[0].chalisaPages);
+ assert.equal(old.pages[0].textPositions[0].w,33);
+ const prompt=continuationPrompt(planned,[],undefined,4);
+ assert.match(prompt,/large, clearly readable figures/);
+ assert.match(prompt,/No extra clearance/);
+ assert.doesNotMatch(prompt,/further 3% canvas clearance/);
 });

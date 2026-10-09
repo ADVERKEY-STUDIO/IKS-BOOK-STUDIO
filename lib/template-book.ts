@@ -1,4 +1,4 @@
-import { CHALISA_BLUEPRINT, parseChalisaPages, chalisaSpreadText, type ChalisaPage } from './chalisa-pages.ts';
+import { isChalisaBlueprint, parseChalisaPages, chalisaSpreadText, type ChalisaPage } from './chalisa-pages.ts';
 import {illustrationBatchPrompt} from './illustration-batching.ts';
 import {parseTextBackgrounds,type TextBackgrounds} from './text-backgrounds.ts';
 import {parseBookTypography,bookTypographyCss,type BookTypography} from './book-typography.ts';
@@ -227,7 +227,7 @@ export function parseTemplateBook(input: unknown, projectId?: string): TemplateB
         if(typeof p.blueprint==='string'&&p.blueprint.startsWith('reference-notes-dense-')&&!noteSections)throw Error('This notebook layout requires noteSections. Use the updated notebook prompt.');
         const textBackgrounds=parseTextBackgrounds(p.textBackgrounds);
         const chalisaPages = parseChalisaPages(p.chalisaPages);
-        if ((p.blueprint === CHALISA_BLUEPRINT) !== Boolean(chalisaPages)) throw Error('The facing-page Chalisa layout requires chalisaPages and its matching blueprint.');
+        if (isChalisaBlueprint(p.blueprint) !== Boolean(chalisaPages)) throw Error('The facing-page Chalisa layout requires chalisaPages and its matching blueprint.');
         if (chalisaPages && (b.templateRevision !== 2 || b.templateId === 'iks-notes' || p.readingOrder !== undefined || p.noteSections !== undefined)) throw Error('Chalisa pages require revision 2 and separate left/right reading areas.');
         const aggregate = chalisaPages ? chalisaSpreadText(chalisaPages) : undefined;
         if (aggregate) for (const key of ['original', 'meaning', 'sourceReference', 'scene'] as const) {
