@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {facingBook} from './fixtures/chalisa-facing-pages.mjs';
 import {parseTemplateBook, renderTemplateBook, continuationPrompt} from '../lib/template-book.ts';
-import {plannedTextBlocks,blueprintFor,planTemplateBook,chalisaFullSpreadBlueprints,blueprintPrompt,blueprintSvg} from '../lib/template-layouts.ts';
+import {plannedTextBlocks,blueprintFor,planTemplateBook,chalisaSingleBlueprints,chalisaFullSpreadBlueprints,blueprintPrompt,blueprintSvg} from '../lib/template-layouts.ts';
 import {validateChalisaBook,sourceRequestEntries} from '../lib/visual-direction.ts';
 import {chalisaSpreadText} from '../lib/chalisa-pages.ts';
 
@@ -42,14 +42,14 @@ test('invalid grouping and conflicting aggregate fields are rejected; supplied r
  const wrong=facingBook();wrong.pages[0].chalisaPages[1].sourceReference=wrong.pages[0].chalisaPages[0].sourceReference;
  assert.throws(()=>validateChalisaBook(wrong,{facingPages:true}),/unique sourceReference/);
 });
-test('request packages the dedicated facing-page guide and continuation keeps side-specific context',async()=>{
+test('new requests package single-chaupai guides while saved facing-page continuation keeps its context',async()=>{
  const entries=await sourceRequestEntries({id:'facing',title:'Durga',templateId:'beanstalk-adventure',language:'Hindi',source:new File(['pdf'],'source.pdf'),visualDirection:{passageMode:'chalisa',audience:'9–14',characters:'Durga',notes:''}});
  assert.ok(entries['template-references/chalisa-facing-pages-layout.svg']);
  assert.equal(JSON.parse(new TextDecoder().decode(entries['template-references/chalisa-full-spread-options.json'])).length,3);
- for(const b of chalisaFullSpreadBlueprints)assert.ok(entries[`template-references/${b.id}-layout.svg`]);
- assert.equal(JSON.parse(new TextDecoder().decode(entries['template-references/chalisa-facing-pages.json'])).original.length,2);
+ for(const b of chalisaSingleBlueprints)assert.ok(entries[`template-references/${b.id}-layout.svg`]);
+ assert.equal(JSON.parse(new TextDecoder().decode(entries['template-references/chalisa-facing-pages.json'])).original.length,1);
  const prompt=new TextDecoder().decode(entries['START-HERE.txt']);
- assert.match(prompt,/41 entries = 21 spread artworks, not 41/);
+ assert.match(prompt,/41 source entries = 41 spread artworks and 82 physical content pages/);
  assert.match(prompt,/"chalisaPages"/);assert.doesNotMatch(prompt,/Never combine four verse lines/);
  const continuation=continuationPrompt(parseTemplateBook(facingBook(3)),[],undefined,4);
  assert.match(continuation,/LEFT PHYSICAL PAGE/);assert.match(continuation,/RIGHT PHYSICAL PAGE/);

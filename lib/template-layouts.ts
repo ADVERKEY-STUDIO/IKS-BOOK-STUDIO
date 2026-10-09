@@ -1,4 +1,4 @@
-import { CHALISA_BLUEPRINT, DIAGONAL_CHALISA_BLUEPRINT, LEGACY_CHALISA_BLUEPRINT, isFullSpreadChalisa, hasCompactChalisaText, isChalisaBlueprint, chalisaPageText } from './chalisa-pages.ts';
+import { CHALISA_SINGLE_BLUEPRINT, isSingleChalisa, CHALISA_BLUEPRINT, DIAGONAL_CHALISA_BLUEPRINT, LEGACY_CHALISA_BLUEPRINT, isFullSpreadChalisa, hasCompactChalisaText, isChalisaBlueprint, chalisaPageText } from './chalisa-pages.ts';
 import {textBackgroundStyle,textBackgroundCss} from './text-backgrounds.ts';
 import { referenceContracts, referencePalette, legacyNotebookLayouts } from './template-reference-contracts.ts';
 import { signatureBlueprints } from './template-signatures.ts';
@@ -39,6 +39,14 @@ export const chalisaFullSpreadBlueprints = [
  bp('chalisa-full-spread-flow','Chalisa · flowing scene','One connected environment with asymmetrical quiet reading areas. Arrange large subjects and supporting details around the words according to the two chaupais.',[r(0,0,100,100)],[r(10,8,36,58),r(54,28,36,58)],r(48,97,2,2),{integrated:true}),
 ];
 export const chalisaBlueprint = chalisaFullSpreadBlueprints[0];
+/** Approved one-verse spreads have one generous cloud reading area and full-canvas art. */
+export const chalisaSingleBlueprints = [
+ bp(CHALISA_SINGLE_BLUEPRINT,'Chalisa · one verse, cloud on right','One source-matched scene flows across both pages; the complete chaupai and its four explanations sit together on a pale painted cloud at upper right.',[r(0,0,100,100)],[r(55,6,36,68)],r(48,97,2,2),{integrated:true}),
+ bp('chalisa-single-cloud-left','Chalisa · one verse, cloud on left','A continuous scene places its focal action to the right, with one pale cloud reading area at upper left.',[r(0,0,100,100)],[r(6,9,36,68)],r(48,97,2,2),{integrated:true}),
+ bp('chalisa-single-cloud-lower','Chalisa · one verse, cloud below canopy','A detailed canopy or architecture surrounds the full spread, with the complete verse and explanations on a pale cloud lower on the right.',[r(0,0,100,100)],[r(58,23,36,68)],r(48,97,2,2),{integrated:true}),
+];
+for(const b of chalisaSingleBlueprints)blueprints[b.id]=b;
+
 blueprints[DIAGONAL_CHALISA_BLUEPRINT]=diagonalChalisaBlueprint;
 for(const b of chalisaFullSpreadBlueprints)blueprints[b.id]=b;
 // New named blueprints extend revision one; existing saved coordinates stay unchanged.
@@ -74,6 +82,15 @@ export function blueprintFor(book:Pick<TemplateBook,'templateId'|'templateRevisi
 }
 export function blueprintPrompt(id:string) {
  const b=blueprints[id];if(!b)throw Error('Unknown blueprint.');
+ if(isSingleChalisa(b.id)) {
+  const a=b.original[0];
+  return `SELECTED SPREAD BLUEPRINT: ${b.id} — ${b.name}
+${b.intent}
+ONE CHAUPAI ACROSS TWO PAGES: Generate ONE composite full-spread artwork, a continuous edge-to-edge illustrated environment across both physical pages. The whole painting expresses this ONE chaupai's two original lines and meaning. Keep the main subject away from the centre fold, with scenery continuing through it.
+CLOUD BEHIND THE TEXT: Reserve ONE reading area at x=${a.x}%, y=${a.y}%, width=${a.w}%, height=${a.h}%. Paint a broad pale ivory cloud with soft irregular scalloped edges behind this entire area. Its centre must be quiet and light enough for every editable verse, meaning and moral line. Keep dark outlines, faces, branches and busy foliage outside it. Leaves may frame the cloud without crossing the words. Do not generate lettering. Ignore the unused meaning slot; all five text sections stay together in the single reading area.
+Create detailed but selective scenery throughout both pages, with one clear focal action. No detached corner scenes, narrow strips, empty half-pages or repeated generic deity portraits. Use flat matte gouache and cut-paper shapes, visible paper grain, restrained shading and simple expressive faces. Avoid glossy skin, plastic 3D modelling, cinematic glow and decorative clutter. Vary setting, camera distance, poses and narrative action according to the source; do not merely mirror an earlier picture.
+VISUAL CHECK: verify source-specific forms and attributes, connected artwork across both pages, a pale painted cloud behind ALL text, and no overlap with important subjects. Return one full-spread image with editable text supplied separately.`;
+ }
  if(isFullSpreadChalisa(b.id)){
   const coords=(a:Region)=>`x=${a.x}%, y=${a.y}%, width=${a.w}%, height=${a.h}%`;
   return `SELECTED SPREAD BLUEPRINT: ${b.id} — ${b.name}\n${b.intent}\nFULL-CANVAS ARTWORK: x=0%, y=0%, width=100%, height=100%. Paint ONE continuous edge-to-edge illustrated environment across BOTH physical pages, including the centre fold. Scenery, sky, ground, trees, architecture and light connect the entire spread. Use large expressive figures and layered supporting details around and between the reading areas. The left-page subject illustrates the LEFT chaupai and the right-page subject illustrates the RIGHT chaupai; connect their environments without conflating different actions or inventing a shared event. When the final right page has no chaupai, continue the environment there without adding another verse or invented narrative.\nQUIET READING AREAS WITHIN THE PAINTING: LEFT ${coords(b.original[0])}; RIGHT ${coords(b.original[1])}. Continue the SAME pale sky, mist, softly lit wall or subtle background colour behind the editable words. These coordinates restrict high-contrast detail, NOT the painted background. No opaque text panels, erased rectangular holes or empty paper quadrants. Keep faces, busy foliage and dark outlines out of the reading areas. Do not add extra blank clearance around them. Ignore the unused meaning slot.\nCompose the whole spread as a connected picture, with natural transitions around the words. Do not constrain artwork to two diagonal patches, upper-left/lower-right quadrants, side strips, isolated vignettes or a percentage of each page. Choose subject scale and placement from the source; vary the composition between spreads without mechanically repeating or mirroring a layout. Preserve the selected character sheet and template illustration style. Keep important faces away from the centre fold, while the environment flows through it. No lettering in the image; the website overlays editable text.\nVISUAL CHECK: the background and scenery must visibly connect both pages, with substantial artwork around the reading areas across the whole canvas. Reject detached corner scenes surrounded by blank paper. Return ONE composite full-spread image.`;
@@ -109,7 +126,7 @@ export function distributeText(text:string,count:number):string[] {
  result.push(text.slice(start));return result;
 }
 export function plannedTextBlocks(page:BookPage,b:Blueprint) {
- if(page.chalisaPages)return [...b.original.map((area,i)=>({...area,role:'original' as const,heading:undefined as string|undefined,text:page.chalisaPages?.[i]?(hasCompactChalisaText(b.id)?chalisaPageText(page.chalisaPages[i]).replace(/\r\n/g,'\n').replace(/\n[ \t]*\n+/g,'\n'):chalisaPageText(page.chalisaPages[i])):''})),{...b.meaning,role:'meaning' as const,heading:undefined as string|undefined,text:''}].map((block,i)=>({...block,...page.textPositions?.[i]}));
+ if(page.chalisaPages)return [...b.original.map((area,i)=>({...area,role:'original' as const,heading:undefined as string|undefined,text:page.chalisaPages?.[i]?(hasCompactChalisaText(b.id)&&!isSingleChalisa(b.id)?chalisaPageText(page.chalisaPages[i]).replace(/\r\n/g,'\n').replace(/\n[ \t]*\n+/g,'\n'):chalisaPageText(page.chalisaPages[i])):''})),{...b.meaning,role:'meaning' as const,heading:undefined as string|undefined,text:''}].map((block,i)=>({...block,...page.textPositions?.[i]}));
  const sections=page.original.match(/[^]*?(?:\n\s*\n|$)/g)?.filter(Boolean)||[];
  const parts=page.readingOrder==='continuous'?b.original.map((_,i)=>i===0?page.original:''):b.id.startsWith('reference-notes-')&&sections.length===b.original.length?sections:distributeText(page.original,b.original.length);
  return [...b.original.map((a,i)=>({...a,role:'original' as const,text:page.noteSections?.[i]?.body??parts[i],heading:page.noteSections?.[i]?.heading})),{...b.meaning,role:'meaning' as const,text:page.meaning}].map((block,i)=>({...block,...page.textPositions?.[i]}));
@@ -210,7 +227,7 @@ export function plannedSpreadCss(){return `${textBackgroundCss()}
 `;}
 export function blueprintSvg(b:Blueprint,paper='#fff9e9',accent='#38766c',height=500) {
  if(isFullSpreadChalisa(b.id)){
-  const area=(a:Region,i:number)=>`<rect x="${a.x*10}" y="${a.y*height/100}" width="${a.w*10}" height="${a.h*height/100}" rx="24" fill="${paper}" fill-opacity=".18" stroke="#24483e" stroke-dasharray="6 5"/><text x="${a.x*10+12}" y="${a.y*height/100+24}" font-family="sans-serif" font-size="14" fill="#172e27">${i===0?'Left':'Right'} words · quiet painted background</text>`;
+  const area=(a:Region,i:number)=>`<rect x="${a.x*10}" y="${a.y*height/100}" width="${a.w*10}" height="${a.h*height/100}" rx="24" fill="${paper}" fill-opacity=".18" stroke="#24483e" stroke-dasharray="6 5"/><text x="${a.x*10+12}" y="${a.y*height/100+24}" font-family="sans-serif" font-size="14" fill="#172e27">${isSingleChalisa(b.id)?'One chaupai · cloud behind text':i===0?'Left words · quiet painted background':'Right words · quiet painted background'}</text>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 ${height}"><rect width="1000" height="${height}" fill="${accent}"/><path d="M0 ${height*.85} Q250 ${height*.7} 500 ${height*.85} T1000 ${height*.8} V${height}H0Z" fill="#38766c" opacity=".35"/>${b.original.map(area).join('')}<text x="16" y="${height-12}" font-family="sans-serif" font-size="16" fill="#172e27">ONE connected illustration across the entire spread — guides are not blank panels</text></svg>`;
  }
  const rect=(a:Region,fill:string,label:string)=>`<rect x="${a.x*10}" y="${a.y*height/100}" width="${a.w*10}" height="${a.h*height/100}" rx="12" fill="${fill}"/><text x="${a.x*10+12}" y="${a.y*height/100+22}" font-family="sans-serif" font-size="15" fill="#172e27">${label}</text>`;

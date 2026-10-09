@@ -54,8 +54,8 @@ test('content reference is copied faithfully and packaged separately from source
  assert.equal(decode(entries['source/chalisa.pdf']),'source');
  assert.equal(decode(entries['references/reference-style.png']),'style');
  assert.equal(decode(entries['START-HERE.txt']),sourceBookPrompt(d));
- assert.match(sourceBookPrompt(d),/COPY, DO NOT REWRITE/);
- assert.match(sourceBookPrompt(d),/do not silently shorten, translate, replace or add missing sections/);
+ assert.match(sourceBookPrompt(d),/COPY VERSES AND MEANINGS; WRITE SHORT BILINGUAL MORALS/);
+ assert.match(sourceBookPrompt(d),/create or adapt a Hindi moral AND an English moral/);
  assert.doesNotMatch(sourceBookPrompt(d),/NO CONTENT REFERENCE — WRITE ALL FOUR/);
  assert.match(samplePrompt(d),/content-reference\/Durga chalisa -1.pdf/);
  delete d.contentReference;
