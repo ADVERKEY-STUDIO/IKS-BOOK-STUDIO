@@ -41,7 +41,7 @@ export function captureCanvaPage(section:HTMLElement,book:TemplateBook,index:num
   if(!visible(el))continue;
   const b=box(el),style=cs(el);elements.push({kind:'shape',shape:'rect',...b,h:Math.max(b.h,.005),color:color(el.matches('.note-rules i')?style.borderTopColor:style.backgroundColor,'FFFFFF')});
  }
- const textSelector='.planned-text,.story-text,.copy h2,.copy .original,.copy .meaning,.notes-title span,.notes-title h2,.cover h1,.cover>p,.cover>small,.completion-copy>*,.completion-author,.completion-imprint span,.completion-imprint p,.folio';
+ const textSelector='.planned-text,.story-text,.copy h2,.copy .original,.copy .meaning,.notes-title span,.notes-title h2,.cover h1,.cover>p,.cover>small,.completion-copy>*,.glossary-spread>h1,.glossary-entry>*,.completion-author,.completion-imprint span,.completion-imprint p,.folio';
  for(const el of section.querySelectorAll<HTMLElement>(textSelector)){
   if(!visible(el)||!el.textContent?.trim())continue;
   const style=cs(el),b=box(el),padding={left:parseFloat(style.paddingLeft)||0,top:parseFloat(style.paddingTop)||0,right:parseFloat(style.paddingRight)||0,bottom:parseFloat(style.paddingBottom)||0};
