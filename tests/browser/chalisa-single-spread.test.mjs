@@ -39,7 +39,7 @@ test('Approved single-chaupai workflow: samples, import, preview, edit, recovery
   assert.match(prompt,/NO CONTENT REFERENCE/);
   assert.match(prompt,/batches of at most FOUR/);
   const id=prompt.match(/"projectId": "([^"]+)"/)[1];
-  const book={...singleBook(3),projectId:id,title:'Durga Chalisa test'};
+  const book={...singleBook(3),projectId:id,title:'Durga Chalisa test',bookSections:[{kind:'introduction',title:'Reading together',body:'Supplied introduction.\n\nRead one verse together.',sourceReference:'Introduction.pdf'},{kind:'aarti',title:'Aarti',body:'Supplied verse.\n\nHindi and English meanings.',sourceReference:'Aarti source'}],glossary:[{term:'ज्योति',hindi:'प्रकाश।',english:'Light.',sourceReference:'Chaupai 2'}]};
   const upload=async data=>page.getByLabel('Import ChatGPT’s ZIP or book.json').setInputFiles({name:'book.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(data))});
   await upload({...book,pages:book.pages.map(p=>({...p,chalisaPages:p.chalisaPages.map(leaf=>({...leaf,meaning:'Only one English meaning'}))}))});
   await page.getByRole('alert').filter({hasText:'required labels'}).waitFor();
@@ -50,6 +50,10 @@ test('Approved single-chaupai workflow: samples, import, preview, edit, recovery
    ctx.fillStyle='#355b52';ctx.fillRect(0,0,45,600);ctx.fillRect(1160,0,40,600);return c.toDataURL().split(',')[1];}),'base64');
   await page.getByLabel('Import ChatGPT’s ZIP or book.json').setInputFiles({name:'checkpoint.zip',mimeType:'application/zip',buffer:Buffer.from(zipSync({'book.json':strToU8(JSON.stringify(book)),'images/spread-1.png':image,'images/character-reference.png':image,'passage-map.txt':strToU8('Saved passage map'),'progress.txt':strToU8('Pending spread-2.png')}))});
   await page.getByRole('button',{name:'Read book',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Book settings',exact:true}).click();
+  await page.getByLabel('Glossary 1 english',{exact:true}).fill('Divine light.');
+  await page.getByLabel('Section 1 body',{exact:true}).fill('Approved introduction.\n\nRead with your family.');
+  await page.getByRole('button',{name:'Book settings',exact:true}).click();
   await page.getByRole('button',{name:'Text & layout',exact:true}).click();
   assert.equal(await page.getByLabel('Spread chaupai',{exact:true}).inputValue(),book.pages[0].chalisaPages[0].original);
   assert.equal(await page.getByLabel('Right chaupai',{exact:true}).count(),0);
@@ -58,6 +62,7 @@ test('Approved single-chaupai workflow: samples, import, preview, edit, recovery
   await preview.locator('.planned-text').first().waitFor();
   await preview.locator('body').evaluate(()=>document.fonts.ready);
   const regions=await preview.locator('.planned-text').evaluateAll(nodes=>nodes.filter(n=>n.textContent.trim()).map(n=>({text:n.textContent,x:n.offsetLeft,w:n.offsetWidth,sw:n.scrollWidth,h:n.clientHeight,sh:n.scrollHeight,parent:n.parentElement.clientWidth})));
+  assert.equal(await preview.locator('.chalisa-verse').first().evaluate(el=>getComputedStyle(el).color),'rgb(139, 54, 40)');
   assert.equal(regions.length,1);assert.ok(regions[0].x>regions[0].parent/2);
   assert.ok(regions.every(r=>r.sw<=r.w+2&&r.sh<=r.h+2),'The complete chaupai and all four sections fit');
   assert.equal(await page.getByText(/reading order needs review/).count(),0);
@@ -81,10 +86,18 @@ test('Approved single-chaupai workflow: samples, import, preview, edit, recovery
   await page.getByRole('button',{name:'Download editable ZIP',exact:true}).click();
   const exported=unzipSync(new Uint8Array(await readFile(await (await exportDownload).path())));
   const restored=JSON.parse(new TextDecoder().decode(exported['book.json']));
+  assert.equal(restored.glossary[0].english,'Divine light.');
+  assert.equal(restored.bookSections[0].body,'Approved introduction.\n\nRead with your family.');
+  assert.equal(restored.bookSections[1].kind,'aarti');
   assert.equal(restored.pages[0].chalisaPages.length,1);
   assert.equal(restored.pages[1].chalisaPages.length,1);
   assert.match(restored.pages[0].chalisaPages[0].meaning,/Mother Durga lovingly/);
   const manuscript=new TextDecoder().decode(exported['manuscript.md']);
+  assert.match(manuscript,/Divine light/);
+  assert.ok(manuscript.indexOf('Approved introduction')<manuscript.indexOf('### Two-page spread'));
+  assert.ok(manuscript.indexOf('## Aarti')<manuscript.indexOf('Divine light'));
+  const exportHtml=new TextDecoder().decode(exported['preview.html']);
+  assert.match(exportHtml,/class="spread glossary-spread"/);
   assert.match(manuscript,/### Two-page spread/);
   assert.doesNotMatch(manuscript,/### Right page|### Left page/);
   assert.ok(entries['template-references/approved-cloud-right.png']);

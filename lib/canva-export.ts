@@ -41,7 +41,7 @@ export function captureCanvaPage(section:HTMLElement,book:TemplateBook,index:num
   if(!visible(el))continue;
   const b=box(el),style=cs(el);elements.push({kind:'shape',shape:'rect',...b,h:Math.max(b.h,.005),color:color(el.matches('.note-rules i')?style.borderTopColor:style.backgroundColor,'FFFFFF')});
  }
- const textSelector='.planned-text,.story-text,.copy h2,.copy .original,.copy .meaning,.notes-title span,.notes-title h2,.cover h1,.cover>p,.cover>small,.completion-copy>*,.completion-author,.completion-imprint span,.completion-imprint p,.folio';
+ const textSelector='.planned-text,.story-text,.copy h2,.copy .original,.copy .meaning,.notes-title span,.notes-title h2,.cover h1,.cover>p,.cover>small,.completion-copy>*,.book-section>h1,.book-section-column,.book-section>small,.glossary-spread>h1,.glossary-entry>*,.completion-author,.completion-imprint span,.completion-imprint p,.folio';
  for(const el of section.querySelectorAll<HTMLElement>(textSelector)){
   if(!visible(el)||!el.textContent?.trim())continue;
   const style=cs(el),b=box(el),padding={left:parseFloat(style.paddingLeft)||0,top:parseFloat(style.paddingTop)||0,right:parseFloat(style.paddingRight)||0,bottom:parseFloat(style.paddingBottom)||0};
@@ -75,7 +75,7 @@ export async function exportCanvaBook(book:TemplateBook,images:Record<string,Blo
   const doc=frame.contentDocument;if(!doc)throw Error('Could not prepare the book for export.');await doc.fonts.ready;await Promise.all(Array.from(doc.images).map(image=>image.decode()));
   const groups=new Map<string,CanvaPage[]>(),order:string[]=[];let index=0;
   for(const section of doc.querySelectorAll<HTMLElement>('.spread')){
-   const cover=section.classList.contains('cover');const page=captureCanvaPage(section,book,cover?-1:index++),key=`${Math.round(page.width*25.4)}x${Math.round(page.height*25.4)}mm`;
+   const interior=section.classList.contains('planned-spread')||(!section.classList.contains('cover')&&!section.classList.contains('book-section')&&!section.classList.contains('glossary-spread'));const page=captureCanvaPage(section,book,interior?index++:-1),key=`${Math.round(page.width*25.4)}x${Math.round(page.height*25.4)}mm`;
    order.push(`Book-${key}.pptx — slide ${(groups.get(key)?.length||0)+1}: ${page.name}`);
    groups.set(key,[...(groups.get(key)||[]),page]);
   }
