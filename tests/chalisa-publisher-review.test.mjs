@@ -40,5 +40,5 @@ test('supplied long back-cover copy round-trips and reserves a larger reading ar
 test('initial and resumed production both carry the publisher corrections',()=>{
  const prompt=sourceBookPrompt({id:'review',title:'Durga',templateId:'beanstalk-adventure',language:'Hindi',source:new File(['source'],'source.pdf'),contentReference:new File(['reference'],'scan.pdf'),visualDirection:{passageMode:'chalisa',audience:'9–14',characters:'',notes:''}});
  const continuation=continuationPrompt(parseTemplateBook(singleBook(1)),[]);
- for(const p of [prompt,continuation])for(const phrase of ['REFERENCE TEXT LOCK','DEVOTIONAL MORALS','bookSections','saffron head drape','fallen still figures','exact URL and access date','publisher-review.txt'])assert.ok(p.includes(phrase),phrase);
+ for(const p of [prompt,continuation])for(const phrase of ['REFERENCE TEXT LOCK','DEVOTIONAL MORALS','bookSections','saffron head drape','fallen still figures','exact URL and access date','publisher-review.txt','omits Aarti by default','remove Aarti promises','WHOLE-BOOK FOOT AUDIT','one distinct inward big toe and four progressively smaller toes','verify no toe remains exposed'])assert.ok(p.includes(phrase),phrase);
 });
