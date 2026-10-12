@@ -50,8 +50,10 @@ test('request ZIP carries approved actual samples and only single-verse layout s
  const refs=await templateReferenceEntries(draft.templateId,async url=>{
   fetched.push(url);return new Response(await readFile(new URL('../public'+url,import.meta.url)),{headers:{'content-type':'image/png'}});
  },true);
- assert.equal(fetched.length,2);
+ assert.equal(fetched.length,8);
  for(const name of ['approved-cloud-right.png','approved-cloud-left.png'])assert.ok(refs['template-references/'+name].length>1000);
+ for(const name of ['compassion','gauri','lakshmi'])for(const kind of ['spread','art'])assert.ok(refs[`template-references/approved-${name}-${kind}.png`].length>1000);
+ assert.match(new TextDecoder().decode(refs['template-references/READ-ME.txt']),/Character options change proportions/);
  const spec=JSON.parse(new TextDecoder().decode(refs['template-references/template-specification.json']));
  assert.ok(spec.blueprints.every(b=>b.original.length===1));
  assert.doesNotMatch(new TextDecoder().decode(refs['template-references/LAYOUT-INSTRUCTIONS.txt']),/LEFT chaupai|RIGHT chaupai|SELECTED SPREAD BLUEPRINT: reference-beanstalk/);
