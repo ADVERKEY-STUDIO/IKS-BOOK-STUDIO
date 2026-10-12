@@ -1,3 +1,4 @@
+import { approvedChalisaSpreads, approvedChalisaReferenceRoot, approvedChalisaReferencePrompt } from './chalisa-approved-references.ts';
 import { referenceContracts, referenceCoverage, referencePalette } from './template-reference-contracts.ts';
 import { referenceAssets } from './template-reference-assets.ts';
 import { TEMPLATE_REVISION, chalisaSingleBlueprints, templateBlueprints, templateSize, blueprintSvg, blueprintPrompt } from './template-layouts.ts';
@@ -18,12 +19,12 @@ export async function templateReferenceEntries(id: TemplateId, fetchReference: t
   entries['template-references/LAYOUT-INSTRUCTIONS.txt'] = strToU8(templateDesignPrompt(id,undefined,undefined,singleChalisa,singleChalisa)+'\n\nChoose one blueprint per spread according to the passage. Multiple art regions represent distinct scenes within one composite spread image. Do not cycle mechanically. Preserve source order, never shorten original text. The app supplies all lettering.\n\n' + layouts.map(b=>blueprintPrompt(b.id)).join('\n\n'));
   for (const b of layouts) entries[`template-references/${b.id}-layout.svg`] = strToU8(blueprintSvg(b,palette.paper,'#8bb8a6',1000*size.height/size.width));
   if(singleChalisa) {
-    for(const name of ['cloud-right.png','cloud-left.png']) {
-      const response=await fetchReference(`/templates/references/chalisa-approved/${name}`);
+    for(const name of ['cloud-right.png','cloud-left.png', ...approvedChalisaSpreads.flatMap(sample => [sample.spread, sample.painting])]) {
+      const response=await fetchReference(`${approvedChalisaReferenceRoot}/${name}`);
       if(!response.ok)throw Error('Could not package the approved Chalisa references. Retry downloading the request.');
-      entries[`template-references/approved-${name}`]=new Uint8Array(await response.arrayBuffer());
+      entries[`template-references/${name.startsWith('approved-') ? name : 'approved-' + name}`]=new Uint8Array(await response.arrayBuffer());
     }
-    entries['template-references/READ-ME.txt']=strToU8('Approved Chalisa book samples: one chaupai per two-page spread, continuous matte gouache/cut-paper illustration and a pale scalloped cloud behind all text. Use these as actual visual references for every image call. Their words and deity belong to the example book: do not copy their text, cast or scenes into another source. The new source determines every subject, divine form, attribute and action. Keep new lettering editable in book.json. Choose a single-chaupai layout; the painted cloud must cover its complete reading area.');
+    entries['template-references/READ-ME.txt']=strToU8(approvedChalisaReferencePrompt + '\n\nApproved Chalisa book samples: one chaupai per two-page spread, continuous matte gouache/cut-paper illustration and a pale scalloped cloud behind all text. Use these as actual visual references for every image call. Their words and deity belong to the example book: do not copy their text, cast or scenes into another source. The new source determines every subject, divine form, attribute and action. Keep new lettering editable in book.json. Choose a single-chaupai layout; the painted cloud must cover its complete reading area.');
     return entries;
   }
   if(id==='iks-notes'){

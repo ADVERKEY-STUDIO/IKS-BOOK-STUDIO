@@ -1,3 +1,4 @@
+import { approvedChalisaReferencePrompt } from './chalisa-approved-references.ts';
 import {parseBookSections,renderBookSections,bookSectionsCss,type BookSection} from './book-sections.ts';
 import {chalisaPublisherReviewPrompt} from './chalisa-publisher-review.ts';
 import {parseBookGlossary,renderBookGlossary,bookGlossaryCss,type GlossaryEntry} from './book-glossary.ts';
@@ -123,6 +124,7 @@ export function templateDesignPrompt(id: TemplateId, layout = templateLayout(id)
     if(id==='iks-notes')return notebookDesignPrompt();
     if(singleChalisa)return `${templateGenerationReviewPrompt(true)}
 APPROVED CHALISA DESIGN: ${id}, revision ${revision}. One complete two-line chaupai per two-page spread. Use the supplied single-chaupai cloud blueprint; keep all five text sections together and editable.
+${approvedChalisaReferencePrompt}
 REFERENCE INPUTS: template-references/approved-cloud-right.png and template-references/approved-cloud-left.png. Attach these ACTUAL approved book samples and the chosen character sheet to every image call. Their words, Durga-specific identity and scenes are examples only; the uploaded source determines the new content. If these assets are missing from a copied-prompt request, request the samples or request ZIP instead of claiming a visual match to unseen files.
 ART: Flat matte gouache and cut-paper shapes, tactile paper grain, simplified expressive faces, restrained modelling, warm ochre and russet accents with teal/navy foliage and pale cream sky. Use detailed but selective environments with a clear focal action. Avoid glossy devotional/calendar art, photorealistic skin, plastic 3D faces, cinematic glow and repeated generic deity portraits.
 Paint one connected full-spread environment across both pages and a broad pale ivory cloud with softly scalloped edges behind the entire reading area. Leaves can frame the cloud without crossing text. No lettering in the painting, rectangular text panels or isolated corner vignettes. Vary viewpoint, action, scale and setting by the verse; keep character identity and medium consistent. The selected blueprint is the placement authority; the old storybook reference layouts do not apply.`;

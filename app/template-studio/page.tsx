@@ -1,4 +1,5 @@
 'use client';
+import ApprovedChalisaSamples from './approved-chalisa-samples';
 import BookSectionsEditor from './book-sections-editor';
 import {bookSectionsMarkdown} from '../../lib/book-sections';
 import ChalisaPageEditor from './chalisa-page-editor';
@@ -505,7 +506,7 @@ export default function TemplateStudio() {
  <label className="ts-upload">Book content reference (optional)<input aria-label="Book content reference (optional)" disabled={busy} type="file" accept=".pdf" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void run(async () => { validateSourceFile(file); if (!/\.pdf$/i.test(file.name)) throw Error('Choose a PDF for the book content reference.'); patch({ contentReference: file }); }); }}/></label>
  <p className="ts-help">Upload a prepared book such as Durga chalisa -1.pdf to use its actual chaupais, meanings and morals. ChatGPT will preserve that content and create matching illustrations. Leave this empty to create simple Hindi and English meanings and morals from your original Chalisa.</p>
  {draft.contentReference && <p>{draft.contentReference.name} <button disabled={busy} onClick={() => patch({ contentReference: undefined })}>Remove content reference</button></p>}
- </div>}<details className="ts-visual-direction"><summary>Visual direction (optional)</summary><p>Use references to guide new illustrations. They will not become book pages.</p>
+ </div>}{draft.templateId !== 'iks-notes' && draft.visualDirection?.passageMode === 'chalisa' && <ApprovedChalisaSamples/>}<details className="ts-visual-direction"><summary>Visual direction (optional)</summary><p>Use references to guide new illustrations. They will not become book pages.</p>
  <label>Recurring characters<textarea maxLength={4000} placeholder="e.g. A boy, a girl and Chanakya. Describe their appearance and outfits." value={draft.visualDirection?.characters || ''} onChange={e => editDirection({ characters: e.target.value })}/></label>
  <label>Illustration notes<textarea maxLength={4000} placeholder="e.g. Soft textured painting, warm light and expressive faces. Keep the same characters throughout." value={draft.visualDirection?.notes || ''} onChange={e => editDirection({ notes: e.target.value })}/></label>
  <label className="ts-upload">Add style references<input type="file" accept=".png,.jpg,.jpeg,.webp" multiple onChange={e => {
