@@ -1,5 +1,8 @@
 "use client";
 
+import CatalogueHandoff from './components/catalogue-handoff';
+import { prepareCataloguePdf, type CatalogueSource } from '../lib/catalogue-source';
+import type { CatalogueBook } from '../lib/iks-catalogue';
 import { illustrationBatchPrompt } from "../lib/illustration-batching";
 import SavedTemplateLibrary from "./components/saved-template-library";
 import TemplateCoverPreview from "./components/template-cover-preview";
@@ -220,6 +223,8 @@ type DesignerPageOverride = DesignerPageRevision & {
 type DesignerStylePreset = { id: string; name: string; style: Partial<DesignerPageRevision> };
 
 type Project = {
+  catalogueCategory?: string;
+  catalogueSources?: CatalogueSource[];
   edition?: Edition;
   inspiration?: BookInspiration;
   sourceManifest?: SourceBookManifest;
@@ -1430,6 +1435,8 @@ function printableChapters(chapters: Chapter[]) {
 }
 
 export default function Home() {
+  const [catalogueHandoff, setCatalogueHandoff] = useState(false);
+  useEffect(() => { setCatalogueHandoff(new URLSearchParams(window.location.search).get("catalogue") === "1"); }, []);
   const [view, setView] = useState<View>("dashboard");
   const [project, setProject] = useState<Project>(seedProject);
   const [projects, setProjects] = useState<Project[]>([seedProject]);
@@ -1525,6 +1532,28 @@ export default function Home() {
     setWizardStep(0);
     setEditorWorkspace("workflow");
     setView("wizard");
+  }
+
+  async function prepareCatalogueProject(category: string, books: CatalogueBook[], audience: string, progress: (message: string) => void) {
+    const { file, sources } = await prepareCataloguePdf(books, category, progress);
+    const id = makeId();
+    progress('Uploading and analysing the category sources…');
+    const source = await uploadSourceForAnalysis(file, id, audience, percent => progress(`Analysing sources: ${percent}%`));
+    const persona = inferBookPersona({ title: category, sourcePreview: source.preview, sourceTerms: source.terms, sourceHeadings: source.headings, bookType: emptyProject.bookType });
+    const base: Project = { ...emptyProject, id, title: category, audience, creationMode: 'automatic',
+      catalogueCategory: category, catalogueSources: sources,
+      source: source.name, sourceSize: source.size, sourceObjectKey: source.objectKey,
+      sourcePages: source.pages, sourceWords: source.words, sourceQuality: source.quality,
+      sourceHeadings: source.headings, sourceTerms: source.terms, sourceSections: source.sections,
+      sourcePreview: source.preview, sourceIntelligence: source.sourceIntelligence,
+      ...bookPersonaPatch(persona), briefApproved: false, adaptationPlanConfirmed: false,
+      adaptationPlanVersion: ADAPTATION_PLAN_VERSION, chapters: [],
+    };
+    const chapters = source.sourceIntelligence?.status === 'ocr-required' ? [] : source.headings.map((title, index) => chapterFromContextPlan(title, index, source.sections[index], source.chapterPlans[index], audience));
+    await persistProject({ ...base, chapters: attachChapterVisuals(base, applyAutomaticAdaptationPlan(chapters, audience, true)) });
+    setCatalogueHandoff(false);
+    window.history.replaceState(null, '', '/');
+    setView('analysis');
   }
 
   async function handleFile(event: ChangeEvent<HTMLInputElement>) {
@@ -2707,6 +2736,8 @@ OUTPUT REQUIREMENTS
     else openPreview();
   }
 
+  if (catalogueHandoff) return <CatalogueHandoff onPrepare={prepareCatalogueProject} onClose={() => { setCatalogueHandoff(false); window.history.replaceState(null, "", "/"); }} />;
+
   if (view === "edition" && project.edition) return <EditionDesk onSnapshot={async final=>{const response=await fetch(`/api/edition/release-snapshot?projectId=${encodeURIComponent(project.id)}&revision=${project.edition!.revision}&final=${final}`,{headers:ownerHeaders()});const data=await response.json();if(!response.ok)throw new Error(data.error||"Snapshot unavailable.");return data.edition;}} onBackup={async()=>{const response=await fetch(`/api/edition/backup?projectId=${encodeURIComponent(project.id)}&revision=${project.edition!.revision}`,{headers:ownerHeaders()});if(!response.ok){const data=await response.json();throw new Error(data.error||"Backup unavailable.");}return response.blob();}} onRestore={async file=>{if(file.size>42*1024*1024)throw new Error("Backup exceeds 42 MB.");const response=await fetch('/api/edition/restore',{method:'POST',headers:ownerHeaders(),body:file});const data=await response.json();if(!response.ok)throw new Error(data.error||"Restore failed.");setProjects(current=>[data.project,...current]);setProject(data.project);}} onArtUpload={async input=>{if(input.file.size>10*1024*1024)throw new Error("Choose an image up to 10 MB.");const bitmap=await createImageBitmap(input.file);const oversized=bitmap.width*bitmap.height>64000000;bitmap.close();if(oversized)throw new Error("Image exceeds 64 megapixels.");await editionRequest(undefined,input.file,undefined,input);}} onArtPackage={async id=>{const response=await fetch(`/api/edition/art-package?projectId=${encodeURIComponent(project.id)}&requestId=${encodeURIComponent(id)}`,{headers:ownerHeaders()});if(!response.ok){const data=await response.json() as {error?:string};throw new Error(data.error||"Package unavailable.");}const url=URL.createObjectURL(await response.blob());const a=document.createElement("a");a.href=url;a.download=`art-request-${id}.zip`;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}} key={project.id} edition={project.edition} onReferenceUpload={async input => { if (input.file.size > 10 * 1024 * 1024) throw new Error("Choose an image up to 10 MB."); let bitmap: ImageBitmap; try { bitmap = await createImageBitmap(input.file); } catch { throw new Error("This image could not be decoded. Use a valid PNG, JPEG, or WebP file."); } const oversized = bitmap.width * bitmap.height > 64000000; bitmap.close(); if (oversized) throw new Error("Use a reference image up to 64 megapixels."); await editionRequest(undefined, input.file, input); }} onReferenceImage={async key => { const response = await fetch(`/api/edition/reference-asset?projectId=${encodeURIComponent(project.id)}&key=${encodeURIComponent(key)}`, { headers: ownerHeaders() }); if (!response.ok) throw new Error("Reference image unavailable."); return response.blob(); }} onReferencePackage={async id => { const response = await fetch(`/api/edition/reference-package?projectId=${encodeURIComponent(project.id)}&referenceId=${encodeURIComponent(id)}`, { headers: ownerHeaders() }); if (!response.ok) { const error = await response.json() as { error?: string }; throw new Error(error.error || "Could not build reference package."); } const url = URL.createObjectURL(await response.blob()); const a = document.createElement("a"); a.href = url; a.download = `reference-${id}.zip`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 30000); }} inspiration={project.inspiration} onBrief={async () => { const response = await fetch(`/api/edition/art-brief?projectId=${encodeURIComponent(project.id)}`, { headers: ownerHeaders() }); if (!response.ok) { const data = await response.json() as { error?: string }; throw new Error(data.error || "Approve the current art guide before production."); } return response.text(); }} onBack={() => setView("dashboard")} onAction={action => editionRequest(action)} onUpload={file => editionRequest(undefined, file)} onReload={async () => { const response = await fetch(`/api/edition?projectId=${encodeURIComponent(project.id)}`, { headers: ownerHeaders() }); const data = await response.json() as { project: Project; error?: string }; if (!response.ok) throw new Error(data.error); setProject(data.project); setProjects(current => [data.project, ...current.filter(p => p.id !== data.project.id)]); }} onDownload={async (key, name) => { const response = await fetch(`/api/source/download?key=${encodeURIComponent(key)}`, { headers: ownerHeaders() }); if (!response.ok) throw new Error("Could not retrieve original source."); const url = URL.createObjectURL(await response.blob()); const a = document.createElement("a"); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 30000); }} onExport={async () => { const response = await fetch(`/api/edition/export?projectId=${encodeURIComponent(project.id)}`, { headers: ownerHeaders() }); if (!response.ok) { const data = await response.json() as { error?: string }; throw new Error(data.error || "Review the edition before export."); } return response.text(); }}/>;
 
   if (view === "dashboard") return <><Dashboard onNewEdition={() => void startEdition()} projects={projects} onNew={startNewBook} onOpen={openProject} onDuplicate={duplicateProject} onDelete={deleteProject} /></>;
@@ -2745,6 +2776,7 @@ OUTPUT REQUIREMENTS
 
       {view === "wizard" && <Wizard step={wizardStep} project={project} sourceBusy={sourceBusy} sourceProgress={sourceProgress} onPatch={patchProject} onFile={handleFile} onBack={() => wizardStep === 0 ? setView("dashboard") : setWizardStep((step) => step - 1)} onNext={() => wizardStep < 3 ? setWizardStep((step) => step + 1) : setView(project.creationMode === "external" ? "external" : "analysis")} />}
       {view === "external" && <ExternalAiManuscript project={project} onBack={() => { if (project.externalManuscript) setView("editor"); else { setView("wizard"); setWizardStep(3); } }} onAccept={acceptExternalManuscript} onImportIllustrations={importExternalIllustrations} onOpenDesigner={() => { setEditorWorkspace("designer"); setView("editor"); }} onNotify={notify} />}
+      {Boolean(project.catalogueSources?.length) && <section className="catalogue-source-provenance"><h2>{project.catalogueCategory} · Catalogue sources</h2><p>Combined PDF page numbers map to these original books. Review the outline before generating content.</p><ul>{project.catalogueSources?.map(source => <li key={source.id}><a href={source.pdfUrl} target="_blank" rel="noreferrer">{source.title}</a> · Combined PDF pp. {source.startPage}–{source.endPage} (original PDF pp. 1–{source.endPage - source.startPage + 1})</li>)}</ul></section>}
       {view === "analysis" && <Analysis project={project} sourceBusy={sourceBusy} onPatch={patchProject} onBack={() => { setView("wizard"); setWizardStep(3); }} onUseExternal={() => { patchProject({ creationMode: "external" }); setView("external"); }} onContinue={confirmAdaptationPlan} onRunOcr={runSourceOcr} onUpdateOutline={updateSourceOutline} onAcceptOutline={acceptSourceOutline} />}
       {view === "brief" && <BookBrief project={project} allocated={allocatedPages} draftBusy={draftBusy} onBack={() => setView("analysis")} onUpdateChapter={updateChapter} onPrepare={prepareDraft} onContinue={() => { patchProject({ briefApproved: true }); setActiveChapter(project.chapters[0]?.id ?? 1); setEditorWorkspace("workflow"); setView("editor"); }} />}
       {view === "editor" && editorWorkspace === "workflow" && <Editor project={project} active={active} activeId={activeChapter} allocated={allocatedPages} draftBusy={draftBusy} onSelect={setActiveChapter} onSaveBody={saveChapterBody} editorRef={editorRef} onAi={aiAction} onRemember={rememberPreference} onAddChapter={addChapter} onUploadImage={uploadChapterImage} onPatchProject={patchProject} onUpdateChapter={updateChapter} />}
@@ -2859,7 +2891,7 @@ function ThemeSwitcher(){
 
 function Dashboard({ onNewEdition, projects, onNew, onOpen, onDuplicate, onDelete }: { onNewEdition: () => void; projects: Project[]; onNew: () => void; onOpen: (project: Project) => void; onDuplicate: (project: Project) => void; onDelete: (project: Project) => void }) {
   return <main className="dashboard template-home">
-    <header><div className="brand"><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></div><div className="home-nav"><ThemeSwitcher/><a className="primary" href="/template-studio">Create from a template</a><button className="secondary" onClick={onNewEdition}>New devotional edition</button><button className="secondary" onClick={onNew}>＋ New book</button></div></header>
+    <header><div className="brand"><span className="brand-mark">B</span><span><strong>IKS Book Studio</strong><small>Adapt · Design · Publish</small></span></div><div className="home-nav"><ThemeSwitcher/><a className="secondary" href="/catalogue">Source catalogue</a><a className="secondary" href="/?catalogue=1">Selected catalogue sources</a><a className="primary" href="/template-studio">Create from a template</a><button className="secondary" onClick={onNewEdition}>New devotional edition</button><button className="secondary" onClick={onNew}>＋ New book</button></div></header>
     <section className="hero">
       <div><p className="eyebrow">CREATE FROM A TEMPLATE</p><h1>Books,<br/><em>made your way.</em></h1><p className="hero-copy">Choose a template, bring your source, and create your illustrated book.</p><a className="hero-cta" href="/template-studio">Create from a template <span>→</span></a></div>
       <TemplateCoverPreview/>
@@ -2868,6 +2900,7 @@ function Dashboard({ onNewEdition, projects, onNew, onOpen, onDuplicate, onDelet
     <section className="library-section">
       <div className="section-title"><div><h2>Continue where you left off</h2><p className="home-library-intro">Your books, ready for the next chapter.</p></div></div>
       <SavedTemplateLibrary/>
+      {Array.from(new Set(projects.map(p => p.catalogueCategory).filter(Boolean))).map(category => <section key={category} className="catalogue-project-group"><h3>{category}</h3>{projects.filter(p => p.catalogueCategory === category).map(p => <button key={p.id} onClick={() => onOpen(p)}>{p.title} · {p.catalogueSources?.length || 0} source books · {p.chapters.length} chapters →</button>)}</section>)}
       <div className="saved-library-heading home-other-projects"><h3>Adaptations & devotional editions</h3><span>{projects.length} {projects.length === 1 ? "project" : "projects"}</span></div>
       <div className="project-grid">
         <button className="new-card" onClick={onNew}><b>＋</b><strong>New adaptation</strong><small>Begin with any source book</small></button>

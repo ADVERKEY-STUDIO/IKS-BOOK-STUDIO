@@ -1,3 +1,5 @@
+import catalogueSeed from '../lib/iks-catalogue-seed.json';
+import { cataloguePdfDownload } from '../lib/catalogue-pdf-download';
 import { templateReferenceApi } from './template-reference';
 import { libraryApi, libraryUser, librarySchema, libraryOwner } from './library';
 import { bookReleaseApi } from './book-release';
@@ -1509,6 +1511,7 @@ const worker = {
       if (url.pathname === "/api/projects") return await projectsApi(request, env);
       if (url.pathname === "/api/versions") return await versionsApi(request, env);
       if (url.pathname === "/api/preferences") return await preferencesApi(request, env);
+      if (url.pathname === "/api/catalogue/pdf") return await cataloguePdfDownload(request, catalogueSeed);
       if (url.pathname === "/api/source") return await sourceApi(request, env);
       if (url.pathname === "/api/source/chunk") return await sourceChunkApi(request, env);
       if (url.pathname === "/api/source/finalize") return await sourceFinalizeApi(request, env);
