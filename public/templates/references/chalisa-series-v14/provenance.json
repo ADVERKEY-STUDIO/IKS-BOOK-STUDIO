@@ -1,0 +1,22 @@
+{
+  "reference": "Durga-Chalisa-v14-Final-Detailed-Review.pdf",
+  "sha256": "874516bc5871a4e62b7c77e52bb4a3a017a8210646515f91203caa50f1f2fe5a",
+  "sourceType": "User supplied book, corrected in this chat",
+  "reviewedPdfContainers": 55,
+  "referenceImages": {
+    "front-cover": 1,
+    "title-page": 2,
+    "introduction": 4,
+    "how-to-read": 5,
+    "compassion-spread": 6,
+    "shiva-spread": 12,
+    "saraswati-spread": 14,
+    "vishnu-lakshmi-spread": 17,
+    "many-forms-spread": 20,
+    "courage-spread": 23,
+    "devotion-spread": 38,
+    "glossary": 47,
+    "back-cover": 55
+  },
+  "derivedAssets": "JPEG reading references from rendered final PDF; not print-production art"
+}

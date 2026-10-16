@@ -1,0 +1,117 @@
+DURGA V14: REFERENCE STUDY FOR THE TEN-BOOK CHALISA COLLECTION
+
+Reference reviewed: Durga-Chalisa-v14-Final-Detailed-Review.pdf, 55 PDF pages.
+This study carries forward the full-book editorial and illustration review.
+The supplied JPEGs are viewing references, not print-resolution production art.
+
+OBSERVED STRUCTURE
+PDF 1: square illustrated front cover.
+PDF 2: square cream title page; large warm-red Hindi title, brown English
+title, small supplied publisher/year, substantial blank space.
+PDF 3: copyright/edition notes left; devotional invocation right on textured
+cream, transliteration below, teal leaves and pink lotus at the foot.
+PDF 4: introduction spread, Hindi left and equivalent English right.
+PDF 5: how-to-read spread, Hindi left and equivalent English right.
+PDF 6–46: 41 illustrated entries, including the closing prayer. Each is one
+continuous scene across two square pages, with the complete verse and four
+bilingual explanation/lesson blocks together in a pale organic cloud.
+PDF 47–54: glossary, six entries per square page, two columns, three entries
+per column, thin horizontal dividers and one fine vertical divider.
+PDF 55: matching botanical back cover, short blurb, publisher/contact/rights
+details and blank ISBN. No extra Aarti, activities or separate moral stories.
+
+COUNT AND SCALE
+The source has 55 PDF containers, not 55 physical interior pages. Printed
+folios run 1–97. Illustrated entries occupy printed pages 8–89. Do not copy
+this count to another title: count its actual opening, main and closing text.
+Single reference page: 630 × 630 points = 222.25 × 222.25mm. Spread: 1260 ×
+630 points = 444.5 × 222.25mm. Web Book Studio uses a proportional 210mm
+square / 420 × 210mm spread. Keep one consistent scale in the new book.
+Body around 15.75pt, original verses 19.5pt, labels 12pt in the reference.
+The reviewed English prose uses Charis SIL; original lettering includes
+outlined fonts. Match visual hierarchy and readable proportions, and report
+font substitutions rather than pretending exact matching.
+
+COVER OBSERVATIONS
+The deep-red 'Durga Chalisa' title occupies the top roughly 16% of the square.
+'for Young Minds' is a smaller bold dark-teal line below; a third, smaller
+serif line reads 'With Meanings and Life Lessons for Children'. The title
+area is pale cream, lightly textured. Gold flourishes flank the middle line.
+Durga dominates the lower left/centre; a golden circular halo sits behind her
+crown. A girl in teal and a boy in yellow look towards her warmly. Broad dark
+teal foliage frames the sides; white flowers and a pink lotus add selective
+colour. This is an intimate, welcoming scene, not a distant shrine portrait.
+New covers should preserve this relationship and hierarchy while using the
+new deity's correct identity and source-appropriate objects. Keep lettering
+editable. Do not paste this Durga cover into another book.
+
+INTERIOR VISUAL SYSTEM
+Warm textured gouache, broad matte shapes, cut-paper-like layering, delicate
+fabric patterns, rounded expressive faces and large dark eyes. Restrained
+modelling, warm cheeks, black/dark flowing hair, clear silhouettes and gold
+ornament. No glossy plastic shading, 3D realism or cinematic lighting.
+Teal/navy foreground foliage, dusty blue distant hills, terracotta buildings,
+ochre stone, gold light, pink lotus accents and pale warm sky recur throughout.
+The setting changes with the verse: temple steps, mountains, rivers, forest,
+home, symbolic landscape or battlefield. Repeated colours do not mean
+repeating the same scene. Both left-cloud/right-scene and right-cloud/left-
+scene arrangements occur. The cloud has overlapping soft scalloped lobes,
+subtle transparency at its edge and a quiet light centre.
+All prose sits within ONE reading area. Keep room for five text blocks, not
+only the original verse. The reading area must not obscure limbs or faces.
+
+IDENTITY AND SMALL-DETAIL LESSONS FROM THE REVIEW
+Keep the principal Durga face, crown, sari, bindi, skin tone and hair stable.
+Other named forms have distinct attributes; do not give them identical
+outfits or eight arms by default. A visible missing arm differs from a limb
+hidden naturally by the body. Trace each arm from shoulder through elbow,
+wrist and hand. Check hand-to-object contact, finger-supported chakras,
+continuous trident shafts, feet and visible toes, ears/earrings, tilak/bindi,
+lion paws, veena construction and all small background people.
+The review repaired inconsistent Prahlad clothing, Shankaracharya robe/hood
+and forehead marks, missing hands, obsolete overlays hiding corrected
+fingers, a standing army inconsistent with the aftermath text, and false
+lettering on book spines. These are checks to repeat in every new edition.
+Anatomy and typography must be assessed again AFTER the cloud is placed.
+
+EDITORIAL SYSTEM
+The original traditional verse is retained. Hindi meaning, English meaning,
+Hindi moral and English moral follow in clearly labelled separate blocks.
+Meanings explain both halves accurately; morals are interpretations for
+everyday life, not literal translations. The two languages agree in content.
+The tone is respectful and clear, for approximately ages 9–14 and families.
+Use a specific connection: deity's action/quality -> practical child action.
+Examples in editorial-examples.json show comforting someone who is sad,
+meeting change patiently, facing fear with a slow breath/trusted adult,
+self-discipline and resisting endless wants. Do not reuse them where the
+current verse does not support them.
+The review corrected 'mouth' versus 'face', wrong Hindi agreement, heaven
+versus a mistranslated realm, an invented penance called 'Aacharaj', difficult
+adult wording and disconnected morals. Faithfulness comes before word count.
+Preserve devotional language while distinguishing prayers and assurances
+from factual guarantees. Source variants remain explicit editorial questions.
+
+GLOSSARY AND END MATTER
+Cream single pages, large brown serif 'Glossary', smaller subtitle, red Hindi
+terms, a simple Hindi definition then matching English, muted references.
+Words follow first appearance. Recalculate all references after pagination.
+Do not call the closing prayer 'Chaupai 41' just because it is entry 41.
+The back cover echoes the front's cream/teal/pink botany with more quiet space.
+Its description accurately promises illustrated verses, meanings and lessons.
+Only use publisher data actually supplied for the new edition. ISBN is not
+invented or copied across books. No hidden-object game in this series.
+
+REFERENCE LIMITATIONS NOT TO COPY
+The original/final PDF contains some approximately 101ppi spread art and
+143ppi cover art. These reading references cannot supply true 300ppi detail.
+Generate or obtain adequate source-resolution art; merely enlarging pixels
+does not recover detail. Check the new rendered proof before publication.
+The reference's Hiranyaksha/Hiranyakashipu variant is a recorded publisher
+decision, not permission to propagate a mistaken name to another source.
+
+ICONOGRAPHY CROSS-CHECK EXAMPLES
+These are starting references for identifying a form, not universal rules
+for every regional depiction. Verify the actual selected Chalisa and form.
+Vishnu attributes: https://www.metmuseum.org/art/collection/search/38530
+Gayatri depiction: https://jameelcentre.ashmolean.org/collection/8/sort_by/date/sort_order/desc/per_page/25/offset/0/object/18454
+Accessed 16 October 2026. Never import museum art as this book's illustration.
