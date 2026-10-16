@@ -1,4 +1,5 @@
 import { CHALISA_SINGLE_BLUEPRINT } from './chalisa-pages.ts';
+import {chalisaEditionPrompt} from './chalisa-editions.ts';
 import { blueprintPrompt, templateBlueprints } from './template-layouts.ts';
 import { strToU8 } from 'fflate';
 import type { Draft } from './template-storage.ts';
@@ -30,6 +31,7 @@ ${d?.passageMode === 'chalisa' && draft.templateId !== 'iks-notes' ? chalisaProm
 ${d?.passageMode === 'chalisa-astra' && draft.templateId !== 'iks-notes' ? chalisaAstraPrompt() + '\nSAMPLE ONLY: Demonstrate one two-chaupai group; do not produce the full book.' : ''}
 CHARACTERS: ${d?.characters || 'Identify recurring characters from the source and describe your choices.'}
 ART DIRECTION: ${d?.notes || ''}
+${d?.passageMode === 'chalisa' && d.chalisaEdition && draft.templateId !== 'iks-notes' ? chalisaEditionPrompt(d.chalisaEdition) + '\nSAMPLE SCOPE OVERRIDE: Apply this edition design to the character sheet and ONE sample only. Do not start full production until sample approval.' : ''}
 ${templateDesignPrompt(draft.templateId,undefined,undefined,d?.passageMode === 'chalisa',d?.passageMode === 'chalisa')}
 ${blueprintPrompt(d?.passageMode === 'chalisa' ? CHALISA_SINGLE_BLUEPRINT : templateBlueprints(draft.templateId).find(b => b.id === 'reference-beanstalk-diagonal')?.id || templateBlueprints(draft.templateId)[0].id)}
 SELECTED TEMPLATE: ${t.name}: ${t.description}. Composition: ${templateLayout(draft.templateId)}. The sample must match the selected template’s medium, shape language and spread geometry. User notes refine source-specific characters, not replace the selected template style. Use one full-spread canvas at the dimensions in template-specification.json. Follow only the selected blueprint above. Keep text in the selected quiet reading area and essential subjects away from the gutter.
