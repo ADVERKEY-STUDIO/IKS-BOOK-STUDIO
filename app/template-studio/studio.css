@@ -76,3 +76,5 @@
 .ts-tool-body .ts-page-image{margin:0}.ts-tool-body fieldset{min-width:0}
 .ts-bookbar .ts-actions:has(.ts-tool.is-open){width:100%}
 @media(max-width:600px){.ts-tool-body{padding:14px}.ts-tool-body .ts-fields{grid-template-columns:1fr}.ts-page-canvas>.ts-tool{margin-right:5px}.ts-workspace .ts-tool-trigger{padding:10px 12px}}
+
+.ts-chalisa-collection{display:grid;grid-template-columns:minmax(160px,260px) minmax(0,1fr);gap:36px;align-items:center;margin:32px 0 48px;padding:28px;background:#fff9ec;border:1px solid #e3d6bd;border-radius:16px}.ts-chalisa-collection>img{display:block;width:100%;border-radius:8px}.ts-chalisa-collection h2{margin:6px 0 12px}.ts-chalisa-collection .ts-eyebrow{font-size:12px;letter-spacing:.12em;color:#8b3628}.ts-chalisa-collection label{display:flex;flex-direction:column;gap:8px;max-width:620px;margin:20px 0}.ts-chalisa-collection select{width:100%;padding:12px;border:1px solid #b7b0a0;border-radius:6px;background:#fff;color:#292723;font:inherit}.ts-chalisa-collection button{margin-top:4px}@media(max-width:640px){.ts-chalisa-collection{grid-template-columns:1fr;gap:16px;padding:20px}.ts-chalisa-collection>img{max-width:180px}}

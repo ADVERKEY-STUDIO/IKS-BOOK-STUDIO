@@ -50,7 +50,8 @@ test('request ZIP carries approved actual samples and only single-verse layout s
  const refs=await templateReferenceEntries(draft.templateId,async url=>{
   fetched.push(url);return new Response(await readFile(new URL('../public'+url,import.meta.url)),{headers:{'content-type':'image/png'}});
  },true);
- assert.equal(fetched.length,8);
+ assert.equal(fetched.filter(url=>!url.includes('chalisa-series-v14')).length,8);
+ assert.ok(fetched.some(url=>url.endsWith('/chalisa-series-v14/front-cover.jpg')));
  for(const name of ['approved-cloud-right.png','approved-cloud-left.png'])assert.ok(refs['template-references/'+name].length>1000);
  for(const name of ['compassion','gauri','lakshmi'])for(const kind of ['spread','art'])assert.ok(refs[`template-references/approved-${name}-${kind}.png`].length>1000);
  assert.match(new TextDecoder().decode(refs['template-references/READ-ME.txt']),/Character options change proportions/);
