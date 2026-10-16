@@ -1,4 +1,5 @@
 import { approvedChalisaSpreads, approvedChalisaReferenceRoot, approvedChalisaReferencePrompt } from './chalisa-approved-references.ts';
+import {chalisaSeriesReferences,chalisaSeriesReferenceRoot} from './chalisa-editions.ts';
 import { referenceContracts, referenceCoverage, referencePalette } from './template-reference-contracts.ts';
 import { referenceAssets } from './template-reference-assets.ts';
 import { TEMPLATE_REVISION, chalisaSingleBlueprints, templateBlueprints, templateSize, blueprintSvg, blueprintPrompt } from './template-layouts.ts';
@@ -19,6 +20,11 @@ export async function templateReferenceEntries(id: TemplateId, fetchReference: t
   entries['template-references/LAYOUT-INSTRUCTIONS.txt'] = strToU8(templateDesignPrompt(id,undefined,undefined,singleChalisa,singleChalisa)+'\n\nChoose one blueprint per spread according to the passage. Multiple art regions represent distinct scenes within one composite spread image. Do not cycle mechanically. Preserve source order, never shorten original text. The app supplies all lettering.\n\n' + layouts.map(b=>blueprintPrompt(b.id)).join('\n\n'));
   for (const b of layouts) entries[`template-references/${b.id}-layout.svg`] = strToU8(blueprintSvg(b,palette.paper,'#8bb8a6',1000*size.height/size.width));
   if(singleChalisa) {
+    for(const name of [...chalisaSeriesReferences,'REFERENCE-STUDY.txt','editorial-examples.json']) {
+      const response=await fetchReference(`${chalisaSeriesReferenceRoot}/${name}`);
+      if(!response.ok)throw Error('Could not package the Durga v14 series references. Retry downloading the request.');
+      entries[`template-references/chalisa-series-v14/${name}`]=new Uint8Array(await response.arrayBuffer());
+    }
     for(const name of ['cloud-right.png','cloud-left.png', ...approvedChalisaSpreads.flatMap(sample => [sample.spread, sample.painting])]) {
       const response=await fetchReference(`${approvedChalisaReferenceRoot}/${name}`);
       if(!response.ok)throw Error('Could not package the approved Chalisa references. Retry downloading the request.');
