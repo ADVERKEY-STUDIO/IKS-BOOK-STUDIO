@@ -1,3 +1,4 @@
+import {midnightApi} from './midnight';
 import catalogueSeed from '../lib/iks-catalogue-seed.json';
 import { cataloguePdfDownload } from '../lib/catalogue-pdf-download';
 import { templateReferenceApi } from './template-reference';
@@ -1490,6 +1491,7 @@ const worker = {
     const url = new URL(request.url);
 
     try {
+      if (url.pathname === '/api/midnight' || url.pathname.startsWith('/api/midnight/')) return await midnightApi(request, env);
       if (url.pathname === '/api/template-reference') return await templateReferenceApi(request, fetch, true);
       if (url.pathname.startsWith('/api/account/') || url.pathname.startsWith('/api/library/')) return await libraryApi(request, env);
       if (url.pathname.startsWith('/api/')) {
