@@ -1,3 +1,4 @@
+import {illustrationBatchPrompt} from './illustration-batching.ts';
 import { storyCompositionPrompt } from './story-compositions.ts';
 import { templateDesignPrompt, templateLayout, templates, type TemplateBook, type TemplateId } from './template-book.ts';
 import { validateBookArtwork } from './template-capacity.ts';
@@ -26,6 +27,7 @@ Preserve the subjects, recognizable characters and important details of each ref
 ${templateDesignPrompt(book.templateId)}
 The chosen book design is ${template.name}: ${template.description}. Borrow its composition and text placement, not its sample artwork or characters. The website adds all lettering; generate no text inside images. Each full spread is ${book.templateId === 'beanstalk-adventure' ? '420 × 210' : '420 × 250'} mm. Keep essential subjects clear of the gutter and reserved text areas.
 Composition rules: art-right/art-left = one half-spread image (210 × 250 mm); vignette = a small image within generous margins; panorama = wide art above a bottom reading band; immersive = full-spread art with the left 40% quiet for a text panel; poetry = a small image beneath centered text; study = a shallow image strip above text columns.
-Generate a separate image for every entry below. Return Book-Images.zip containing images/<exact filename>, preserving the declared file formats. Do not return book.json, a montage, or template example artwork. Report any unfinished images honestly. I will upload the ZIP using “Upload all images ZIP” in the existing book; it replaces matching images only.
+${illustrationBatchPrompt('Book-Images.zip', book.pages.map(p => p.image), true)}
+Generate a separate image for every entry below across the batches. After the final batch return Book-Images.zip containing images/<exact filename>, preserving the declared file formats. Do not return book.json, a montage, or template example artwork. Report any unfinished images honestly. I will upload the ZIP using “Upload all images ZIP” in the existing book; it replaces matching images only.
 ${book.pages.map((page, index) => `\n${index + 1}. Reference and output: images/${page.image}\nComposition: ${page.layout}\n${page.layout === 'story-scene' ? storyCompositionPrompt(page.composition || 'landscape-opening') : ''}\nScene notes: ${page.scene || 'Keep the supplied scene and subjects.'}\nText context (do not draw): ${page.original || '(not yet supplied)'}`).join('\n')}`;
 }

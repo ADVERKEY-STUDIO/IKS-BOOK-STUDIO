@@ -1,6 +1,7 @@
 """Run against the local preview: python3 scripts/verify-visual-reference-api.py."""
 import json, urllib.request, urllib.error, uuid, struct, zlib, io, zipfile
-base='http://127.0.0.1:5173'
+from verification_target import verification_base
+base=verification_base()
 owner='visual-reference-check-'+str(uuid.uuid4())
 id=str(uuid.uuid4())
 def req(path,data=None,method=None):
