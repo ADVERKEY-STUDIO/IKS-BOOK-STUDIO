@@ -1,0 +1,3143 @@
+{
+  "original_root": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84",
+  "commit": "73ea47d0f3ac30987f8f647df95eb4301cf07c80",
+  "git_pointer": "gitdir: /Users/gaurav/IKS-Book-Studio-Local-v84/.git/worktrees/IKS-Book-Studio-Local-v8417\n",
+  "files": [
+    {
+      "path": ".dev.vars.example",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/.dev.vars.example",
+      "bytes": 359,
+      "sha256": "41309cee1715493577de99bac0baef8e2ffdb6517ded129387e757ee4c04a0f0",
+      "mode": "0o644",
+      "purpose": "Placeholder configuration template; not real credentials"
+    },
+    {
+      "path": ".gitignore",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/.gitignore",
+      "bytes": 508,
+      "sha256": "e346ba3e5fe215899f1564329051cb5fbb7608beb7adf1c435c645a1e7f600e9",
+      "mode": "0o644",
+      "purpose": "Rules excluding secrets and generated runtime files"
+    },
+    {
+      "path": ".npmrc",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/.npmrc",
+      "bytes": 76,
+      "sha256": "494e64a8818b6158e89321250500ad5ad018e33ad5cfea06a1cacd2cf4da75fa",
+      "mode": "0o644",
+      "purpose": "npm installation settings"
+    },
+    {
+      "path": ".openai/hosting.json",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/.openai/hosting.json",
+      "bytes": 95,
+      "sha256": "1eba68cbc66f54db3e41c75aca21be4f251d00faeda9a816f4bf3c5b4c30a360",
+      "mode": "0o644",
+      "purpose": "Hosting project metadata: hosting"
+    },
+    {
+      "path": "BOOK-INSPIRATION-RESEARCH.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/BOOK-INSPIRATION-RESEARCH.md",
+      "bytes": 11101,
+      "sha256": "4fe15ac8c5f055db88089a4a603dd8d383b7651805218d6aade55bc7f717db77",
+      "mode": "0o644",
+      "purpose": "Project reference/documentation: BOOK INSPIRATION RESEARCH Title: Book inspiration: first discovery and visual review."
+    },
+    {
+      "path": "BOOK-STRUCTURE-IMPLEMENTATION.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/BOOK-STRUCTURE-IMPLEMENTATION.md",
+      "bytes": 6483,
+      "sha256": "ab682307e27d5b7ddc94f36db57aa6f64073f18662a9836c8d8060333bcd7d04",
+      "mode": "0o644",
+      "purpose": "Project reference/documentation: BOOK STRUCTURE IMPLEMENTATION Title: Book structure implementation \u2014 three phases."
+    },
+    {
+      "path": "BOOK-STRUCTURE-RECHECK.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/BOOK-STRUCTURE-RECHECK.md",
+      "bytes": 4072,
+      "sha256": "d618f4172a2b0d309cc18840bf00cb587ba8f90b0927ce46dce52c1cf55f7ada",
+      "mode": "0o644",
+      "purpose": "Project reference/documentation: BOOK STRUCTURE RECHECK Title: Book structure recheck and fixes \u2014 7 September 2026."
+    },
+    {
+      "path": "LOCAL_SETUP.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/LOCAL_SETUP.md",
+      "bytes": 3546,
+      "sha256": "08fd204b33be2804440c4af8f91fc91470b827ada940868d472b13bba525c1bf",
+      "mode": "0o644",
+      "purpose": "Local installation and runtime setup instructions Title: IKS Book Studio \u2014 Local Setup."
+    },
+    {
+      "path": "NEXT-DEVELOPMENT-PLAN.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/NEXT-DEVELOPMENT-PLAN.md",
+      "bytes": 25158,
+      "sha256": "4860e673a4ea171b3e4796c48d88179a46067d624f04662adfb1c5e41c435613",
+      "mode": "0o644",
+      "purpose": "Project reference/documentation: NEXT DEVELOPMENT PLAN Title: Full next development plan \u2014 IKS Book Studio."
+    },
+    {
+      "path": "README.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/README.md",
+      "bytes": 7363,
+      "sha256": "80850701015c419e317416cfd3701933d6392eac385026d42933e670946edead",
+      "mode": "0o644",
+      "purpose": "Project overview and usage documentation Title: IKS Book Studio."
+    },
+    {
+      "path": "SOURCE-BOOK-FEATURES.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/SOURCE-BOOK-FEATURES.md",
+      "bytes": 5815,
+      "sha256": "0e36a9e796fe75dd88fedd40562087fc9c4954e0e784ad319bd478878c1cba7f",
+      "mode": "0o644",
+      "purpose": "Project reference/documentation: SOURCE BOOK FEATURES Title: Source images and Sanskrit \u2014 phased implementation."
+    },
+    {
+      "path": "app/art-direction.css",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/art-direction.css",
+      "bytes": 3341,
+      "sha256": "b6c6cf5cdaef89eab65b5f3037f274e6e7a359822ae127e73fee099c07dc7e9f",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: art direction"
+    },
+    {
+      "path": "app/art-production.css",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/art-production.css",
+      "bytes": 538,
+      "sha256": "a9df85d2d7aaa6a23ce6db4cad2948c6cba72d535d74e3d1f9e8aca856ba5a9d",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: art production"
+    },
+    {
+      "path": "app/book-inspiration.css",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/book-inspiration.css",
+      "bytes": 11603,
+      "sha256": "691555f36bd69f82700e842fa0aee4cf40bc52a4fad3a9f24011220004ba7917",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: book inspiration"
+    },
+    {
+      "path": "app/book-production.css",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/book-production.css",
+      "bytes": 1365,
+      "sha256": "c804ab1670087edbbfa62a527bde0a6817526341685771280fa338e820843562",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: book production"
+    },
+    {
+      "path": "app/book-review.css",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/book-review.css",
+      "bytes": 805,
+      "sha256": "5cc8bfe8e199550a479c2b19154db30eb049e5c98e9927c70f262a511665d4f1",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: book review"
+    },
+    {
+      "path": "app/catalogue/catalogue.css",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/catalogue/catalogue.css",
+      "bytes": 3359,
+      "sha256": "cb4c9b6b8d70fd890b289784738542acdc8f1b57ef469f11850edee2cb6e761e",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: catalogue"
+    },
+    {
+      "path": "app/catalogue/page.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/catalogue/page.tsx",
+      "bytes": 12298,
+      "sha256": "2690e05d6b577abb321d30603151d22e85b41df6000373ea37d96421556fcf9d",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: page"
+    },
+    {
+      "path": "app/chatgpt-auth.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/chatgpt-auth.ts",
+      "bytes": 2404,
+      "sha256": "17a965f8948b21510cdf8ecbd70c5fdf58100e10970463f6a8fd2cc4795f8044",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: chatgpt auth Exports: ChatGPTUser, getChatGPTUser, requireChatGPTUser, chatGPTSignInPath, chatGPTSignOutPath."
+    },
+    {
+      "path": "app/components/account-panel.css",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/components/account-panel.css",
+      "bytes": 4132,
+      "sha256": "c5a5a62eebfde70020662bd95c9ebeb6b4a07efb340bb1380ed64ebe908a4031",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: account panel"
+    },
+    {
+      "path": "app/components/account-panel.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/components/account-panel.tsx",
+      "bytes": 3641,
+      "sha256": "453da853e9fb12c056f1660df17a06389c01e68af1357de348f70d36f0fb3495",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: account panel"
+    },
+    {
+      "path": "app/components/art-direction-workspace.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/components/art-direction-workspace.tsx",
+      "bytes": 11732,
+      "sha256": "8ffaeddfc18cb4cd7b79db6813eb0d4a35908b74903b033fe9570c1d9882ad01",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: art direction workspace Exports: ArtDirectionWorkspace."
+    },
+    {
+      "path": "app/components/art-production-workspace.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/components/art-production-workspace.tsx",
+      "bytes": 7381,
+      "sha256": "bec752c0bb7b0f679744e1924e2ac3e1216f8fb6a2a32ffb9b8e23e8d7d7116c",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: art production workspace Exports: ArtUpload, ArtProductionWorkspace."
+    },
+    {
+      "path": "app/components/book-inspiration.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/components/book-inspiration.tsx",
+      "bytes": 12428,
+      "sha256": "7775cb2cde0dd123abb8a0005d551f7bb7dd208c43badf5804ac622bb1c327b4",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: book inspiration Exports: InspirationShelf, BookInspirationGallery."
+    },
+    {
+      "path": "app/components/book-production-workspace.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/components/book-production-workspace.tsx",
+      "bytes": 12716,
+      "sha256": "5f3fa74af542576e2d32f5b7b5f743265d9a78c1bef1c8e04ef0cbfad5d3d6c7",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: book production workspace Exports: BookProductionWorkspace."
+    },
+    {
+      "path": "app/components/book-release-workspace.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/components/book-release-workspace.tsx",
+      "bytes": 6581,
+      "sha256": "69afcd6d9dbeea209a64864601805d86006dd388ef8773f69599800662584971",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: book release workspace Exports: BookReleaseWorkspace."
+    },
+    {
+      "path": "app/components/book-review-workspace.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/components/book-review-workspace.tsx",
+      "bytes": 10838,
+      "sha256": "6490aa2bb5e50fac1c490df805b7f5aa3ef7c307e2673d7c990b88ecdabc646b",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: book review workspace Exports: BookReviewWorkspace."
+    },
+    {
+      "path": "app/components/catalogue-handoff.css",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/components/catalogue-handoff.css",
+      "bytes": 1742,
+      "sha256": "c3c5cb3457811e94ecf37a931c1d96ba3903efa500e5b689bf31fa4cf6991f94",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: catalogue handoff"
+    },
+    {
+      "path": "app/components/catalogue-handoff.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/components/catalogue-handoff.tsx",
+      "bytes": 2924,
+      "sha256": "7ffea61722a34867813b1bf578fcf037358eb72585d2692128cd81f027c415b8",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: catalogue handoff"
+    },
+    {
+      "path": "app/components/edition-desk.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/components/edition-desk.tsx",
+      "bytes": 19593,
+      "sha256": "d090cf6d8d9403416b2cda504ecec3e865ddfcc84dd69b622ad19efb4abdd75c",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: edition desk Exports: EditionDesk."
+    },
+    {
+      "path": "app/components/firebase-account-panel.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/components/firebase-account-panel.tsx",
+      "bytes": 7781,
+      "sha256": "fb07167c681ac47eeecb62bced45f505e3071b44c56dee2d087970a8b251b302",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: firebase account panel Exports: FirebaseConfig."
+    },
+    {
+      "path": "app/components/saved-template-library.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/components/saved-template-library.tsx",
+      "bytes": 6961,
+      "sha256": "5e8b4fa032b326631a192502c2411f64e223a8fa12bf663c3bcd2b3be4ee98f2",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: saved template library"
+    },
+    {
+      "path": "app/components/source-book-options.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/components/source-book-options.tsx",
+      "bytes": 5594,
+      "sha256": "4e5d2bb82e717ba0aad19cc797b70342bd14f27191f7e3d28b21bb6002d56af1",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: source book options Exports: SourceBookOptions, SourceBookOptionsReview."
+    },
+    {
+      "path": "app/components/source-book-review.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/components/source-book-review.tsx",
+      "bytes": 7569,
+      "sha256": "686d529a130a5aecc48c87b8615ff4a35d18d52b744d0caf4c5fdd7b0e9ee0b9",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: source book review Exports: SourceBookReviewPanel."
+    },
+    {
+      "path": "app/components/spread-designer.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/components/spread-designer.tsx",
+      "bytes": 16053,
+      "sha256": "f1bf8ac986f824a591393cc4fec2abe7f0c115a3d3a5e27d9c4c4dce4699ef72",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: spread designer Exports: SpreadDesigner."
+    },
+    {
+      "path": "app/components/storyboard-workspace.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/components/storyboard-workspace.tsx",
+      "bytes": 8612,
+      "sha256": "60bbb6b15f0d2ef6a22d0daf18bf20748e63857b548c2bf13e628bff13769d35",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: storyboard workspace Exports: StoryboardWorkspace."
+    },
+    {
+      "path": "app/components/template-cover-preview.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/components/template-cover-preview.tsx",
+      "bytes": 1277,
+      "sha256": "fc978c26af091a6f5a0d266f519203567e4a8dd79b0800be802515cd794d80ab",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: template cover preview"
+    },
+    {
+      "path": "app/components/visual-reference-workspace.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/components/visual-reference-workspace.tsx",
+      "bytes": 11317,
+      "sha256": "a43c43930d4f80dc1fa65ac83a48e46925ea0ddc687e98dbfede5769cd374d27",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: visual reference workspace Exports: ReferenceUpload, VisualReferenceWorkspace, ReferencePicture."
+    },
+    {
+      "path": "app/edition-desk.css",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/edition-desk.css",
+      "bytes": 3092,
+      "sha256": "782764624b1c9f3d771effbee5d31bef4b30686f0769dd02d5d6c64a7cfabb6a",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: edition desk"
+    },
+    {
+      "path": "app/globals.css",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/globals.css",
+      "bytes": 209298,
+      "sha256": "43e33f1d9311165bc652d72484ceb904816a94f074931b3c44260b02235279c4",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: globals"
+    },
+    {
+      "path": "app/home.css",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/home.css",
+      "bytes": 11852,
+      "sha256": "a299dc8aba6ab0ccaddc585ef33d85e97c6c4f7430518f480da8698393619ee2",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: home"
+    },
+    {
+      "path": "app/layout.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/layout.tsx",
+      "bytes": 725,
+      "sha256": "9f38b733d0bba273df03660b870a9fffb153b7284403c291b2d736ddc5458a98",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: layout Exports: metadata."
+    },
+    {
+      "path": "app/midnight/page.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/midnight/page.tsx",
+      "bytes": 9512,
+      "sha256": "6a8ad6a2233a3db6ec4a4d335a2e892c2026e7e8f6f7b37a39cc5de43d2f97f8",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: page"
+    },
+    {
+      "path": "app/midnight/queue.css",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/midnight/queue.css",
+      "bytes": 3703,
+      "sha256": "13adec6bef48d5775c2c98bb60f957a0b9dabe520b9fcf81228f5563567e17b3",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: queue"
+    },
+    {
+      "path": "app/page.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/page.tsx",
+      "bytes": 470646,
+      "sha256": "3524b8ef5e83f4cf51b5de91209587fa750d45cf20f846a53625fab5a7b79a87",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: page"
+    },
+    {
+      "path": "app/pilot/page.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/pilot/page.tsx",
+      "bytes": 6181,
+      "sha256": "dc1bda56dbc1c5c89a4341b626832e7b620e8be707f1653ed69f12e47399a5b5",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: page"
+    },
+    {
+      "path": "app/pilot/pilot.css",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/pilot/pilot.css",
+      "bytes": 2511,
+      "sha256": "3f4dd8dbf2a6f6d6be020814e77a532653113c805e6296c48b9a892131d286f9",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: pilot"
+    },
+    {
+      "path": "app/sign-in/[[...sign-in]]/page.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/sign-in/[[...sign-in]]/page.tsx",
+      "bytes": 638,
+      "sha256": "dbbae5d658e50d85a8a5b2267ae563e295014ab2ed289dd5b4db1ce55cbea355",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: page"
+    },
+    {
+      "path": "app/sign-up/[[...sign-up]]/page.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/sign-up/[[...sign-up]]/page.tsx",
+      "bytes": 638,
+      "sha256": "d4ebaaf760bc79f6813182895d2d0ece5addcf8d6d5fd73333a14b73aacd68ac",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: page"
+    },
+    {
+      "path": "app/spread-designer.css",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/spread-designer.css",
+      "bytes": 1198,
+      "sha256": "d7b4518511d79e0617c574d8ab8b4618c6d82c2a55f6636da4d75da27c897ba8",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: spread designer"
+    },
+    {
+      "path": "app/storyboard.css",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/storyboard.css",
+      "bytes": 1624,
+      "sha256": "cdb713cc6b944b50e15efd6f13f21e2b2d83397d1d4b5753d07a67f817c904ee",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: storyboard"
+    },
+    {
+      "path": "app/template-studio/approved-chalisa-samples.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/template-studio/approved-chalisa-samples.tsx",
+      "bytes": 1399,
+      "sha256": "b07eb871bd9190ccdb50a196f012c6f26349e3c4a8c9d5dc0f9af1cc189ab802",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: approved chalisa samples"
+    },
+    {
+      "path": "app/template-studio/book-sections-editor.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/template-studio/book-sections-editor.tsx",
+      "bytes": 1663,
+      "sha256": "2a9486ac31eef19fd55ce1344b5dcee20fad95209cd739a10b435fce4c18b186",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: book sections editor"
+    },
+    {
+      "path": "app/template-studio/chalisa-edition-picker.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/template-studio/chalisa-edition-picker.tsx",
+      "bytes": 777,
+      "sha256": "3f90dd730031cbcf5e7d98a963aad5bb72cd3323217ced95d6b8b6ce39c3ef42",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: chalisa edition picker"
+    },
+    {
+      "path": "app/template-studio/chalisa-page-editor.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/template-studio/chalisa-page-editor.tsx",
+      "bytes": 1623,
+      "sha256": "194a16ce78372e488f7fc42080f9d95680921b05fa1cf89c37598c59ea4663c7",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: chalisa page editor"
+    },
+    {
+      "path": "app/template-studio/chatgpt-handoff.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/template-studio/chatgpt-handoff.tsx",
+      "bytes": 6810,
+      "sha256": "7c9d27968ffc7cf3c219fa951b4d6915f50e0a88766b0bcec284e6cd055d3c77",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: chatgpt handoff"
+    },
+    {
+      "path": "app/template-studio/children-gallery.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/template-studio/children-gallery.tsx",
+      "bytes": 5113,
+      "sha256": "d6d4bf69b62bd7c25699a34b2196793c949d881315a2e3480b179353d8d05492",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: children gallery"
+    },
+    {
+      "path": "app/template-studio/completion-editor.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/template-studio/completion-editor.tsx",
+      "bytes": 2734,
+      "sha256": "aa3a0f9ec08d44aa0f01ba839e545529050881139a4b6f723b82d338d50709ad",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: completion editor"
+    },
+    {
+      "path": "app/template-studio/editor-tools.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/template-studio/editor-tools.tsx",
+      "bytes": 1484,
+      "sha256": "43a2138dc89bb42a5b3cb258288bd6d043a2f9b681c0def89ec377b1c27be7e3",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: editor tools Exports: EditorTools, ToolPanel."
+    },
+    {
+      "path": "app/template-studio/glossary-editor.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/template-studio/glossary-editor.tsx",
+      "bytes": 1138,
+      "sha256": "d3647a9b85095bf673ca3daf5f84cb700b02ad526a3ca5cddb5fb9a05765928c",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: glossary editor"
+    },
+    {
+      "path": "app/template-studio/layout-review.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/template-studio/layout-review.tsx",
+      "bytes": 4486,
+      "sha256": "6900a0cc660e9042b388b2346b24244abe9722f2c477d592b4926b2a62df2dbd",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: layout review Exports: BookSpreadPreview, LayoutDiagram."
+    },
+    {
+      "path": "app/template-studio/literary-gallery.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/template-studio/literary-gallery.tsx",
+      "bytes": 2646,
+      "sha256": "91f690b316fce56667c49404ff3b8d98639d1c8a27ca72d6e8c6837f566d9a89",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: literary gallery"
+    },
+    {
+      "path": "app/template-studio/notes-gallery.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/template-studio/notes-gallery.tsx",
+      "bytes": 3420,
+      "sha256": "b7e2923da3bd78c5d6400eb9c0193bbb65362372386ffebff4fc363087c20b66",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: notes gallery"
+    },
+    {
+      "path": "app/template-studio/page.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/template-studio/page.tsx",
+      "bytes": 79964,
+      "sha256": "abc8d23e237b02d0d478812326957e2158987a0e3cf29bd91898812dfdb1bd9c",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: page"
+    },
+    {
+      "path": "app/template-studio/studio.css",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/template-studio/studio.css",
+      "bytes": 21505,
+      "sha256": "c5a9bd8861d4f0f012d928690bbb6ab97f7576c7572017f96ebcf70bc675f5e4",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: studio"
+    },
+    {
+      "path": "app/template-studio/template-layout-samples.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/template-studio/template-layout-samples.tsx",
+      "bytes": 2788,
+      "sha256": "62f368c3f7073d20f93db4462116be8b2566733ca04e40bf36488c29f1b1e2da",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: template layout samples"
+    },
+    {
+      "path": "app/template-studio/text-background-editor.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/template-studio/text-background-editor.tsx",
+      "bytes": 3557,
+      "sha256": "e4d150f184f05e2233b2a9c726fc21c89d1cc9799724e6c2defd44dc9a1d14ac",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: text background editor"
+    },
+    {
+      "path": "app/template-studio/text-placement-editor.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/template-studio/text-placement-editor.tsx",
+      "bytes": 4422,
+      "sha256": "e6c5449e3a293a0daba48f5f7af7ca1c881c5bc85276a5e6ebaa8feadb317f01",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: text placement editor"
+    },
+    {
+      "path": "app/template-studio/typography-editor.tsx",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/template-studio/typography-editor.tsx",
+      "bytes": 2668,
+      "sha256": "f040f918c291624ab58908d2613ce8ab97c2c5fcec673064dc815a5c86155bed",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: typography editor"
+    },
+    {
+      "path": "app/visual-references.css",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/app/visual-references.css",
+      "bytes": 1483,
+      "sha256": "4156f1eb02358520d32a73aeeccb894156e1decb5f3e5fa044dba43aa5d1a882",
+      "mode": "0o644",
+      "purpose": "Application pages, UI components and styling: visual references"
+    },
+    {
+      "path": "build/sites-vite-plugin.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/build/sites-vite-plugin.ts",
+      "bytes": 1254,
+      "sha256": "81b7cbfaeb970611572256aba0e313425beb3809f6426f63750696c15d9c756b",
+      "mode": "0o644",
+      "purpose": "Build integration source: sites vite plugin Exports: sites."
+    },
+    {
+      "path": "db/index.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/db/index.ts",
+      "bytes": 423,
+      "sha256": "dc7610b00b918e0ffff1360a63626f16655ced3064b2eaf96095a4101fb14bcd",
+      "mode": "0o644",
+      "purpose": "Database schema and access layer: index Exports: getDb."
+    },
+    {
+      "path": "db/schema.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/db/schema.ts",
+      "bytes": 1345,
+      "sha256": "139202b0d45f225bb703db50d4899b4ad9f3028ba53ba91b692aa5b45ddea02d",
+      "mode": "0o644",
+      "purpose": "Database schema and access layer: schema Exports: projects, projectVersions, designerPreferences."
+    },
+    {
+      "path": "docs/book-inspiration-gallery.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/book-inspiration-gallery.md",
+      "bytes": 2110,
+      "sha256": "3ac66385f62496ef99b56a0bb3ff09f1f8187cf4c31fa63b6fec713f8c012ef7",
+      "mode": "0o644",
+      "purpose": "Project documentation: book inspiration gallery Title: Book inspiration gallery."
+    },
+    {
+      "path": "docs/design/handwritten-notebook-fidelity.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/design/handwritten-notebook-fidelity.md",
+      "bytes": 3345,
+      "sha256": "467acb01e4472db67488a311b644098dae4153a9225c99d5065ce3d49d125485",
+      "mode": "0o644",
+      "purpose": "Project documentation: handwritten notebook fidelity Title: Handwritten notebook reference study."
+    },
+    {
+      "path": "docs/development/EMAIL-LIBRARY.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/development/EMAIL-LIBRARY.md",
+      "bytes": 6518,
+      "sha256": "15b25eb54f98adcc7a9209fc389fb6278a4c447c35ce8bea5b690e79ae0f5f2b",
+      "mode": "0o644",
+      "purpose": "Project documentation: EMAIL LIBRARY Title: Clerk accounts and shared books."
+    },
+    {
+      "path": "docs/development/PHASE-A-COMPLETED.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/development/PHASE-A-COMPLETED.md",
+      "bytes": 3775,
+      "sha256": "2c2cff3843f28a30ef4f62a24737370612ce6e10ce1107a790ab7fc3d72a1b65",
+      "mode": "0o644",
+      "purpose": "Project documentation: PHASE A COMPLETED Title: Phase A \u2014 Edition setup and protected content."
+    },
+    {
+      "path": "docs/development/PHASE-B-COMPLETED.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/development/PHASE-B-COMPLETED.md",
+      "bytes": 4204,
+      "sha256": "373a461f5352f54fb8557bbe00c127a0518cc37bd8f08398e2be5a9ee30e22fc",
+      "mode": "0o644",
+      "purpose": "Project documentation: PHASE B COMPLETED Title: Phase B \u2014 Art-direction workspace."
+    },
+    {
+      "path": "docs/development/PHASE-C-COMPLETED.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/development/PHASE-C-COMPLETED.md",
+      "bytes": 2503,
+      "sha256": "c1494ce73f6480b17d5adb3d4e33c956f1e9d6130032cbbad9a7459adc24fbb9",
+      "mode": "0o644",
+      "purpose": "Project documentation: PHASE C COMPLETED Title: Phase C \u2014 Character and visual continuity."
+    },
+    {
+      "path": "docs/development/PHASE-D-COMPLETED.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/development/PHASE-D-COMPLETED.md",
+      "bytes": 2748,
+      "sha256": "96a66fe33fbd98342d0aa8405587ef5f4e12e24749b6c64d3e167e68dde15aa6",
+      "mode": "0o644",
+      "purpose": "Project documentation: PHASE D COMPLETED Title: Phase D \u2014 Whole-book storyboard."
+    },
+    {
+      "path": "docs/development/PHASE-E-COMPLETED.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/development/PHASE-E-COMPLETED.md",
+      "bytes": 3518,
+      "sha256": "a43d1f81aef6d42bf77919381288367d45560d7ea7d868844bd19f15dc1caa05",
+      "mode": "0o644",
+      "purpose": "Project documentation: PHASE E COMPLETED Title: Phase E \u2014 Dedicated spread compositor."
+    },
+    {
+      "path": "docs/development/PHASE-F-IMPORTS-COMPLETED.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/development/PHASE-F-IMPORTS-COMPLETED.md",
+      "bytes": 3193,
+      "sha256": "e0e339377e823582a6c011d638e4a321698b17ed1bb9cb5845b990927635c05a",
+      "mode": "0o644",
+      "purpose": "Project documentation: PHASE F IMPORTS COMPLETED Title: Phase F \u2014 Artwork imports and revision review."
+    },
+    {
+      "path": "docs/development/PHASE-G-PILOT-BRIEF.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/development/PHASE-G-PILOT-BRIEF.md",
+      "bytes": 4130,
+      "sha256": "5c0198f218863ee4874b69f37483d23b24049f4ff182e9d8c27200dcaa3a7527",
+      "mode": "0o644",
+      "purpose": "Project documentation: PHASE G PILOT BRIEF Title: Phase G \u2014 Three-spread pilot brief."
+    },
+    {
+      "path": "docs/development/PHASE-G-REVIEW-READY.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/development/PHASE-G-REVIEW-READY.md",
+      "bytes": 3488,
+      "sha256": "a0b81d77bc53d37f31b84aee9fe3309e1cc467708fe8cc67fa7e6b415da1991d",
+      "mode": "0o644",
+      "purpose": "Project documentation: PHASE G REVIEW READY Title: Phase G \u2014 Three review studies ready."
+    },
+    {
+      "path": "docs/development/PHASE-H-WORKSPACE-COMPLETED.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/development/PHASE-H-WORKSPACE-COMPLETED.md",
+      "bytes": 4017,
+      "sha256": "e48b2a030d1f1abe83a1c2733afb76efd31d95458fb892636efb069a01e05506",
+      "mode": "0o644",
+      "purpose": "Project documentation: PHASE H WORKSPACE COMPLETED Title: Phase H \u2014 Full-book production workspace."
+    },
+    {
+      "path": "docs/development/PHASE-I-WORKSPACE-COMPLETED.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/development/PHASE-I-WORKSPACE-COMPLETED.md",
+      "bytes": 4831,
+      "sha256": "05ca06278bc67485bb6065d8b6d19733e72db38e429790757f2c1cd260b4b48d",
+      "mode": "0o644",
+      "purpose": "Project documentation: PHASE I WORKSPACE COMPLETED Title: Phase I \u2014 Editorial, visual, and print review workspace."
+    },
+    {
+      "path": "docs/development/PHASE-J-EXPORT-AND-RESTORE.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/development/PHASE-J-EXPORT-AND-RESTORE.md",
+      "bytes": 5720,
+      "sha256": "007f8e54823c7c490ad3642e0d5334511bd3dc135f0002dde5d935f6e730410e",
+      "mode": "0o644",
+      "purpose": "Project documentation: PHASE J EXPORT AND RESTORE Title: Phase J \u2014 export and restore workspace."
+    },
+    {
+      "path": "docs/development/REVIEW-A-THROUGH-D.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/development/REVIEW-A-THROUGH-D.md",
+      "bytes": 2227,
+      "sha256": "4ab6138766fedf9fcbbb2fa3b2441bf59859cc89e7206432d463d0e8276d622e",
+      "mode": "0o644",
+      "purpose": "Project documentation: REVIEW A THROUGH D Title: Development audit \u2014 Phases A through D."
+    },
+    {
+      "path": "docs/development/TEMPLATE-BOOK-WORKFLOW.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/development/TEMPLATE-BOOK-WORKFLOW.md",
+      "bytes": 5993,
+      "sha256": "8e6972ed387c5ac9787e371e9f11c85b43e6a49e02ce76433138cedead2171e9",
+      "mode": "0o644",
+      "purpose": "Project documentation: TEMPLATE BOOK WORKFLOW Title: Template book workflow."
+    },
+    {
+      "path": "docs/development/TEMPLATE-FIDELITY.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/development/TEMPLATE-FIDELITY.md",
+      "bytes": 8547,
+      "sha256": "8b54395350c4d51597584036d928601922f363153fcfc3d7e3b7c5f8036edc3d",
+      "mode": "0o644",
+      "purpose": "Project documentation: TEMPLATE FIDELITY Title: Template fidelity and varied spread layouts."
+    },
+    {
+      "path": "docs/development/saved-book-reliability.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/development/saved-book-reliability.md",
+      "bytes": 3384,
+      "sha256": "eb101f9323d97282b960c70f39652c6e0da3c0eff90a790093c92e5abe91bf05",
+      "mode": "0o644",
+      "purpose": "Project documentation: saved book reliability Title: Saved book reliability."
+    },
+    {
+      "path": "docs/research/book-inspiration-candidates.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/research/book-inspiration-candidates.md",
+      "bytes": 11318,
+      "sha256": "e3346854a66dabf9d7c4e97ae9c8c8d06196414355c2244678f9ed5fe5992047",
+      "mode": "0o644",
+      "purpose": "Project documentation: book inspiration candidates Title: Real published book candidates for the inspiration gallery."
+    },
+    {
+      "path": "docs/research/phase-g-gita-sources.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/research/phase-g-gita-sources.md",
+      "bytes": 9130,
+      "sha256": "930ff492bf57b46d3b839f23417f2b1acd131defcce0e0f6e747b6c4caa15d66",
+      "mode": "0o644",
+      "purpose": "Project documentation: phase g gita sources Title: Phase G: Bhagavad Gita pilot sources."
+    },
+    {
+      "path": "docs/research/unique-book-template-references.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/docs/research/unique-book-template-references.md",
+      "bytes": 4144,
+      "sha256": "4f869a7ff7ff709bde17b3a99adb58a4ba8ccba00c99529705ded41f1d126e70",
+      "mode": "0o644",
+      "purpose": "Project documentation: unique book template references Title: Distinctive book template references."
+    },
+    {
+      "path": "drizzle/0000_fixed_whiplash.sql",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/drizzle/0000_fixed_whiplash.sql",
+      "bytes": 900,
+      "sha256": "32ca3eadff60f73da458d3530488cdf314efc33a537cb3f6970155b4881446d4",
+      "mode": "0o644",
+      "purpose": "Database migration history: 0000 fixed whiplash"
+    },
+    {
+      "path": "drizzle/0001_thick_tag.sql",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/drizzle/0001_thick_tag.sql",
+      "bytes": 170,
+      "sha256": "87c1bec06efe6a568d277e5599a3511725c48a896eaaeb2aaf0363717b174155",
+      "mode": "0o644",
+      "purpose": "Database migration history: 0001 thick tag"
+    },
+    {
+      "path": "drizzle/meta/0000_snapshot.json",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/drizzle/meta/0000_snapshot.json",
+      "bytes": 4134,
+      "sha256": "71d90341e7fdc99b3c0f076f4839bae5f83ec25bf3e881c53ff9b925675bbda8",
+      "mode": "0o644",
+      "purpose": "Database migration history: 0000 snapshot"
+    },
+    {
+      "path": "drizzle/meta/0001_snapshot.json",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/drizzle/meta/0001_snapshot.json",
+      "bytes": 4979,
+      "sha256": "c831abab2273204124bc199ac90c18b02191ec48737f39904494bef435559aa0",
+      "mode": "0o644",
+      "purpose": "Database migration history: 0001 snapshot"
+    },
+    {
+      "path": "drizzle/meta/_journal.json",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/drizzle/meta/_journal.json",
+      "bytes": 341,
+      "sha256": "222e60fbd346655db9274173ad0ccc7a48ccfbdedfb9bb273f7f588ac98efdc4",
+      "mode": "0o644",
+      "purpose": "Database migration history:  journal"
+    },
+    {
+      "path": "drizzle.config.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/drizzle.config.ts",
+      "bytes": 148,
+      "sha256": "af081f7384aaeb0082cf422e29f139d137ca2f6a57c69b2c37b9fb1f8479867b",
+      "mode": "0o644",
+      "purpose": "Database migration tooling configuration"
+    },
+    {
+      "path": "eslint.config.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/eslint.config.mjs",
+      "bytes": 465,
+      "sha256": "870f1adccecf3051cbcd9fd307cef51d7633cf510979c181a81f4b1797273493",
+      "mode": "0o644",
+      "purpose": "Static code-checking configuration"
+    },
+    {
+      "path": "examples/d1/app/api/notes/route.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/examples/d1/app/api/notes/route.ts",
+      "bytes": 1700,
+      "sha256": "a3d4a74fd53b7bf53e2df41f169d9d9d44a8b22aeb6d92f4e754956079af8909",
+      "mode": "0o644",
+      "purpose": "Example input or workflow reference: route Exports: GET, POST."
+    },
+    {
+      "path": "examples/d1/db/schema.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/examples/d1/db/schema.ts",
+      "bytes": 370,
+      "sha256": "d89eabd95716ce404f5f7ca2a254220435be8ddce7c899d7ef461ff22ec80454",
+      "mode": "0o644",
+      "purpose": "Example input or workflow reference: schema Exports: notes."
+    },
+    {
+      "path": "lib/adaptation-pages.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/adaptation-pages.ts",
+      "bytes": 3916,
+      "sha256": "5ba676dd340b4df14bb982eedb108f1a50a3e5799012c1ed4adf7fbe076ddb26",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: adaptation pages Exports: ADAPTATION_PLAN_VERSION, TOTAL_BOOK_PAGE_LIMIT, FIXED_MATTER_PAGES, CHAPTER_PAGE_BUDGET, AdaptationPageInputs, recommendedAdaptationPages, allocatePagesWithinBudget."
+    },
+    {
+      "path": "lib/art-direction.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/art-direction.ts",
+      "bytes": 11382,
+      "sha256": "fb8cc19857737693a7e2749a5a393634409b48925949b661f663203c55a958b1",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: art direction Exports: guideTextFields, guideLayers, ArtGuide, GuideVersion, ArtDirection, guideContext, latestGuide, guideStatus."
+    },
+    {
+      "path": "lib/art-production.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/art-production.ts",
+      "bytes": 6501,
+      "sha256": "2b7ed08db189717645b036fa93e6592c220ac9041a01fca1bb5467b6e4f32fea",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: art production Exports: ArtRequest, ArtVersion, SpreadArt, ArtProduction, ProductionAction, artContext, approvedArt, artStatus."
+    },
+    {
+      "path": "lib/book-backup.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/book-backup.ts",
+      "bytes": 1749,
+      "sha256": "ab01657fa2b487f39c59140555d574cf9683b3dbbfb1f07c2dc29eced289cde9",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: book backup Exports: BACKUP_LIMIT, BackupManifest, digest, backupKeys, restoredEdition."
+    },
+    {
+      "path": "lib/book-completion.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/book-completion.ts",
+      "bytes": 14708,
+      "sha256": "e81c6ce3ff092e6f7ff0ebc855396269f031c26b8a1c750a8fe15ce9b473829e",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: book completion Exports: BookCompletion, defaultBookCompletion, parseBookCompletion, bookArtworkFiles, coverArtworkPrompt, bookCompletionPrompt, renderBookCompletion, bookCompletionCss."
+    },
+    {
+      "path": "lib/book-export.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/book-export.ts",
+      "bytes": 3057,
+      "sha256": "98fc9afb7ca1e9c61830ef00a2801a472890ce84eed042113600adbfaf38ceda",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: book export Exports: ExportMode, bookExportIssues, bookPageSequence, bookDocument."
+    },
+    {
+      "path": "lib/book-format.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/book-format.ts",
+      "bytes": 5274,
+      "sha256": "bcbcffb9eb0a3bb04c9dc5bfc84226e727aa7ce8b37a4db012858ba6ec87c827",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: book format Exports: BookFormatId, BookFormatDefinition, DEFAULT_NEW_BOOK_FORMAT, LEGACY_BOOK_FORMAT, BOOK_SCREEN_PX_PER_MM, BOOK_FORMATS, isBookFormatId, bookFormat."
+    },
+    {
+      "path": "lib/book-glossary.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/book-glossary.ts",
+      "bytes": 2491,
+      "sha256": "7a35ddd21e39ebd74755ca4f5022ff21900b87daf85e5edad6456a3624ca067c",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: book glossary Exports: GlossaryEntry, parseBookGlossary, renderBookGlossary, glossaryMarkdown, bookGlossaryCss."
+    },
+    {
+      "path": "lib/book-illustrations.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/book-illustrations.ts",
+      "bytes": 4393,
+      "sha256": "9564a64c6754384d0c67216214e7ea5fb87943be88d9c7a397ee944a2a6b1878",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: book illustrations Exports: BookIllustration, placeBookIllustrations."
+    },
+    {
+      "path": "lib/book-inspiration.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/book-inspiration.ts",
+      "bytes": 19690,
+      "sha256": "ba58d24cb504c3851b3badc7164ae89b481c791c9b92feeae8b336cc57b53507",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: book inspiration Exports: inspirationAspects, InspirationAspect, BookInspiration, InspirationBook, inspirationBooks, inspirationBook, normalizeInspiration, inspirationBrief."
+    },
+    {
+      "path": "lib/book-layout.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/book-layout.ts",
+      "bytes": 17825,
+      "sha256": "dddab84bc3af3ca305c934a5ddeb57754494f3b68a72f952d43a5fc9e7ff7243",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: book layout Exports: measureBookContent, pageFlowHtml, refreshBookPageNumbers, splitFlowBlock, paginateFlowBlocks, flowManifest, assertFlowPreserved, inspectBookPage."
+    },
+    {
+      "path": "lib/book-package.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/book-package.ts",
+      "bytes": 6283,
+      "sha256": "95160ae91c814cd4b02088169f29e99d3d2f9a6a8fd162940d7c6855576b452f",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: book package Exports: BOOK_PACKAGE_FORMAT, BookPackageImage, BookPackagePage, BookPackageChapter, BookPackage, PlannedChapter, BookPackageValidation, expectedChapterId."
+    },
+    {
+      "path": "lib/book-persona.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/book-persona.ts",
+      "bytes": 12274,
+      "sha256": "8bf6bbd7da7012d8f7eab4940811d2c303b7feddeaf48a67033ebc34e74c9cf5",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: book persona Exports: BookPersonaId, BookPersona, BOOK_PERSONA_VERSION, bookPersonaDefinitions, personaById, materializePersona, inferBookPersona, bookPersonaPatch."
+    },
+    {
+      "path": "lib/book-production.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/book-production.ts",
+      "bytes": 9945,
+      "sha256": "2fc0322df3ed79829d06bb79657ddc11bafd9a765f359ab37febd8ea54fd220f",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: book production Exports: productionStates, ProductionState, bookPartRoles, BookPartRole, ProductionBatch, ProductionReview, PrinterCover, BookProduction."
+    },
+    {
+      "path": "lib/book-raster.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/book-raster.ts",
+      "bytes": 6165,
+      "sha256": "7d9bd534914cb285faf59fb2011a9cc49b14d5ac10bd66b76d7610c8aa66c522",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: book raster Exports: renderBookPageCanvas."
+    },
+    {
+      "path": "lib/book-review.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/book-review.ts",
+      "bytes": 10596,
+      "sha256": "38067a72b024c88932896e0419d842ad161d0b55b8c8d5a8e063b3075ad195c0",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: book review Exports: ReviewTarget, ReviewFinding, humanReviewCategories, HumanReviewCategory, renderCodes, RenderProblem, RenderResult, BookReview."
+    },
+    {
+      "path": "lib/book-sections.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/book-sections.ts",
+      "bytes": 2716,
+      "sha256": "12507cdd424c06f7eb7535458be20ca0465268428eab5efc2935737583a604ed",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: book sections Exports: BookSection, parseBookSections, sectionColumns, renderBookSections, bookSectionsMarkdown, bookSectionsCss."
+    },
+    {
+      "path": "lib/book-typography.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/book-typography.ts",
+      "bytes": 2006,
+      "sha256": "678070885b5ec829f81e6c71832cdeb59ea779c241376b7f255ea9f5d78abd73",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: book typography Exports: BookTypography, parseBookTypography, bookTypographyCss."
+    },
+    {
+      "path": "lib/canva-export.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/canva-export.ts",
+      "bytes": 11221,
+      "sha256": "8286ffb22430a9736c0df081b54d7b3ebe39ccad1346b6e009d3f364079aee7f",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: canva export Exports: captureCanvaPage, exportCanvaBook."
+    },
+    {
+      "path": "lib/canva-presentation.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/canva-presentation.ts",
+      "bytes": 2243,
+      "sha256": "10017e7771fb6baa80c0adef8d6ce2c645228118999086cf7aa23a2e5271db10",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: canva presentation Exports: CanvaBox, CanvaTextRun, CanvaElement, CanvaPage, buildCanvaPresentation."
+    },
+    {
+      "path": "lib/catalogue-pdf-download.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/catalogue-pdf-download.ts",
+      "bytes": 2313,
+      "sha256": "1502d73a39fea98a48bbd81a6b259758c689d2c2b74593a329fa2230845e3a1d",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: catalogue pdf download Exports: cataloguePdfDownload."
+    },
+    {
+      "path": "lib/catalogue-source.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/catalogue-source.ts",
+      "bytes": 2647,
+      "sha256": "62de7302d9e5ebccc15906ec58644c302ddf74ab2d244e5face9d56dae9eb5f2",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: catalogue source Exports: CatalogueSource, selectedCategoryGroups, prepareCataloguePdf."
+    },
+    {
+      "path": "lib/chalisa-approved-references.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/chalisa-approved-references.ts",
+      "bytes": 1708,
+      "sha256": "967be4ae2d6feb1c80cb3bdb376b072ffb0c062f553576fd027ece7b14c7674b",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: chalisa approved references Exports: approvedChalisaSpreads, approvedChalisaReferenceRoot, approvedChalisaReferencePrompt."
+    },
+    {
+      "path": "lib/chalisa-editions.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/chalisa-editions.ts",
+      "bytes": 19953,
+      "sha256": "f53d187ba4b5e90a6d12e1471ccadf75acb71509a3f67e928900ce9dcef587e6",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: chalisa editions Exports: chalisaEditions, ChalisaEditionId, parseChalisaEdition, chalisaEdition, chalisaSeriesReferenceRoot, chalisaSeriesReferences, chalisaSeriesMasterPrompt, chalisaEditionPrompt."
+    },
+    {
+      "path": "lib/chalisa-pages.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/chalisa-pages.ts",
+      "bytes": 2513,
+      "sha256": "7c352ab7eaf2e6a9bca764d8652f3faee6dbe853e659cba52bf9860de038b273",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: chalisa pages Exports: LEGACY_CHALISA_BLUEPRINT, DIAGONAL_CHALISA_BLUEPRINT, CHALISA_BLUEPRINT, CHALISA_FULL_SPREAD_IDS, CHALISA_SINGLE_BLUEPRINT, CHALISA_SINGLE_IDS, isSingleChalisa, isFullSpreadChalisa."
+    },
+    {
+      "path": "lib/chalisa-publisher-review.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/chalisa-publisher-review.ts",
+      "bytes": 6651,
+      "sha256": "11d553ef8bc4a2d72dfb75c594f8aebe7174dbb5898a01872ea74c5a5168ef81",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: chalisa publisher review Exports: chalisaPublisherReviewPrompt."
+    },
+    {
+      "path": "lib/chatgpt-handoff.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/chatgpt-handoff.ts",
+      "bytes": 8294,
+      "sha256": "4f44da791fe1bdc290f2c5aba94ecb5120a760e13ad78019d83318e849b83981",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: chatgpt handoff Exports: draftStep, sampleNames, canApproveSample, analysisPrompt, samplePrompt, chapterPrompt, handoffEntries."
+    },
+    {
+      "path": "lib/child-summary.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/child-summary.ts",
+      "bytes": 9735,
+      "sha256": "8194c5e96efd9702a73fe812cd86f652a2faa2e25451410626771f1a773da029",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: child summary Exports: ChildAgeBand, childAgeBand, generationProfileKey, AUTHORIAL_READER_INSTRUCTION, readerFacingChapterTitle, authorialReaderHtml, adaptEvidenceForAge, ageEvidenceOrder."
+    },
+    {
+      "path": "lib/children-templates.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/children-templates.ts",
+      "bytes": 13486,
+      "sha256": "c07b70c13bb521544b9cb64b17de14cd5e3db3ca6e16ac3185727e4d8316c5ae",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: children templates Exports: childrenTemplates, isChildrenTemplate."
+    },
+    {
+      "path": "lib/create-gita-pilot-draft.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/create-gita-pilot-draft.ts",
+      "bytes": 3557,
+      "sha256": "33b057d26c10402b2cbac2396783e1f6fcdddba9400ce555f110eb2a4c22abc6",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: create gita pilot draft Exports: createGitaPilotDraft."
+    },
+    {
+      "path": "lib/devotional-edition.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/devotional-edition.ts",
+      "bytes": 14683,
+      "sha256": "b4211012c8ce4dd8929218594ad28b779de00f73879e00ee3e216530c3aeab13",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: devotional edition Exports: editionTypes, editionAudiences, passageFields, PassageField, Provenance, EditorialField, PassageSnapshot, Passage."
+    },
+    {
+      "path": "lib/external-manuscript.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/external-manuscript.ts",
+      "bytes": 45572,
+      "sha256": "0c3b2745239832c48657ceda419f34eaf7a6020790ae5522c81f3995427807c6",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: external manuscript Exports: ExternalManuscriptSettings, ExternalManuscriptSection, ExternalManuscriptResult, ExternalIllustrationSlot, ExternalIllustrationPromptProject, ExternalIllustrationArchiveEntry, ExternalIllustrationArchiveMatch, ExternalIllustrationArchiveResult."
+    },
+    {
+      "path": "lib/font-coverage.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/font-coverage.ts",
+      "bytes": 2964,
+      "sha256": "4c1ad09fc626babf0b075ae05e9c32cdc206b8602c6a8a52df2c0574aabeb0af",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: font coverage Exports: PROOF_FONT_SHA256, fontCoverage, missingGlyphs."
+    },
+    {
+      "path": "lib/gita-pilot.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/gita-pilot.ts",
+      "bytes": 6951,
+      "sha256": "d7f97a6c30e2b3d9b6b22f3bfe039c3e8fbb79a7eb94382d003dc6c6f4446046",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: gita pilot Exports: pilotStudies, pilotCredits, pilotAssets, gitaPilot."
+    },
+    {
+      "path": "lib/iks-catalogue-seed.json",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/iks-catalogue-seed.json",
+      "bytes": 453211,
+      "sha256": "cae20ba003e64f7d02ba5b4c99b5a6defafe67e874198c127a1113e97c429f7c",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: iks catalogue seed"
+    },
+    {
+      "path": "lib/iks-catalogue-storage.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/iks-catalogue-storage.ts",
+      "bytes": 979,
+      "sha256": "5f8294fd12329daeec3fdd2e2d4548d77de376e548d4f623389728e0c00cce38",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: iks catalogue storage Exports: catalogueStorage."
+    },
+    {
+      "path": "lib/iks-catalogue.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/iks-catalogue.ts",
+      "bytes": 2657,
+      "sha256": "10795a82f8c5ab9314b3a652cad5a71280e94e5b093ee2816cc3f05582999cd5",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: iks catalogue Exports: kidsCategories, readerAges, CatalogueBook, ContentCard, CatalogueState, webUrl, selectionPack, mergeCatalogue."
+    },
+    {
+      "path": "lib/iks-content-seed.json",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/iks-content-seed.json",
+      "bytes": 1404,
+      "sha256": "eba295fc22408f7e81aab8ac9e8377575d0d5190a769a3537bc48801334de135",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: iks content seed"
+    },
+    {
+      "path": "lib/illustration-batching.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/illustration-batching.ts",
+      "bytes": 3804,
+      "sha256": "87981340223227f0713c3040f23d137e0ef49176a9d42f16ebaeeb2bf55db03e",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: illustration batching Exports: illustrationBatchPrompt."
+    },
+    {
+      "path": "lib/image-first-book.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/image-first-book.ts",
+      "bytes": 3683,
+      "sha256": "7abffef277526cad40ba899b3976dbba9b61c40a5ea021b435941a0f7582eeef",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: image first book Exports: createImageFirstBook, imageDevelopmentPrompt."
+    },
+    {
+      "path": "lib/literary-templates.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/literary-templates.ts",
+      "bytes": 10382,
+      "sha256": "17c2f7bd628f25be686f0c9e2cce40fbc09ed9eee2ebb9d24de754e97506a09c",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: literary templates Exports: literaryTemplates, literaryReferenceUrl, isLiteraryTemplate, literaryCover, literaryCss."
+    },
+    {
+      "path": "lib/manuscript-import.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/manuscript-import.ts",
+      "bytes": 3143,
+      "sha256": "8bbd9d5534689527aa400dea6eb6beb971878b66dae77c56ae0beeda50728d70",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: manuscript import Exports: ManuscriptInspection, inspectManuscript, inspectManuscriptArchive, manuscriptRepairRequest."
+    },
+    {
+      "path": "lib/midnight-queue.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/midnight-queue.ts",
+      "bytes": 7622,
+      "sha256": "44588f266a7c1ff3e6a8904cab7be9ae3e3e463519219f93a10ba21997cbcc46",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: midnight queue Exports: editions, Edition, stages, Job, Artifact, Queue, seedQueue, inNight."
+    },
+    {
+      "path": "lib/notebook-content.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/notebook-content.ts",
+      "bytes": 912,
+      "sha256": "0e38a7572e00c8260e1362450d5cd5ecfa102f564c3c9fe37486843b31987399",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: notebook content Exports: NoteSection, parseNoteSections, notebookOriginal."
+    },
+    {
+      "path": "lib/notebook-prompt.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/notebook-prompt.ts",
+      "bytes": 22681,
+      "sha256": "914d7e0304c8d086b42a9a4e42e8f9e81791ba35be82e5ca2957012b0d6a3629",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: notebook prompt Exports: notebookRelevancePrompt, notebookArtworkRequest, notebookBookPrompt, notebookDesignPrompt."
+    },
+    {
+      "path": "lib/notebook-settings.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/notebook-settings.ts",
+      "bytes": 1209,
+      "sha256": "fc9a75d96d8de716c5396824766f0288edb68d19dbfd94b03640f781205d5362",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: notebook settings Exports: parseNotebookPageCount, notebookPageCountPrompt."
+    },
+    {
+      "path": "lib/pedagogy.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/pedagogy.ts",
+      "bytes": 36612,
+      "sha256": "d81a53e153f1df42e6dbb15f33d8fb590589c724bb4d603ec9093584581d8343",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: pedagogy Exports: TeachingVocabulary, TeachingSection, TeachingChapter, ChapterBlueprint, chapterBlueprintSchema, PedagogyScores, PedagogyQuality, ChapterEvaluation."
+    },
+    {
+      "path": "lib/publication.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/publication.ts",
+      "bytes": 7103,
+      "sha256": "4619eca5daf9f4bad208e474008e03f9b5b099d668c3ee7db6b72e47886fe681",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: publication Exports: PublicationChapter, ContentsEntry, PublicationBlocker, pdfRasterSettings, chapterRequiresIllustration, sanitizeReaderHtml, readerSafeImageCaption, sanitizeReaderImageHtml."
+    },
+    {
+      "path": "lib/render-book-review.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/render-book-review.ts",
+      "bytes": 3648,
+      "sha256": "afa745bf4d4a35537131aeb675b25465929def9efcaface9596ec288b28c7645",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: render book review Exports: renderBookReview."
+    },
+    {
+      "path": "lib/series-art.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/series-art.ts",
+      "bytes": 5713,
+      "sha256": "5951cf280808b14587d785e559619b069a77edb564cc3d5d1f0e08d458c8d913",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: series art Exports: characterStyles, CharacterOption, SeriesArt, seriesReferenceName, characterOptionName, isSeriesReference, MAX_STYLE_REFERENCES, parseSeriesArt."
+    },
+    {
+      "path": "lib/source-book-options.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/source-book-options.ts",
+      "bytes": 2601,
+      "sha256": "aeace25aa1f64fa8154824cff6d34331feabd3fc605f03b92e4bc177fbd7a4ef",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: source book options Exports: sourceImageModes, imageEnhancements, sourceImageStyles, SourceImageStyle, SourceBookOptions, normalizeSourceBookOptions."
+    },
+    {
+      "path": "lib/source-book-package.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/source-book-package.ts",
+      "bytes": 14026,
+      "sha256": "947aa6e136b30f1ad0323a6086d698608492ed6219498e5b881794197ef69e13",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: source book package Exports: SOURCE_PACKAGE_FORMAT, SourceImage, SourceVerse, SourceBookManifest, SourceArchiveAsset, parseSourceBookManifest, attachSourceBookManifest, sourceImageSlots."
+    },
+    {
+      "path": "lib/source-book-review.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/source-book-review.ts",
+      "bytes": 5158,
+      "sha256": "6bcd0151af88a3065da378b388acf2f1b7739e06c3bd502bb3f9b00fea73f667",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: source book review Exports: SourceBookReview, SourceReviewProject, normalizeVerseText, compareSourceVerse, sourceImageSignature, sourceVerseSignature, sourceReviewIssues, inspectRenderedSourceVerses."
+    },
+    {
+      "path": "lib/source-intelligence.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/source-intelligence.ts",
+      "bytes": 6814,
+      "sha256": "bb9addb7d361c691dcd8dd9fd209a37fdc6a693a4cc077e04404891e20fe9b8f",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: source intelligence Exports: SourceKind, SourceIntelligenceStatus, OutlineMode, SourceOutlineItem, SourceIntelligence, SAFE_OCR_CHUNK_BYTES, SAFE_OCR_CHUNK_PAGES, recoverOcrPageTexts."
+    },
+    {
+      "path": "lib/spread-composition.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/spread-composition.ts",
+      "bytes": 13832,
+      "sha256": "b6139370bae91ececea057452a1b40634ff34b3a5315646137704722297e5480",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: spread composition Exports: PrintFormat, CompositionLayer, SpreadComposition, CompositionAction, defaultPrintFormat, compositionFormat, layerDefaults, initialComposition."
+    },
+    {
+      "path": "lib/story-compositions.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/story-compositions.ts",
+      "bytes": 4580,
+      "sha256": "e0b5f46b0037e5aece283fc87720115d1e95f200dca1edd863c278d22c474615",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: story compositions Exports: storyCompositions, StoryComposition, storySequence, storyCompositionAt, storyCompositionPrompt, splitStoryText, storyTextBlocks, storyCompositionCss."
+    },
+    {
+      "path": "lib/story-text-placement.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/story-text-placement.ts",
+      "bytes": 6330,
+      "sha256": "4232e7d7d8f88c9fb98dc5c837534b917ba1b9fa78295313fd62caf328c67c1e",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: story text placement Exports: placeStoryText, autoPlaceStoryBook."
+    },
+    {
+      "path": "lib/storyboard.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/storyboard.ts",
+      "bytes": 10600,
+      "sha256": "ab9e400d486f0baaf1ad539e123026c477644f7106452de4fbb3d2edc31fd729",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: storyboard Exports: compositionFamilies, pageKinds, Allocation, SpreadPlan, StoryboardAction, PageAssignment, blankSpread, storyboardPages."
+    },
+    {
+      "path": "lib/template-archive.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/template-archive.ts",
+      "bytes": 2553,
+      "sha256": "723ed8cbaaa0de15792bc0e514c1f1b0f2676bde24b992f9667e6c4181668159",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: template archive Exports: readTemplateArchive."
+    },
+    {
+      "path": "lib/template-backup.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/template-backup.ts",
+      "bytes": 2188,
+      "sha256": "6b80735429a78be150bb06255f12a7589a5d35f9614c9a1bc3b2d5a262d63ac4",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: template backup Exports: accountSaveQueue, recoverDraftImages, recoverAccountImages."
+    },
+    {
+      "path": "lib/template-book.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/template-book.ts",
+      "bytes": 52983,
+      "sha256": "f57313d21f81c7f95afe7a8d47e3c83536bd48cf4a85e256aeb75a75078eeba5",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: template book Exports: templates, templateAppearanceCss, TemplateId, selectableTemplates, layouts, Layout, templateLayout, templateDesign."
+    },
+    {
+      "path": "lib/template-capacity.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/template-capacity.ts",
+      "bytes": 897,
+      "sha256": "a6ff733dccbaa4310560d7e75b73f6c0d23c861aff3635daa5eba7a35eb85070",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: template capacity Exports: MiB, BOOK_ARTWORK_BYTES, IMAGE_BYTES, ARCHIVE_BYTES, UNPACKED_BYTES, validateBookArtwork, SOURCE_BYTES, validateSourceFile."
+    },
+    {
+      "path": "lib/template-export-fonts.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/template-export-fonts.ts",
+      "bytes": 1249,
+      "sha256": "176f8bf63a86fb7a7e15739adb12cd928cbb01ff5826fe721d7b6d49745fe219",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: template export fonts Exports: prepareExportFont."
+    },
+    {
+      "path": "lib/template-layout-sample.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/template-layout-sample.ts",
+      "bytes": 4894,
+      "sha256": "0eb5e7c0b81004da8e8dad76d9e7325bc9bca5b62f639eba747468bfdd3d3c69",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: template layout sample Exports: sampleArtwork, renderLayoutSample."
+    },
+    {
+      "path": "lib/template-layouts.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/template-layouts.ts",
+      "bytes": 39686,
+      "sha256": "f7b58c760b727ef52b55a09c22861e692c358d6fc8e5695a502db6041dafd396",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: template layouts Exports: TEMPLATE_REVISION, Region, Blueprint, blueprints, legacyChalisaBlueprint, diagonalChalisaBlueprint, chalisaFullSpreadBlueprints, chalisaBlueprint."
+    },
+    {
+      "path": "lib/template-library.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/template-library.ts",
+      "bytes": 604,
+      "sha256": "afe81ff89ae8757b2092ae2a03a08b1a736a358031db3fe595a8277ca93ed90f",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: template library Exports: LibraryBook, templateLibrary."
+    },
+    {
+      "path": "lib/template-reference-assets.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/template-reference-assets.ts",
+      "bytes": 2360,
+      "sha256": "330f77bb3685bacfdc4d128b019636e433f05b87e6a2f19ed1b016b1aaa55c24",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: template reference assets Exports: referenceAssets."
+    },
+    {
+      "path": "lib/template-reference-contracts.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/template-reference-contracts.ts",
+      "bytes": 16889,
+      "sha256": "36cf6173ab8f5238e0cf96dc4b40a28e02ab86bc541465a5672c7ada7bd902a4",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: template reference contracts Exports: ReferenceContract, referenceContracts, legacyNotebookLayouts, referenceCoverage, referenceStylePrompt, referencePalette."
+    },
+    {
+      "path": "lib/template-reference-package.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/template-reference-package.ts",
+      "bytes": 7261,
+      "sha256": "2a3d576f5728352e99c6bbfd8e24dbca45159251115098160c695e81cf3eda06",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: template reference package Exports: templateReferenceEntries."
+    },
+    {
+      "path": "lib/template-sample.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/template-sample.ts",
+      "bytes": 2667,
+      "sha256": "5371d2b4d86be79cf5690f032051edc6010c73af96369e60bfd0211fa312dba6",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: template sample Exports: templateSample, renderTemplateSample."
+    },
+    {
+      "path": "lib/template-save.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/template-save.ts",
+      "bytes": 1198,
+      "sha256": "7f875dffa1fd6e21569c4d9d04ee84a6d7e0bf37071d6f5f0b4bda64af54a39f",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: template save Exports: saveWithFallback, browserSaveError."
+    },
+    {
+      "path": "lib/template-signatures.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/template-signatures.ts",
+      "bytes": 6430,
+      "sha256": "d0b7d267559a401e8002de93e157ea7a7a95a26d19de9741b020bec93a5c866b",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: template signatures Exports: signatureBlueprints."
+    },
+    {
+      "path": "lib/template-storage.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/template-storage.ts",
+      "bytes": 8854,
+      "sha256": "5afde0d3d2c406c1dc256dc8a8690d8577fc22f0ac0b8d4da2791c092db7f1b7",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: template storage Exports: Draft, requestPersistentStorage, storage, CloudBook, cloudRequest, uploadDraft, downloadDraft."
+    },
+    {
+      "path": "lib/text-backgrounds.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/text-backgrounds.ts",
+      "bytes": 4123,
+      "sha256": "069898e15de0149f096e03cb1596fd29b88fe6b6bb0fb845be6e402881b704a8",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: text backgrounds Exports: textBackgroundShapes, TextBackground, TextBackgrounds, parseTextBackgrounds, textBackgroundStyle, textBackgroundCss, applyTextBackgroundsToPages."
+    },
+    {
+      "path": "lib/text-placement.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/text-placement.ts",
+      "bytes": 2265,
+      "sha256": "dcfc92a2ef7bf2fdbf941742324e7edf18fc158c6f2c0fec3ca94f4a9f9b4a38",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: text placement Exports: parseTextPositions, moveTextBox, fitTextPositions."
+    },
+    {
+      "path": "lib/visual-direction.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/visual-direction.ts",
+      "bytes": 36001,
+      "sha256": "4fdc3ede0e4337ea5c95fe2535df433a4351cf4051049b5b25113f8e9bd9731f",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: visual direction Exports: VisualDirection, parseVisualDirection, sourceBookPrompt, sourceRequestEntries, chalisaTemplateDirection, chalisaPrompt, validateChalisaBook, chalisaAstraPrompt."
+    },
+    {
+      "path": "lib/visual-references.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/lib/visual-references.ts",
+      "bytes": 8837,
+      "sha256": "db518a029debc22a8776fdc635d00ef1cdfb203c1f6548fcae29286589d12af9",
+      "mode": "0o644",
+      "purpose": "Reusable book-processing and application logic: visual references Exports: referenceKinds, referenceViews, referenceSpecFields, ReferenceSpec, ReferenceImage, ReferenceVersion, VisualReference, ReferenceAction."
+    },
+    {
+      "path": "next.config.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/next.config.ts",
+      "bytes": 133,
+      "sha256": "614bce25b089c3f19b1e17a6346c74b858034040154c6621e7d35303004767cc",
+      "mode": "0o644",
+      "purpose": "Next.js framework settings"
+    },
+    {
+      "path": "output/pdf/iks-book-studio-workflow-map.pdf",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/output/pdf/iks-book-studio-workflow-map.pdf",
+      "bytes": 9472,
+      "sha256": "049eeae67c88a22365a54ffb0ec934fb03c0a6d9bd5213953dc8df3d6e72be4d",
+      "mode": "0o644",
+      "purpose": "Saved output/reference artifact: iks book studio workflow map"
+    },
+    {
+      "path": "package-lock.json",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/package-lock.json",
+      "bytes": 449339,
+      "sha256": "4996032e1552ed15922709b9107f3ddfd4303a168a06f0cab95227d299a0d0b4",
+      "mode": "0o644",
+      "purpose": "Exact dependency resolution for reproducible npm installs"
+    },
+    {
+      "path": "package.json",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/package.json",
+      "bytes": 1679,
+      "sha256": "f701e3d99b266985cab95933de2593ffbc05687aeb3d1118d481b4dd404b060c",
+      "mode": "0o644",
+      "purpose": "Dependency requirements and npm commands"
+    },
+    {
+      "path": "postcss.config.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/postcss.config.mjs",
+      "bytes": 94,
+      "sha256": "dfac7ac2d86d326a0e5adb024e7943c181393ed17a5fcb8f0315b24c7da6ddde",
+      "mode": "0o644",
+      "purpose": "CSS processing configuration"
+    },
+    {
+      "path": "proxy.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/proxy.ts",
+      "bytes": 659,
+      "sha256": "717c3902344bc47fdecf94b93a15a9e98617742b332eef7d04261a71dacaa9a2",
+      "mode": "0o644",
+      "purpose": "Request middleware and authentication routing Exports: config."
+    },
+    {
+      "path": "public/favicon.svg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/favicon.svg",
+      "bytes": 412,
+      "sha256": "223adb1d4b5b555f8acd34b3fb73c11ffb1c51203f80e85041f288ca6d77941b",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: favicon"
+    },
+    {
+      "path": "public/file.svg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/file.svg",
+      "bytes": 392,
+      "sha256": "1e0ae4d1a1ddfa36752988647b731e4abf150c414d069ec83c96fb0aaeff0307",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: file"
+    },
+    {
+      "path": "public/fonts/OFL-NotoSansDevanagari.txt",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/fonts/OFL-NotoSansDevanagari.txt",
+      "bytes": 4386,
+      "sha256": "a216f6f8d85c7228093e0ee5e258d9d377e6671f68acb4db1930b29583d0f331",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: OFL NotoSansDevanagari"
+    },
+    {
+      "path": "public/fonts/OFL-NotoSerifDevanagari.txt",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/fonts/OFL-NotoSerifDevanagari.txt",
+      "bytes": 4386,
+      "sha256": "a216f6f8d85c7228093e0ee5e258d9d377e6671f68acb4db1930b29583d0f331",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: OFL NotoSerifDevanagari"
+    },
+    {
+      "path": "public/fonts/OFL-PatrickHand.txt",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/fonts/OFL-PatrickHand.txt",
+      "bytes": 4376,
+      "sha256": "377f4f9c19e935228552478eb68cc2ed82910988a60ba60e2ac73b09f32d02d1",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: OFL PatrickHand"
+    },
+    {
+      "path": "public/fonts/book-hand.ttf",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/fonts/book-hand.ttf",
+      "bytes": 214772,
+      "sha256": "0f173b3e6cb6d1af25babf7f0057c5ac4ee11f9992b0469bb817e967ef4ad0fc",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: book hand"
+    },
+    {
+      "path": "public/fonts/book-sans.ttf",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/fonts/book-sans.ttf",
+      "bytes": 641944,
+      "sha256": "14ec4af41f27482216d1c2229f417ff9b1425e1babb014e57d1d40d03229853e",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: book sans"
+    },
+    {
+      "path": "public/fonts/book-sanskrit.ttf",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/fonts/book-sanskrit.ttf",
+      "bytes": 757692,
+      "sha256": "1191e07bfeb062d80e252eb85b0eafdfbda1e350707a2a60628668e8f677dbbb",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: book sanskrit"
+    },
+    {
+      "path": "public/globe.svg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/globe.svg",
+      "bytes": 1036,
+      "sha256": "d051a8c47936990a9085693d307bb7cea1bc1b6d7ed956bcbaacf674f4ec96b9",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: globe"
+    },
+    {
+      "path": "public/illustrations/concept-indian-aesthetics.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/illustrations/concept-indian-aesthetics.webp",
+      "bytes": 165674,
+      "sha256": "44b2dce295f51d9d98d248d4fefd21da054b31a5449cce8ae4e4d3a4222061fc",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: concept indian aesthetics"
+    },
+    {
+      "path": "public/illustrations/dhvani-poetics.png",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/illustrations/dhvani-poetics.png",
+      "bytes": 3230370,
+      "sha256": "1847375e7777fc63890809162298fd7f93eabea7c7fc5b7d9bfdbced115aed00",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: dhvani poetics"
+    },
+    {
+      "path": "public/illustrations/natya-performance.png",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/illustrations/natya-performance.png",
+      "bytes": 3564800,
+      "sha256": "8a57917b0ec34879943f3f2a3a2ab9ee1c78cdd9af641fd065731efaa15b979e",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: natya performance"
+    },
+    {
+      "path": "public/illustrations/origin-and-concept.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/illustrations/origin-and-concept.webp",
+      "bytes": 222284,
+      "sha256": "6d0bb1470d649d46e9b144a3242bb1d894cf0a01fab1c7dc8751b489cf1435af",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: origin and concept"
+    },
+    {
+      "path": "public/illustrations/rasa-bhava.png",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/illustrations/rasa-bhava.png",
+      "bytes": 3162351,
+      "sha256": "0bb6d7eeb59072d095e3793b7922fcb0ca2c8b6b922ca402f016c52ef2bf828a",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: rasa bhava"
+    },
+    {
+      "path": "public/illustrations/structure-and-design.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/illustrations/structure-and-design.webp",
+      "bytes": 240732,
+      "sha256": "d79c5b7ec5557f9ed7f6c3c663ebe3f5587f76aa31e4f33cc1e76734c9f962e5",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: structure and design"
+    },
+    {
+      "path": "public/pilot/gita/composite.jpg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/pilot/gita/composite.jpg",
+      "bytes": 2137205,
+      "sha256": "6e7127ecf5a095b2e1973d4e73db997d0b0b8d3424f5d7e2c2614a9a732c4e82",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: composite"
+    },
+    {
+      "path": "public/pilot/gita/credits.json",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/pilot/gita/credits.json",
+      "bytes": 1075,
+      "sha256": "c12c2f4aeb6aaa7898ff0e6e9d7ffefdab62ad45fd6f466cf961cf61f8fd963e",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: credits"
+    },
+    {
+      "path": "public/pilot/gita/journey.jpg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/pilot/gita/journey.jpg",
+      "bytes": 7041281,
+      "sha256": "d5ebc51849cd559e1806c67101e4f2c1bb7ecb367e91ccf83655b4953cf174c7",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: journey"
+    },
+    {
+      "path": "public/pilot/gita/lamp.jpg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/pilot/gita/lamp.jpg",
+      "bytes": 153394,
+      "sha256": "1876aa5395b02c505daaeade55357c6576bbedacd72484c22ca611e9ac767e07",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: lamp"
+    },
+    {
+      "path": "public/templates/living-atlas.png",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/living-atlas.png",
+      "bytes": 2215507,
+      "sha256": "8f3329883ebe6a5ce0ac24e39756a244af817c502d7630883f8dc9cb6f53e4e3",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: living atlas"
+    },
+    {
+      "path": "public/templates/references/ATTRIBUTION.json",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/ATTRIBUTION.json",
+      "bytes": 5703,
+      "sha256": "7d6b81ed8d1f07581db2d8d7fe2e0950414fa2c574d588aebf25149bd48f0548",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: ATTRIBUTION"
+    },
+    {
+      "path": "public/templates/references/beanstalk-adventure-1.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/beanstalk-adventure-1.webp",
+      "bytes": 155950,
+      "sha256": "a4a120abde2b8d94647280a163405eabd31be037b149dab7efde74209ba3c649",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: beanstalk adventure 1"
+    },
+    {
+      "path": "public/templates/references/beanstalk-adventure-2.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/beanstalk-adventure-2.webp",
+      "bytes": 173246,
+      "sha256": "0276d81325724cbf1d643272b55a4a9d80ce64cc7d25f5fffc27cdbee6c80b81",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: beanstalk adventure 2"
+    },
+    {
+      "path": "public/templates/references/beanstalk-adventure-3.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/beanstalk-adventure-3.webp",
+      "bytes": 240796,
+      "sha256": "637cc357ba7dd69ee9a47f3adf4a5fb84f0b0ad40feb3ba62d35b308bd7f074c",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: beanstalk adventure 3"
+    },
+    {
+      "path": "public/templates/references/beanstalk-adventure-4.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/beanstalk-adventure-4.webp",
+      "bytes": 260812,
+      "sha256": "290f1863d0b38f01e30c3feee7767e9587727ad8418fc37564b9b560f1562260",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: beanstalk adventure 4"
+    },
+    {
+      "path": "public/templates/references/bedtime-play-1.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/bedtime-play-1.webp",
+      "bytes": 294066,
+      "sha256": "f340da2a54ffbd9ef78e29336c33b9c8f62897e7c55ca71c163136f7d1c90a0f",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: bedtime play 1"
+    },
+    {
+      "path": "public/templates/references/bedtime-play-2.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/bedtime-play-2.webp",
+      "bytes": 220674,
+      "sha256": "351914c98d71f778adab24b6d56db7be7b439db4bbda765a2c335ee7996c9c8e",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: bedtime play 2"
+    },
+    {
+      "path": "public/templates/references/bedtime-play-3.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/bedtime-play-3.webp",
+      "bytes": 276616,
+      "sha256": "cd1a2f2ddf46525ca057bb931d2a1606eb677a1df53d4dec970fef70be5c9fa3",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: bedtime play 3"
+    },
+    {
+      "path": "public/templates/references/bedtime-skies-1.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/bedtime-skies-1.webp",
+      "bytes": 169656,
+      "sha256": "6b2ec601da2eb4588e7900d9f32b1fca2514de8bfff60bfc85316341bf6fa36a",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: bedtime skies 1"
+    },
+    {
+      "path": "public/templates/references/bedtime-skies-2.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/bedtime-skies-2.webp",
+      "bytes": 305144,
+      "sha256": "37df4d71b7bd77fe37a1ac708bffce318024a1ddf5678a766772d9e8a07952a6",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: bedtime skies 2"
+    },
+    {
+      "path": "public/templates/references/bedtime-skies-3.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/bedtime-skies-3.webp",
+      "bytes": 235614,
+      "sha256": "1cb5b732dbc5cf72c4af5064a4a91463f38722a774cce67826fc9d9be2fd8e0a",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: bedtime skies 3"
+    },
+    {
+      "path": "public/templates/references/chalisa-approved/approved-compassion-art.png",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-approved/approved-compassion-art.png",
+      "bytes": 2324514,
+      "sha256": "962d501c4a2b52285844a757e1f445337fb8c0955bf160fbf17f3d7753b3fff7",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: approved compassion art"
+    },
+    {
+      "path": "public/templates/references/chalisa-approved/approved-compassion-spread.png",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-approved/approved-compassion-spread.png",
+      "bytes": 2191896,
+      "sha256": "22595737573d11edd650f05a16111808179593aac4ec20ead4da3d6eaf031d8e",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: approved compassion spread"
+    },
+    {
+      "path": "public/templates/references/chalisa-approved/approved-gauri-art.png",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-approved/approved-gauri-art.png",
+      "bytes": 2187789,
+      "sha256": "64a61342585312a7d57e8fad8842c42e0843861f9d852e624c61d41ef2930e88",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: approved gauri art"
+    },
+    {
+      "path": "public/templates/references/chalisa-approved/approved-gauri-spread.png",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-approved/approved-gauri-spread.png",
+      "bytes": 2059176,
+      "sha256": "5cf2553ff2d4dc097e88f54c24b8475d35d3cc13351db59f3f65db66cd5af8ae",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: approved gauri spread"
+    },
+    {
+      "path": "public/templates/references/chalisa-approved/approved-lakshmi-art.png",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-approved/approved-lakshmi-art.png",
+      "bytes": 2155757,
+      "sha256": "5dacee90fa7dbc8b4f1140ecf7403e01f9f86a578adc1b6ecfcedc8a936fd8f6",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: approved lakshmi art"
+    },
+    {
+      "path": "public/templates/references/chalisa-approved/approved-lakshmi-spread.png",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-approved/approved-lakshmi-spread.png",
+      "bytes": 2152399,
+      "sha256": "d0ef30998ba4eb110e2838026dcfdbd74d2d6720645bc74b091d5a26f101d34b",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: approved lakshmi spread"
+    },
+    {
+      "path": "public/templates/references/chalisa-approved/cloud-left.png",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-approved/cloud-left.png",
+      "bytes": 2225366,
+      "sha256": "f3f4fada3a4353756632cc6f2f9a21cb10d90a99aeb057416927dd37b35b85a8",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: cloud left"
+    },
+    {
+      "path": "public/templates/references/chalisa-approved/cloud-right.png",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-approved/cloud-right.png",
+      "bytes": 2093389,
+      "sha256": "56e6b0b66d3866f64455925d439f79d9a088dbd2c7adc8ad62ad80b983f48231",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: cloud right"
+    },
+    {
+      "path": "public/templates/references/chalisa-series-v14/DURGA-V14-MASTER-REFERENCE.md",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-series-v14/DURGA-V14-MASTER-REFERENCE.md",
+      "bytes": 66204,
+      "sha256": "3d557916c989774f86c2e97f6cca72d7747436d7213e1448a6091356676adf2e",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: DURGA V14 MASTER REFERENCE Title: Durga v14 \u2014 master reference for future Chalisa books."
+    },
+    {
+      "path": "public/templates/references/chalisa-series-v14/REFERENCE-STUDY.txt",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-series-v14/REFERENCE-STUDY.txt",
+      "bytes": 7504,
+      "sha256": "d0aa0823ad832bad7be17c04a03f2f269433b2ef1055e6f475409a9f768e9eeb",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: REFERENCE STUDY"
+    },
+    {
+      "path": "public/templates/references/chalisa-series-v14/back-cover.jpg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-series-v14/back-cover.jpg",
+      "bytes": 313310,
+      "sha256": "b61998df418fb85e4a87d610ff4c1e8bb6704cce9583793eab0bfef55a7ad9e4",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: back cover"
+    },
+    {
+      "path": "public/templates/references/chalisa-series-v14/cloud-original-soft-mask.png",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-series-v14/cloud-original-soft-mask.png",
+      "bytes": 4801880,
+      "sha256": "f7c8ce8aaeb3b82a1ee003b9c8ca28cc537c434bfee6b63df34bb61b2b057d70",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: cloud original soft mask"
+    },
+    {
+      "path": "public/templates/references/chalisa-series-v14/compassion-spread.jpg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-series-v14/compassion-spread.jpg",
+      "bytes": 624434,
+      "sha256": "7abc9e1dacb3bba5cb298cf5000e03fc60cdfda7a792c113792ed972c3d90ba4",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: compassion spread"
+    },
+    {
+      "path": "public/templates/references/chalisa-series-v14/courage-spread.jpg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-series-v14/courage-spread.jpg",
+      "bytes": 592781,
+      "sha256": "b3a05a585d16d16612851c2b0ea0bf0c1774a1300853c3d97d23bccb233246ce",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: courage spread"
+    },
+    {
+      "path": "public/templates/references/chalisa-series-v14/devotion-spread.jpg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-series-v14/devotion-spread.jpg",
+      "bytes": 589219,
+      "sha256": "3b3302bcb2c31b570d944bba13e9a094263a276ffa0f6d6046139c77e6203d0a",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: devotion spread"
+    },
+    {
+      "path": "public/templates/references/chalisa-series-v14/editorial-examples.json",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-series-v14/editorial-examples.json",
+      "bytes": 10068,
+      "sha256": "1e34cb40842a0cb89dd22b3cbf855bcc831a924ea15fd2e8df0fb8c420bf8269",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: editorial examples"
+    },
+    {
+      "path": "public/templates/references/chalisa-series-v14/front-cover.jpg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-series-v14/front-cover.jpg",
+      "bytes": 417260,
+      "sha256": "ba087fe961cc8b663f0c838a7f6bbeb0546af653ca224b0ffb6bf4c0b37e2a46",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: front cover"
+    },
+    {
+      "path": "public/templates/references/chalisa-series-v14/glossary.jpg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-series-v14/glossary.jpg",
+      "bytes": 107660,
+      "sha256": "a38df408ac73e349c74ad2eed52a8f71a560dacd9eba6a1554de3ecf876fd71a",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: glossary"
+    },
+    {
+      "path": "public/templates/references/chalisa-series-v14/how-to-read.jpg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-series-v14/how-to-read.jpg",
+      "bytes": 172454,
+      "sha256": "bc3ae6f81caf6e06988d37e88ebb8ddf27f7571444b8d0cc2cc553855708e39c",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: how to read"
+    },
+    {
+      "path": "public/templates/references/chalisa-series-v14/introduction.jpg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-series-v14/introduction.jpg",
+      "bytes": 256960,
+      "sha256": "49c49e5e3a8bb52d41131d074c91a980cdc3780b61e1fb9035c347ad5dab6ad8",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: introduction"
+    },
+    {
+      "path": "public/templates/references/chalisa-series-v14/many-forms-spread.jpg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-series-v14/many-forms-spread.jpg",
+      "bytes": 738960,
+      "sha256": "c27ef73e15c910adc262440c36d2c156110a04f57484389e0489f337449aae46",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: many forms spread"
+    },
+    {
+      "path": "public/templates/references/chalisa-series-v14/provenance.json",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-series-v14/provenance.json",
+      "bytes": 685,
+      "sha256": "b8217992e2ac769a3a70689b513189bd902f1bb1ba99dd2193cf5420bc08b6d6",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: provenance"
+    },
+    {
+      "path": "public/templates/references/chalisa-series-v14/saraswati-spread.jpg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-series-v14/saraswati-spread.jpg",
+      "bytes": 699680,
+      "sha256": "876334c5db56a7a6ec8a899e02e6883e07ad47d4f7bf22b8cd84da8120fbecfb",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: saraswati spread"
+    },
+    {
+      "path": "public/templates/references/chalisa-series-v14/shiva-spread.jpg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-series-v14/shiva-spread.jpg",
+      "bytes": 578522,
+      "sha256": "895fb13543c0a0c46c230c78c651be52f8410f1c90221497ead4c8ca2a1f397e",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: shiva spread"
+    },
+    {
+      "path": "public/templates/references/chalisa-series-v14/title-page.jpg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-series-v14/title-page.jpg",
+      "bytes": 38041,
+      "sha256": "48aa7b92fc2091c0d1141d23cf97d074f0c64c388c360fbe49cadeb62b3ff437",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: title page"
+    },
+    {
+      "path": "public/templates/references/chalisa-series-v14/vishnu-lakshmi-spread.jpg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/chalisa-series-v14/vishnu-lakshmi-spread.jpg",
+      "bytes": 660751,
+      "sha256": "43c4fbb0c187623ce62a419183320500fed6f2139a9b62ad6e6e3f4f12b60df1",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: vishnu lakshmi spread"
+    },
+    {
+      "path": "public/templates/references/colourful-journey-1.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/colourful-journey-1.webp",
+      "bytes": 291570,
+      "sha256": "0b081acc4675fe01646d7d1fbe114dc3aadb570daa9d4e46e137f7c7e3b7de81",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: colourful journey 1"
+    },
+    {
+      "path": "public/templates/references/colourful-journey-2.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/colourful-journey-2.webp",
+      "bytes": 303702,
+      "sha256": "87b9e63d8ff4b712675e0c4912b6e478e7c5e9fabaf653f1bb11f46d01a4dfd1",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: colourful journey 2"
+    },
+    {
+      "path": "public/templates/references/colourful-journey-3.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/colourful-journey-3.webp",
+      "bytes": 347800,
+      "sha256": "e477cc7e68823103f1fffece5e3bd239b8fd9bc3198772bafa6aee70bea2554f",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: colourful journey 3"
+    },
+    {
+      "path": "public/templates/references/flower-festival-1.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/flower-festival-1.webp",
+      "bytes": 206472,
+      "sha256": "6aa42f1db88cc35dd4df3c770247de57439a1baa721b10a197a4bd7124721f45",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: flower festival 1"
+    },
+    {
+      "path": "public/templates/references/flower-festival-2.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/flower-festival-2.webp",
+      "bytes": 232692,
+      "sha256": "6535d4e3c0b913322cdb886bc328620e06c0da2c341c157cd7e6f033b1d9ee9f",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: flower festival 2"
+    },
+    {
+      "path": "public/templates/references/flower-festival-3.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/flower-festival-3.webp",
+      "bytes": 129768,
+      "sha256": "e33cb1a90ad6cd8e742d249fb2dab3c7562b5bfb71de35a3293d1428103617f2",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: flower festival 3"
+    },
+    {
+      "path": "public/templates/references/flower-festival-4.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/flower-festival-4.webp",
+      "bytes": 141264,
+      "sha256": "473084f6bd96be004b5cc2b65b1ea1cd62eb170e60bfbafb8b38d38d9991494c",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: flower festival 4"
+    },
+    {
+      "path": "public/templates/references/iks-notes/reference-1.jpg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/iks-notes/reference-1.jpg",
+      "bytes": 501575,
+      "sha256": "c2e482ea8a307695c991ebd0470bddce7e5f0223ffead242cfe63ec93ddbf92d",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: reference 1"
+    },
+    {
+      "path": "public/templates/references/iks-notes/reference-2.jpg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/iks-notes/reference-2.jpg",
+      "bytes": 480055,
+      "sha256": "155231ec09aa4606c8003d44e6a5507bb3db1c27863bf4c16f152e37a2578e17",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: reference 2"
+    },
+    {
+      "path": "public/templates/references/little-explorers-1.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/little-explorers-1.webp",
+      "bytes": 239996,
+      "sha256": "c4bf37f4d48a0f240badca7a7029622a25a401bca57f0ca5fe3ce03545cf31a1",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: little explorers 1"
+    },
+    {
+      "path": "public/templates/references/little-explorers-2.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/little-explorers-2.webp",
+      "bytes": 186930,
+      "sha256": "a2be99e0beded8734afada61b5ace8ac03b4a23af88216394733053b4535a7cd",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: little explorers 2"
+    },
+    {
+      "path": "public/templates/references/painted-memories-1.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/painted-memories-1.webp",
+      "bytes": 136294,
+      "sha256": "f965440faeac49999c6223f9fedef59eed5709736cfde12ffa72c9b39620f910",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: painted memories 1"
+    },
+    {
+      "path": "public/templates/references/painted-memories-2.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/painted-memories-2.webp",
+      "bytes": 159666,
+      "sha256": "0144a925e11419d076561ad33cb81e4d06d9e3825e8d5196696c67aeb4a990be",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: painted memories 2"
+    },
+    {
+      "path": "public/templates/references/painted-memories-3.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/painted-memories-3.webp",
+      "bytes": 258110,
+      "sha256": "b8c549267e0653c908e9d5cb905714198b7c0b5dd5841bb80696eb794de2054a",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: painted memories 3"
+    },
+    {
+      "path": "public/templates/references/paper-play-1.jpg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/paper-play-1.jpg",
+      "bytes": 25403,
+      "sha256": "4f653632c31b437b5e1de910327903b369fdbd501698c474c2fe7a759cc478a2",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: paper play 1"
+    },
+    {
+      "path": "public/templates/references/snowy-friends-1.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/snowy-friends-1.webp",
+      "bytes": 282026,
+      "sha256": "d313c106f8ba36369ee28d0e77e8f26b913b1bab844b452b5c6fbed9536a03ab",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: snowy friends 1"
+    },
+    {
+      "path": "public/templates/references/snowy-friends-2.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/snowy-friends-2.webp",
+      "bytes": 315474,
+      "sha256": "0c486f5d2413a8fc6a21445fe59ccee29516e3791d9ec126365287d89d2cfe8e",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: snowy friends 2"
+    },
+    {
+      "path": "public/templates/references/snowy-friends-3.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/snowy-friends-3.webp",
+      "bytes": 298444,
+      "sha256": "3758f6964e8eb930f8c245073f85ca7b0538a58798e49b8a1013420a9c812a56",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: snowy friends 3"
+    },
+    {
+      "path": "public/templates/references/treehouse-days-1.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/treehouse-days-1.webp",
+      "bytes": 323630,
+      "sha256": "d99a99717b1413d63c7a71db6679b04f4ec4a2ec70eda7e798658f3c9f0b505d",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: treehouse days 1"
+    },
+    {
+      "path": "public/templates/references/treehouse-days-2.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/treehouse-days-2.webp",
+      "bytes": 166362,
+      "sha256": "70ca5caa86fdaa4dfe5a8f5db89e4842bd815379177707df016afae6cee50628",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: treehouse days 2"
+    },
+    {
+      "path": "public/templates/references/treehouse-days-3.webp",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/templates/references/treehouse-days-3.webp",
+      "bytes": 276956,
+      "sha256": "ff66692a9d90e94dd74cc3bf9c93b59e4b61390a543b7b89ef87afab24f8bf5a",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: treehouse days 3"
+    },
+    {
+      "path": "public/window.svg",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/public/window.svg",
+      "bytes": 386,
+      "sha256": "decf1cf7bb22b5c99c4857cfcd5718ce5465c4454166317589c83fc73df74b66",
+      "mode": "0o644",
+      "purpose": "Static artwork or browser-served asset: window"
+    },
+    {
+      "path": "scripts/build-verified.sh",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/build-verified.sh",
+      "bytes": 699,
+      "sha256": "f7d8b0b181010ed37633337442115ca282cfdc8f9b0b58db347d7f4e83251b35",
+      "mode": "0o755",
+      "purpose": "Development, build or validation automation: build verified"
+    },
+    {
+      "path": "scripts/install-ci.sh",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/install-ci.sh",
+      "bytes": 6326,
+      "sha256": "f63e840679ca885f206d17b7f8285199bb6bcd47ebc360008d04d16b8e54f63c",
+      "mode": "0o755",
+      "purpose": "Development, build or validation automation: install ci"
+    },
+    {
+      "path": "scripts/midnight-client.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/midnight-client.mjs",
+      "bytes": 3670,
+      "sha256": "6e1b8f89b7a991fb01777d7990b11cc57e07a7bbb2e892053f69d10b9784f449",
+      "mode": "0o644",
+      "purpose": "Development, build or validation automation: midnight client"
+    },
+    {
+      "path": "scripts/sites-env.sh",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/sites-env.sh",
+      "bytes": 1530,
+      "sha256": "df86ebfc27d2f00860036658e933ac0ddd7b5f6879aa5d51218f0863c7e1fb60",
+      "mode": "0o755",
+      "purpose": "Development, build or validation automation: sites env"
+    },
+    {
+      "path": "scripts/validate-artifact.sh",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/validate-artifact.sh",
+      "bytes": 1220,
+      "sha256": "826354a781d909a664342b6a6f1a3155529e21f757dc163befa937420c713c2b",
+      "mode": "0o755",
+      "purpose": "Development, build or validation automation: validate artifact"
+    },
+    {
+      "path": "scripts/verify-account-backup.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/verify-account-backup.mjs",
+      "bytes": 5428,
+      "sha256": "2d8e72ab23d0162d2f30bd442aa630d1bb82e4c326b1c7fdce327ee992767bcc",
+      "mode": "0o644",
+      "purpose": "Development, build or validation automation: verify account backup"
+    },
+    {
+      "path": "scripts/verify-art-direction-api.py",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/verify-art-direction-api.py",
+      "bytes": 3304,
+      "sha256": "5b3e824ef13d3e3440c376167978ca18be87e7cd5b97b1121a6e1ab3bde966ce",
+      "mode": "0o644",
+      "purpose": "Development, build or validation automation: verify art direction api"
+    },
+    {
+      "path": "scripts/verify-art-production-api.py",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/verify-art-production-api.py",
+      "bytes": 5177,
+      "sha256": "e97f70e6b35987bbbe54e840f32c0bb45ff2bcc9bf6f71b1eb8ce630669696c5",
+      "mode": "0o644",
+      "purpose": "Development, build or validation automation: verify art production api"
+    },
+    {
+      "path": "scripts/verify-as-is-download.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/verify-as-is-download.mjs",
+      "bytes": 2128,
+      "sha256": "82470e18a21331780d44319efe85f52608d3fedfa98c045188fb0c3eb8fc600c",
+      "mode": "0o644",
+      "purpose": "Development, build or validation automation: verify as is download"
+    },
+    {
+      "path": "scripts/verify-book-persistence.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/verify-book-persistence.mjs",
+      "bytes": 1931,
+      "sha256": "9781a4cf99ff8371859fd44f9b747c1f7fdd120dcab876e1e51decfb7b3dc381",
+      "mode": "0o644",
+      "purpose": "Development, build or validation automation: verify book persistence"
+    },
+    {
+      "path": "scripts/verify-book-production-api.py",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/verify-book-production-api.py",
+      "bytes": 4739,
+      "sha256": "9697e5cf8035a35a51022c762790b816190cad070e5e095fd9e0d0e3eed8ad2d",
+      "mode": "0o644",
+      "purpose": "Development, build or validation automation: verify book production api"
+    },
+    {
+      "path": "scripts/verify-book-release-api.py",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/verify-book-release-api.py",
+      "bytes": 8059,
+      "sha256": "65abfe55b66c54e1a2ff4c3d9416b6e4865b1e2e89b245d7c24307867a3501b8",
+      "mode": "0o644",
+      "purpose": "Development, build or validation automation: verify book release api"
+    },
+    {
+      "path": "scripts/verify-book-review-api.py",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/verify-book-review-api.py",
+      "bytes": 5642,
+      "sha256": "690f14ec089a0557011c1120170163751f60a8274134c58dbc3aff0c33d4ef4c",
+      "mode": "0o644",
+      "purpose": "Development, build or validation automation: verify book review api"
+    },
+    {
+      "path": "scripts/verify-cloud-signin.sh",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/verify-cloud-signin.sh",
+      "bytes": 573,
+      "sha256": "5bc4f3e026cf7e89090909cf8045a98a1035d32541da250e585b0b10f565f95a",
+      "mode": "0o644",
+      "purpose": "Development, build or validation automation: verify cloud signin"
+    },
+    {
+      "path": "scripts/verify-composition-api.py",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/verify-composition-api.py",
+      "bytes": 2969,
+      "sha256": "6e50a8f451c323dcd265effd9a3b8d362e1448dabaac88422f975a465417377a",
+      "mode": "0o644",
+      "purpose": "Development, build or validation automation: verify composition api"
+    },
+    {
+      "path": "scripts/verify-edition-api.py",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/verify-edition-api.py",
+      "bytes": 3645,
+      "sha256": "1f2eaf180e928b28f7a811945119090cc00ba7a4ebcfeb36ab06ebc5f536e2e5",
+      "mode": "0o644",
+      "purpose": "Development, build or validation automation: verify edition api"
+    },
+    {
+      "path": "scripts/verify-notebook-fidelity.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/verify-notebook-fidelity.mjs",
+      "bytes": 2806,
+      "sha256": "fc72ef08b36a81ce3141ffb40073725848db083be9bab8fe307ca87cc8776f6e",
+      "mode": "0o644",
+      "purpose": "Development, build or validation automation: verify notebook fidelity"
+    },
+    {
+      "path": "scripts/verify-notebook-settings.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/verify-notebook-settings.mjs",
+      "bytes": 3214,
+      "sha256": "3b5b14965f7bc4c96fda06e363c75f026546a80316429b87cd39bdba4a205982",
+      "mode": "0o644",
+      "purpose": "Development, build or validation automation: verify notebook settings"
+    },
+    {
+      "path": "scripts/verify-reference-samples.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/verify-reference-samples.mjs",
+      "bytes": 1245,
+      "sha256": "91248cc77a9162cb67f30aead4ea98f261b9091cf43916dbc5d247fc8684a1fb",
+      "mode": "0o644",
+      "purpose": "Development, build or validation automation: verify reference samples"
+    },
+    {
+      "path": "scripts/verify-storyboard-api.py",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/verify-storyboard-api.py",
+      "bytes": 2475,
+      "sha256": "cd73e0e075aa019c406420cedf19d5da8751ae81c61d193fe49577c7558c6dea",
+      "mode": "0o644",
+      "purpose": "Development, build or validation automation: verify storyboard api"
+    },
+    {
+      "path": "scripts/verify-template-layouts.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/verify-template-layouts.mjs",
+      "bytes": 7539,
+      "sha256": "1ad204e6a60929eeb8edf5a6f2d06306ff6130747eb4702d4fc50038a2ea99e6",
+      "mode": "0o644",
+      "purpose": "Development, build or validation automation: verify template layouts"
+    },
+    {
+      "path": "scripts/verify-text-fit.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/verify-text-fit.mjs",
+      "bytes": 1785,
+      "sha256": "c70a15a4a31eecdfbc34956514f7a67a604698673918b54c939886ea876a4322",
+      "mode": "0o644",
+      "purpose": "Development, build or validation automation: verify text fit"
+    },
+    {
+      "path": "scripts/verify-visual-reference-api.py",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/scripts/verify-visual-reference-api.py",
+      "bytes": 5125,
+      "sha256": "2efb2f5d8f260e2116792dfbf370b9ddbab0392a7a709b724925dcc74c9ec679",
+      "mode": "0o644",
+      "purpose": "Development, build or validation automation: verify visual reference api"
+    },
+    {
+      "path": "tests/adaptation-page-planning.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/adaptation-page-planning.test.mjs",
+      "bytes": 4192,
+      "sha256": "db8c58e55ce11f37e8b03660f6748a67cd23f0ec225e71fe0f81150616540bb0",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: adaptation page planning.test"
+    },
+    {
+      "path": "tests/art-direction.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/art-direction.test.mjs",
+      "bytes": 5339,
+      "sha256": "2cde184c929a04844ba9077cf275cbb9a0dca6f1c35bff02b441fb06dda0216f",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: art direction.test"
+    },
+    {
+      "path": "tests/art-production.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/art-production.test.mjs",
+      "bytes": 5507,
+      "sha256": "f7bb42eeb425e90f9166d3154f4f7afd3cc2b80d466472a96423b9be86fa981c",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: art production.test"
+    },
+    {
+      "path": "tests/authorial-reader-workflow.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/authorial-reader-workflow.test.mjs",
+      "bytes": 4399,
+      "sha256": "5fe4d238a3cee67fb0ab043f119f8d5e79f4817147851ec53503cced862c8c5b",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: authorial reader workflow.test"
+    },
+    {
+      "path": "tests/book-borders.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/book-borders.test.mjs",
+      "bytes": 2296,
+      "sha256": "b512bc7d0cff439a0a0fed7d30e1781ebcff8c1091b421bd392603186d8bde9b",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: book borders.test"
+    },
+    {
+      "path": "tests/book-completion.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/book-completion.test.mjs",
+      "bytes": 6266,
+      "sha256": "081e70d6ee09ef83c68c0d3b21720c358aca9acc1fe44d519b7394161e5a52b2",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: book completion.test"
+    },
+    {
+      "path": "tests/book-export.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/book-export.test.mjs",
+      "bytes": 4138,
+      "sha256": "6ec12fc824d794cc110586e69502f56dc9e4994f62a6b1cfe1fb88b72224e602",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: book export.test"
+    },
+    {
+      "path": "tests/book-format.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/book-format.test.mjs",
+      "bytes": 3155,
+      "sha256": "9b4ca6921b8de708b39e487ae23ef524aff4371973c86cfd8d36101a498f50f7",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: book format.test"
+    },
+    {
+      "path": "tests/book-inspiration.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/book-inspiration.test.mjs",
+      "bytes": 4427,
+      "sha256": "efebf1f0f7af6dc021f308eac3cf776e27ac4192df590c56c1fd898dc26f8c64",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: book inspiration.test"
+    },
+    {
+      "path": "tests/book-package-import.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/book-package-import.test.mjs",
+      "bytes": 3597,
+      "sha256": "89766f60777583ad39ca786adf2acfce4d7b7ba87002ce9ba42bd497fc7356bf",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: book package import.test"
+    },
+    {
+      "path": "tests/book-persona.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/book-persona.test.mjs",
+      "bytes": 2098,
+      "sha256": "cf5ff7faac47d6242c792cd046726716f5ad535aababec41ea9c1843b761f460",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: book persona.test"
+    },
+    {
+      "path": "tests/book-production.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/book-production.test.mjs",
+      "bytes": 7825,
+      "sha256": "08b1152ee4f0045f3b76396016bef2d2e13f831ddd8ecc461693d33ba78465d9",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: book production.test"
+    },
+    {
+      "path": "tests/book-review.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/book-review.test.mjs",
+      "bytes": 6240,
+      "sha256": "24a7c2a7a546e9ab3c632c74e30e2522a34d04c90fa761a723680203eafeaa34",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: book review.test"
+    },
+    {
+      "path": "tests/book-typography.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/book-typography.test.mjs",
+      "bytes": 3115,
+      "sha256": "d1c3ba4ee162e5ce1de90a7c40b368becf5b15ab4395bab49a84244bdc71bdff",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: book typography.test"
+    },
+    {
+      "path": "tests/browser/book-import.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/browser/book-import.test.mjs",
+      "bytes": 13655,
+      "sha256": "8f58d0559e57c87089344c691d3485c4ae829597026d55df80eda1d80c17dd9b",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: book import.test"
+    },
+    {
+      "path": "tests/browser/book-layout.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/browser/book-layout.test.mjs",
+      "bytes": 16165,
+      "sha256": "4c18033e3dd030c02621a0ef9c5caf5dc9c34819c7c397fa2b7de1767bfbcf9c",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: book layout.test"
+    },
+    {
+      "path": "tests/browser/book-raster.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/browser/book-raster.test.mjs",
+      "bytes": 4804,
+      "sha256": "d03005cc285e09452f7ff61cd33279b5bee7ced63d3d074ebb9298340fac4c03",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: book raster.test"
+    },
+    {
+      "path": "tests/browser/book-regressions.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/browser/book-regressions.test.mjs",
+      "bytes": 10095,
+      "sha256": "6aeae5743495f81090724018130b01134e3277bdcd327adfe615182e84f3b14a",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: book regressions.test"
+    },
+    {
+      "path": "tests/browser/book-workflow.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/browser/book-workflow.test.mjs",
+      "bytes": 6477,
+      "sha256": "04ceddce2fa2c1ddba931590a149a5a08958ecf43bd49a880ee0d7b0a9e8848c",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: book workflow.test"
+    },
+    {
+      "path": "tests/browser/chalisa-single-spread.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/browser/chalisa-single-spread.test.mjs",
+      "bytes": 11133,
+      "sha256": "eb29b42b540f7c4b3f886b3e459ae50ba188041872a17ffa4b94d1f0b20b18f0",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: chalisa single spread.test"
+    },
+    {
+      "path": "tests/browser/chalisa-workflow.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/browser/chalisa-workflow.test.mjs",
+      "bytes": 11967,
+      "sha256": "cc70d198f377cbf4e79e080fafd21e86d5e4a0fd74712d3e9bc4e96f6278a115",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: chalisa workflow.test"
+    },
+    {
+      "path": "tests/browser/chatgpt-handoff.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/browser/chatgpt-handoff.test.mjs",
+      "bytes": 7067,
+      "sha256": "7b9f2918bbf10ab0d05deaa7d2319af8d9a9c187209a8c97be90540a5c293f7a",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: chatgpt handoff.test"
+    },
+    {
+      "path": "tests/browser/image-first-book.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/browser/image-first-book.test.mjs",
+      "bytes": 4809,
+      "sha256": "d2711b31aef950191dd99f5cd8f513173a410f6d5997d79a0c3c44b6d670d205",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: image first book.test"
+    },
+    {
+      "path": "tests/browser/notebook-mode.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/browser/notebook-mode.test.mjs",
+      "bytes": 1561,
+      "sha256": "63c2378d33a41374ad732603bb27f02bf48d0f8304a8dcc98735214b4c581a7f",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: notebook mode.test"
+    },
+    {
+      "path": "tests/browser/story-text-placement.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/browser/story-text-placement.test.mjs",
+      "bytes": 9801,
+      "sha256": "95627a82fa84d8f74592bcd4570ebec777abffc12d3c9640157807e350f71c69",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: story text placement.test"
+    },
+    {
+      "path": "tests/browser/visual-direction.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/browser/visual-direction.test.mjs",
+      "bytes": 4933,
+      "sha256": "eff472e402ac41b7af30dbbef38f56cd96205a549e160baa8d2d74a849316fd0",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: visual direction.test"
+    },
+    {
+      "path": "tests/canva-presentation.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/canva-presentation.test.mjs",
+      "bytes": 2298,
+      "sha256": "3bd9479c1134860cc33b6511d7f083bc43c834c0df28e2e4103c407fe3d18be1",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: canva presentation.test"
+    },
+    {
+      "path": "tests/catalogue-handoff.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/catalogue-handoff.test.mjs",
+      "bytes": 2889,
+      "sha256": "5e795fadf445baa390805e15504743e341bf96a6df0ac2d5ddac186a5168c853",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: catalogue handoff.test"
+    },
+    {
+      "path": "tests/chalisa-astra.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/chalisa-astra.test.mjs",
+      "bytes": 2904,
+      "sha256": "e5ce70863932e3ebfd9dadef5948a95cb982cbff2a4bf2c9880a90b4d7d90307",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: chalisa astra.test"
+    },
+    {
+      "path": "tests/chalisa-editions.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/chalisa-editions.test.mjs",
+      "bytes": 4698,
+      "sha256": "904ad86043beedc9a81f077f0ecab2dc930b1161ac153dfb3b0529aa050c551f",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: chalisa editions.test"
+    },
+    {
+      "path": "tests/chalisa-editorial.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/chalisa-editorial.test.mjs",
+      "bytes": 2744,
+      "sha256": "7c7838a73a5b2f0c05b98952ad7fd1dc3adb7fe7bd66e723ad01a086f7824f84",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: chalisa editorial.test"
+    },
+    {
+      "path": "tests/chalisa-facing-pages.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/chalisa-facing-pages.test.mjs",
+      "bytes": 6739,
+      "sha256": "4fe70af357e76dc7862b7125846366a137e2717daf91c1b9ea50f6b17340bb6e",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: chalisa facing pages.test"
+    },
+    {
+      "path": "tests/chalisa-publisher-review.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/chalisa-publisher-review.test.mjs",
+      "bytes": 4206,
+      "sha256": "96996cb9e11edb306394b40cfb74ef12d255b43b15582530edb7ab8e8e421d79",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: chalisa publisher review.test"
+    },
+    {
+      "path": "tests/chalisa-single-spread.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/chalisa-single-spread.test.mjs",
+      "bytes": 5280,
+      "sha256": "9dbbd5cb517eb9845e6740ee7ce14471bae0ee60655abdeea1deb62739825d33",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: chalisa single spread.test"
+    },
+    {
+      "path": "tests/chalisa.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/chalisa.test.mjs",
+      "bytes": 6985,
+      "sha256": "dad578e7e0361627146eb004d60a7d691016498486be017d84ea83f4cacee1f3",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: chalisa.test"
+    },
+    {
+      "path": "tests/chapter-illustrations.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/chapter-illustrations.test.mjs",
+      "bytes": 4555,
+      "sha256": "b6d3dea38831ff8a8c649a94d9dc85dd8b0557dff113a7efab4b70aa1e67edd7",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: chapter illustrations.test"
+    },
+    {
+      "path": "tests/chatgpt-handoff.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/chatgpt-handoff.test.mjs",
+      "bytes": 3559,
+      "sha256": "d82b377803d2caa8b04e2fcdeb40a61d35154da95558a6a0f54933e235cb9b81",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: chatgpt handoff.test"
+    },
+    {
+      "path": "tests/children-first-workflow.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/children-first-workflow.test.mjs",
+      "bytes": 3929,
+      "sha256": "4761ba829a9db021ddd3ad2e8ac189f4e90528b5a1a1a414b1ceb92de0caffe2",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: children first workflow.test"
+    },
+    {
+      "path": "tests/clerk-identity.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/clerk-identity.test.mjs",
+      "bytes": 2396,
+      "sha256": "0a6d8d8173e93297c7bf52d07f7d0fbff9767e84dbd82186ad17f968b869cdfa",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: clerk identity.test"
+    },
+    {
+      "path": "tests/designer-preview-parity.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/designer-preview-parity.test.mjs",
+      "bytes": 18054,
+      "sha256": "e254258cfea41b74ee85b1a6c655f9e981d511dabc1e967d26064998513d4db7",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: designer preview parity.test"
+    },
+    {
+      "path": "tests/designer-studio.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/designer-studio.test.mjs",
+      "bytes": 18353,
+      "sha256": "2dc30ea1ba5d0499e3ca5490010c0021d3ff3cbbeba5e07d5c0b08735cf292b3",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: designer studio.test"
+    },
+    {
+      "path": "tests/devotional-edition.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/devotional-edition.test.mjs",
+      "bytes": 5135,
+      "sha256": "66b0a7c3bc2a9dc31793b91f9a632a8d9ea2fa5e6598b6997be4fcd37e70be4c",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: devotional edition.test"
+    },
+    {
+      "path": "tests/external-manuscript.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/external-manuscript.test.mjs",
+      "bytes": 15927,
+      "sha256": "0bd7efa2d667e4c04185c8f293da331c906fd58589e206496ca717a1a2773693",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: external manuscript.test"
+    },
+    {
+      "path": "tests/firebase-identity.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/firebase-identity.test.mjs",
+      "bytes": 3017,
+      "sha256": "e4c06f7c8b5665bdf3b9f1c10dd41dbc3fe1cb6ea038b6299e8056c12c24c6e3",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: firebase identity.test"
+    },
+    {
+      "path": "tests/fixtures/chalisa-facing-pages.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/fixtures/chalisa-facing-pages.mjs",
+      "bytes": 2651,
+      "sha256": "9e9570993aa22aeed4df65a94422fb26b3049f44fd7bf5eb04c9d876c33abb8b",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: chalisa facing pages Exports: leaves, facingBook."
+    },
+    {
+      "path": "tests/fixtures/chalisa-single-spread.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/fixtures/chalisa-single-spread.mjs",
+      "bytes": 414,
+      "sha256": "c52c7611c48cf7702e8f2b1b14a1dc75fd9d4f05646368c32535b46cf85b6a49",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: chalisa single spread Exports: singleBook."
+    },
+    {
+      "path": "tests/font-coverage.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/font-coverage.test.mjs",
+      "bytes": 2916,
+      "sha256": "fe54c0ae882820c0ff23b877a4bee69f350977c1d42ad2e35d4a0db4c36cd279",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: font coverage.test"
+    },
+    {
+      "path": "tests/gita-pilot.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/gita-pilot.test.mjs",
+      "bytes": 2263,
+      "sha256": "45590454f8093c6ff3fa08571605fc179c58b3e05e3a15a36d8f642c9ad416df",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: gita pilot.test"
+    },
+    {
+      "path": "tests/iks-catalogue.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/iks-catalogue.test.mjs",
+      "bytes": 2865,
+      "sha256": "3549997ec4f03838896d607cf81afa6e083c2ad476fd759740fcb2abc29a51de",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: iks catalogue.test"
+    },
+    {
+      "path": "tests/illustration-batching.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/illustration-batching.test.mjs",
+      "bytes": 4310,
+      "sha256": "6de1051bcb1ad5dc5a3b3132b3f0929c2d0fcf1094f38e6a216a9d1c2be2beb5",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: illustration batching.test"
+    },
+    {
+      "path": "tests/image-first-book.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/image-first-book.test.mjs",
+      "bytes": 2623,
+      "sha256": "fbf4a646019882c85695254e7b951e52209e5bd1b0ad8c136c8abe165b4912ca",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: image first book.test"
+    },
+    {
+      "path": "tests/library.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/library.test.mjs",
+      "bytes": 17320,
+      "sha256": "23171da45f81472f8c3a5e7dd73730c7feb625e50efde44d77d2df4b5260fd9c",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: library.test"
+    },
+    {
+      "path": "tests/manual-canva-workflow.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/manual-canva-workflow.test.mjs",
+      "bytes": 1785,
+      "sha256": "38183789b454abcb9d10b5a8a8b2a47b4e9c54ceea84d924a322bbfc7de697c8",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: manual canva workflow.test"
+    },
+    {
+      "path": "tests/manuscript-import.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/manuscript-import.test.mjs",
+      "bytes": 2094,
+      "sha256": "4e60c69640e629ac98d6cdbe52f07407df7e903e6cc42ea46ddd5768f0cb4779",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: manuscript import.test"
+    },
+    {
+      "path": "tests/midnight-api.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/midnight-api.test.mjs",
+      "bytes": 2176,
+      "sha256": "3f39d70193ec01c568d260dddb6b0fcb377069067a92b61d8967db19bf84e13a",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: midnight api.test"
+    },
+    {
+      "path": "tests/midnight-queue.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/midnight-queue.test.mjs",
+      "bytes": 3788,
+      "sha256": "0d02e63eba59372bd6caabe22712f9ef451bd3934038838594f994202a1138bf",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: midnight queue.test"
+    },
+    {
+      "path": "tests/notebook-artwork.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/notebook-artwork.test.mjs",
+      "bytes": 2565,
+      "sha256": "586c2ff70336c47042aa972c9018185e54caa83c98f53446f71aaa089d6c9ac0",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: notebook artwork.test"
+    },
+    {
+      "path": "tests/notebook-fidelity.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/notebook-fidelity.test.mjs",
+      "bytes": 1960,
+      "sha256": "6a350c2fe73ea9a1de6a9a17d939a508b9c80ac37f25ce7edd6510645e2758b1",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: notebook fidelity.test"
+    },
+    {
+      "path": "tests/notebook-import.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/notebook-import.test.mjs",
+      "bytes": 3863,
+      "sha256": "f2af462604b7fddd78bd0ec463e501fde8eca6c8c5843f1ecd45cffec93b3969",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: notebook import.test"
+    },
+    {
+      "path": "tests/original-chapter-workflow.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/original-chapter-workflow.test.mjs",
+      "bytes": 1457,
+      "sha256": "0f50322ce6bea29580a86b9ae7bf7195d4195b36a8aff0e2ded082611ce93333",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: original chapter workflow.test"
+    },
+    {
+      "path": "tests/page-aesthetics.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/page-aesthetics.test.mjs",
+      "bytes": 1882,
+      "sha256": "505efdc1df302789965947669907d2044792aa43bda7f73183174cc94ab57a2f",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: page aesthetics.test"
+    },
+    {
+      "path": "tests/pedagogy-quality.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/pedagogy-quality.test.mjs",
+      "bytes": 8636,
+      "sha256": "62ced784211e1dff02747cef0dfbcd5741a85191c3b0073e25311b0be4f32aba",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: pedagogy quality.test"
+    },
+    {
+      "path": "tests/phase7-safety-gate.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/phase7-safety-gate.test.mjs",
+      "bytes": 1439,
+      "sha256": "22d5bfb2d45d070e1d75a1f770f23a7c75e98a4ca0faef612497f19a86a068c4",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: phase7 safety gate.test"
+    },
+    {
+      "path": "tests/phase7-simulated-engine.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/phase7-simulated-engine.test.mjs",
+      "bytes": 3871,
+      "sha256": "7534a3cf9029ba713eaf8191164a8b1ab301393d5b11ac8bd80279ad1c308c93",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: phase7 simulated engine.test"
+    },
+    {
+      "path": "tests/phase8-chapter-one-contract.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/phase8-chapter-one-contract.test.mjs",
+      "bytes": 8094,
+      "sha256": "3ac2e1643d6b3b2a2780d75aa9bc48f2cb3f48078739c420d5c3488fceace9b5",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: phase8 chapter one contract.test"
+    },
+    {
+      "path": "tests/print-layout.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/print-layout.test.mjs",
+      "bytes": 4975,
+      "sha256": "61c8292843c46461fc5005ce89daa2fe6bf4746d7a39704a9a4a3338890f78ec",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: print layout.test"
+    },
+    {
+      "path": "tests/publication-safety.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/publication-safety.test.mjs",
+      "bytes": 6123,
+      "sha256": "60178edf11b29827207e6b8abf4661221340de6b76bfe49cb0ebfeb741304d29",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: publication safety.test"
+    },
+    {
+      "path": "tests/rendered-html.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/rendered-html.test.mjs",
+      "bytes": 967,
+      "sha256": "eae1d187870ad9a4b3f0c37b40589b25c1a2090dcbee19964555cf70c136b118",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: rendered html.test"
+    },
+    {
+      "path": "tests/request-control.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/request-control.test.mjs",
+      "bytes": 2515,
+      "sha256": "08cfa6d45cd46a9044880c4e65d22c186d8d5eaef02dace1616ff44f1f0d288f",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: request control.test"
+    },
+    {
+      "path": "tests/resumable-generation.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/resumable-generation.test.mjs",
+      "bytes": 2046,
+      "sha256": "68f8e4721399f0dab5cac9715c1f14e412755bfa828c4c61f93bcccb74adc175",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: resumable generation.test"
+    },
+    {
+      "path": "tests/series-art.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/series-art.test.mjs",
+      "bytes": 4601,
+      "sha256": "d79376bd0f21bccb78d0f68c2c0e83b72a1e76511c70d877e362ef1352021bb9",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: series art.test"
+    },
+    {
+      "path": "tests/simplified-workflow.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/simplified-workflow.test.mjs",
+      "bytes": 5017,
+      "sha256": "d3b1f7ed3a2de74bbcb3fa0fbc39d6b902c8c7cdc493e66afbb67e4f3fc049e6",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: simplified workflow.test"
+    },
+    {
+      "path": "tests/source-book-options.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/source-book-options.test.mjs",
+      "bytes": 1475,
+      "sha256": "350c64bf9d12b6d8542f69af453a523ef4209cb52d62420ecb2f2c19d1e6c1cd",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: source book options.test"
+    },
+    {
+      "path": "tests/source-book-package.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/source-book-package.test.mjs",
+      "bytes": 8554,
+      "sha256": "8fdb65e92053f3a256498a83eca220e216187c7f9f0252d53dfac19c868d6e4d",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: source book package.test"
+    },
+    {
+      "path": "tests/source-book-review.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/source-book-review.test.mjs",
+      "bytes": 2637,
+      "sha256": "13d5932be6fe535c5688363449846a7347b2aaa56129d657b759651dd71c6bf3",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: source book review.test"
+    },
+    {
+      "path": "tests/source-intelligence.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/source-intelligence.test.mjs",
+      "bytes": 4530,
+      "sha256": "b7ac3c92fd44eafb21cda54c9db0778cc10241929a0b174dd691409fc055cc8d",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: source intelligence.test"
+    },
+    {
+      "path": "tests/spread-composition.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/spread-composition.test.mjs",
+      "bytes": 4849,
+      "sha256": "c01f14f249d1496ac13f42da608e3502ae656efe7ed696c8318d07cbb3a0ce7a",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: spread composition.test"
+    },
+    {
+      "path": "tests/story-compositions.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/story-compositions.test.mjs",
+      "bytes": 5304,
+      "sha256": "784cbf77fde5745f307bec28b850d9ab6a55248daab9921457d8d953dfca65c0",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: story compositions.test"
+    },
+    {
+      "path": "tests/story-text-placement.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/story-text-placement.test.mjs",
+      "bytes": 2026,
+      "sha256": "d869255ba41699777dfb7429551655797dd2c2f72fdeff9bb966a84d48a62512",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: story text placement.test"
+    },
+    {
+      "path": "tests/storyboard.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/storyboard.test.mjs",
+      "bytes": 5872,
+      "sha256": "fbcecb65482a88257ef0c6f895f536524c57e560f1b309eb7beef6af24ffa17d",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: storyboard.test"
+    },
+    {
+      "path": "tests/template-backup.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/template-backup.test.mjs",
+      "bytes": 2934,
+      "sha256": "e2f65296e6dfd5141f4f42153029e7775dabbc3f11a2ba3c408ff514d3fa2fe0",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: template backup.test"
+    },
+    {
+      "path": "tests/template-book.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/template-book.test.mjs",
+      "bytes": 9111,
+      "sha256": "aab733173f6e3ad770e2ece05ee3d0f6149f0e5b8e5660f6a9e18bc71cb522a2",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: template book.test"
+    },
+    {
+      "path": "tests/template-capacity.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/template-capacity.test.mjs",
+      "bytes": 2372,
+      "sha256": "0eedc94c5b3ac3e67840f655d1d83c315094b53d330bff5cb981b0e09722aecf",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: template capacity.test"
+    },
+    {
+      "path": "tests/template-draft-regressions.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/template-draft-regressions.test.mjs",
+      "bytes": 3520,
+      "sha256": "87b676a7806d7abca59539f9e16e916c61055973ccd83a843b031b50a405116b",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: template draft regressions.test"
+    },
+    {
+      "path": "tests/template-layouts.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/template-layouts.test.mjs",
+      "bytes": 15836,
+      "sha256": "7326c060fdf0a683b18e509fe85ecd6db352029cc0fe01e85178ea353ee83e61",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: template layouts.test"
+    },
+    {
+      "path": "tests/template-library.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/template-library.test.mjs",
+      "bytes": 1157,
+      "sha256": "b6ab3cd25d988ae74008ba8f5f86c93ddcce461f82e1327053074183b5cfcaeb",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: template library.test"
+    },
+    {
+      "path": "tests/template-save.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/template-save.test.mjs",
+      "bytes": 1200,
+      "sha256": "42e0892aa4b4a45e8aa9bf2eaa410e9691f21cea48485265c2482baa9386653d",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: template save.test"
+    },
+    {
+      "path": "tests/template-upload.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/template-upload.test.mjs",
+      "bytes": 1804,
+      "sha256": "9e8b92d3d13b018638b029f00a3a2d21c2430988c92db882cb54e04631caafcf",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: template upload.test"
+    },
+    {
+      "path": "tests/text-backgrounds.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/text-backgrounds.test.mjs",
+      "bytes": 5672,
+      "sha256": "5897acd0ee4394aca1b3168dcc7c7eebb0296898e141c6109234d815bebbf5f0",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: text backgrounds.test"
+    },
+    {
+      "path": "tests/typography.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/typography.test.mjs",
+      "bytes": 1623,
+      "sha256": "b278c63b8d43455b0fe25e3fcdedec521cd65c23bbd5cbf0959d57f5e03e3c12",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: typography.test"
+    },
+    {
+      "path": "tests/unlimited-page-plan.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/unlimited-page-plan.test.mjs",
+      "bytes": 1247,
+      "sha256": "9e6716f27a0cfc28bff5c13bcb36cdfd05c197b07c8093f94fb1ce5e0e138c8f",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: unlimited page plan.test"
+    },
+    {
+      "path": "tests/visual-direction.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/visual-direction.test.mjs",
+      "bytes": 6910,
+      "sha256": "c667148d86e9a508347ca50fd4eef91a9d04369d4056553542cc4f20252336ed",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: visual direction.test"
+    },
+    {
+      "path": "tests/visual-references.test.mjs",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tests/visual-references.test.mjs",
+      "bytes": 4935,
+      "sha256": "4c3ccf3c4c6c42c7ea7e6b56cc6143f4397c866f93baa6941566ec62253ebb90",
+      "mode": "0o644",
+      "purpose": "Regression or workflow verification: visual references.test"
+    },
+    {
+      "path": "tmp/pdfs/make_workflow_map.py",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tmp/pdfs/make_workflow_map.py",
+      "bytes": 12497,
+      "sha256": "b03c818aa556eb8e112a24ed907478eb285aa45fc30258cf8051103a2496211d",
+      "mode": "0o644",
+      "purpose": "Retained working/reference artifact: make workflow map"
+    },
+    {
+      "path": "tmp/pdfs/rendered/workflow-1.png",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tmp/pdfs/rendered/workflow-1.png",
+      "bytes": 473715,
+      "sha256": "6d585f5bf419baaa7afecca19f866fb5dc14f8383ce70744f142da08242297b5",
+      "mode": "0o644",
+      "purpose": "Retained working/reference artifact: workflow 1"
+    },
+    {
+      "path": "tsconfig.json",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/tsconfig.json",
+      "bytes": 706,
+      "sha256": "e1f2b4ec806c55ba0cc71369588733fe427a277990cccfd44ef62c9b6e9fe49d",
+      "mode": "0o644",
+      "purpose": "TypeScript compiler settings"
+    },
+    {
+      "path": "vite.config.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/vite.config.ts",
+      "bytes": 2898,
+      "sha256": "b8111336aba24a95692020e4b13ab93601d402b2ed488c0c56146e272cbec728",
+      "mode": "0o644",
+      "purpose": "Vite/Vinext and Cloudflare runtime bindings"
+    },
+    {
+      "path": "worker/book-release.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/worker/book-release.ts",
+      "bytes": 6448,
+      "sha256": "16c03b7a0206fc5a043a8a46b461ba55909f1ca44d76f23e228bd03ad7cbe766",
+      "mode": "0o644",
+      "purpose": "Server API, storage and export implementation: book release Exports: bookReleaseApi."
+    },
+    {
+      "path": "worker/clerk-identity.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/worker/clerk-identity.ts",
+      "bytes": 1375,
+      "sha256": "75e800e20b52ae24bd16df9e89ef8278407550130663eb534d5ca9f773c12613",
+      "mode": "0o644",
+      "purpose": "Server API, storage and export implementation: clerk identity Exports: ClerkIdentity, ClerkEnvironment, clerkConfigured, verifyClerkIdentity."
+    },
+    {
+      "path": "worker/firebase-identity.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/worker/firebase-identity.ts",
+      "bytes": 2158,
+      "sha256": "2a8ec9fe6aea12c50af739c527e8f0f37ffcbbeb03dbfc632200f7e68018ae0e",
+      "mode": "0o644",
+      "purpose": "Server API, storage and export implementation: firebase identity Exports: FirebaseEnvironment, firebaseConfigured, verifyFirebaseIdentity."
+    },
+    {
+      "path": "worker/index.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/worker/index.ts",
+      "bytes": 110225,
+      "sha256": "085d24a9d33da451b67a635b84ee8c3c196c65f810fe0a2641c838509f406fc6",
+      "mode": "0o644",
+      "purpose": "Server API, storage and export implementation: index Exports: Env."
+    },
+    {
+      "path": "worker/library.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/worker/library.ts",
+      "bytes": 15609,
+      "sha256": "11d7e339255d9e2bc1b6765da4c9bd85e1ddec1dd1baf461ad0f592bfaca9d7b",
+      "mode": "0o644",
+      "purpose": "Server API, storage and export implementation: library Exports: LibraryEnv, digest, librarySchema, libraryUser, libraryOwner, libraryApi."
+    },
+    {
+      "path": "worker/midnight.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/worker/midnight.ts",
+      "bytes": 3964,
+      "sha256": "dff62b0995da73acc45648956d7b79753b6aea1e5236921d4f37f3717fa820df",
+      "mode": "0o644",
+      "purpose": "Server API, storage and export implementation: midnight Exports: midnightSchema, midnightApi."
+    },
+    {
+      "path": "worker/template-reference.ts",
+      "original_path": "/Users/gaurav/.codex/worktrees/5c26/IKS-Book-Studio-Local-v84/worker/template-reference.ts",
+      "bytes": 2170,
+      "sha256": "8a121d25120813c2a6d50bef020c582260383be1307d28711b708bf905a90708",
+      "mode": "0o644",
+      "purpose": "Server API, storage and export implementation: template reference Exports: templateReferenceApi."
+    }
+  ]
+}
